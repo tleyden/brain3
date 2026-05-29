@@ -1,0 +1,2 @@
+- The point of the app is to run mcp servers and skills locally on your desktop in a safe manner, ideally inside of a native macos container, but opt-out is allowed
+- Also the other point of the app is to open it up 
