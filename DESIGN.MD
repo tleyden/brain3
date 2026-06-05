@@ -42,8 +42,11 @@ See PRD.MD
 
 ### DD: Is container mandatory or optional?
 
-#### Option 1: Mandatory
+#### Option 1: Mandatory (mvp)
 
+##### Strenghts
+
+* Simplicity
 ##### Risks
 
 * How could someone run https://github.com/CursorTouch/MacOS-MCP in a linux container?
@@ -56,9 +59,29 @@ The container is the zoo grounds!  If you let the agents out of the zoo, they ar
 
 #### Option 1: One container for all MCP
 
-#### Option 2: Each MCP gets own container
+##### Risks
 
-#### Option 3: Monolith container by default, can isolate on case-by-case basis (rec'd)
+* Need another isolation mechanism, like nix.  This is Matryoshka doll level complexity, and for what?  Feels like premature optimization for resource sharing.
+
+#### Option 2: Each MCP gets own container (rec'd)
+
+##### Strengths 
+
+* So much simpler
+* Normalizes mcps packaged as oci containers with npm/pypi mcp servers
+
+#### Option 3: Monolith container by default, can isolate on case-by-case basis 
+
+##### Risks
+
+* Same as option 1
+
+#### Option 4: Isolated container by default, can opt into a monolith container (shared cage per zoo animals) 
+
+##### Risks
+
+* Same as option 1
+
 
 ### DD: How do we expose MCP servers as separate entities with own tools?
 
@@ -155,6 +178,33 @@ Instead: create a prompt with instructions that they can copy into their locally
 #### Option 2: NixOS
 
 #### Option 3: Debian/Ubuntu
+
+
+### DD: Where does OAuth happen?
+
+#### Option 1: In a gateway reverse proxy (rec'd)
+
+#### Option 2: In each container (straw)
+
+
+### DD: How to build OAuth gateway reverse proxy?
+
+#### Option 1: Build from scratch
+
+#### Option 2: oauth2-proxy
+
+##### Risks
+
+* No mcp support https://github.com/oauth2-proxy/oauth2-proxy/issues/3167
+
+
+
+### DD: How to build MCP gateway reverse proxy?
+
+#### Option 1: Build from scratch
+
+
+
 
 ## POC Prototyping
 
