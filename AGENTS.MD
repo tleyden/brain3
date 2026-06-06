@@ -1,2 +1,3 @@
 - The point of the app is to run mcp servers and skills locally on your desktop in a safe manner, ideally inside of a native macos container, but opt-out is allowed
 - Also the other point of the app is to open it up 
+- Be very judidicous about writing unit tests, they create a lot of tech debt.  Never write tests for log output for example.  It must just be core functionality on public apis.  Never test private apis, because they constantly break.
