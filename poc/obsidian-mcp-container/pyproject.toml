@@ -1,0 +1,22 @@
+[project]
+name = "obsidian-mcp-server"
+version = "0.1.0"
+description = "Authless MCP server for an Obsidian vault"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mcp[cli]>=1.9.0",
+    "python-frontmatter>=1.1.0",
+    "pydantic>=2.0",
+    "watchdog>=4.0.0",
+]
+
+[project.scripts]
+obsidian-mcp-server = "obsidian_mcp_server.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/obsidian_mcp_server"]
