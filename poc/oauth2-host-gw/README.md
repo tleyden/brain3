@@ -38,7 +38,7 @@ uv run oauth2-gateway
 Or:
 
 ```bash
-./scripts/start-server.sh
+./scripts/start-oauth2-server.sh
 ```
 
 ## Scope

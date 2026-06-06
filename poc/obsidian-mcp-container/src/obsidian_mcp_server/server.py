@@ -47,6 +47,7 @@ def _stop_process_resources() -> None:
 
 mcp = FastMCP(
     "obsidian_mcp_server",
+    port=VAULT_MCP_PORT,
     stateless_http=True,
     json_response=True,
     transport_security=TransportSecuritySettings(
@@ -195,7 +196,7 @@ def main() -> None:
     _start_process_resources()
     try:
         logger.info(f"Starting authless MCP server on port {VAULT_MCP_PORT}")
-        mcp.run(transport="streamable-http", port=VAULT_MCP_PORT)
+        mcp.run(transport="streamable-http")
     finally:
         _stop_process_resources()
 

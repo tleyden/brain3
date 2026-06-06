@@ -34,7 +34,7 @@ uv run obsidian-mcp-server
 Or:
 
 ```bash
-./scripts/start-server.sh
+./scripts/start-mcp-server.sh
 ```
 
 ## Scope
