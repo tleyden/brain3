@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.vault-mcp</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>REPLACE_WITH_UV_PATH</string>
+        <string>run</string>
+        <string>--project</string>
+        <string>REPLACE_WITH_PROJECT_PATH</string>
+        <string>vault-mcp</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>VAULT_PATH</key>
+        <string>REPLACE_WITH_VAULT_PATH</string>
+        <key>VAULT_MCP_TOKEN</key>
+        <string>REPLACE_WITH_TOKEN</string>
+        <key>VAULT_MCP_PORT</key>
+        <string>8420</string>
+        <key>VAULT_OAUTH_CLIENT_ID</key>
+        <string>vault-mcp-client</string>
+        <key>VAULT_OAUTH_CLIENT_SECRET</key>
+        <string>REPLACE_WITH_OAUTH_SECRET</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>REPLACE_WITH_HOME/Library/Logs/vault-mcp.log</string>
+    <key>StandardErrorPath</key>
+    <string>REPLACE_WITH_HOME/Library/Logs/vault-mcp-error.log</string>
+    <key>WorkingDirectory</key>
+    <string>REPLACE_WITH_PROJECT_PATH</string>
+</dict>
+</plist>
