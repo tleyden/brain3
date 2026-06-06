@@ -203,6 +203,7 @@ Instead: create a prompt with instructions that they can copy into their locally
 
 #### Option 1: Build from scratch
 
+#### Option 2: Re-use existing MCP gateway
 
 
 
