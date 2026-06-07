@@ -33,8 +33,7 @@ async def oauth_metadata(request: Request) -> JSONResponse:
             "issuer": base_url,
             "authorization_endpoint": f"{base_url}/oauth/authorize",
             "token_endpoint": f"{base_url}/oauth/token",
-            "registration_endpoint": f"{base_url}/oauth/register",
-            "grant_types_supported": ["authorization_code", "client_credentials"],
+            "grant_types_supported": ["authorization_code"],
             "response_types_supported": ["code"],
             "code_challenge_methods_supported": ["S256"],
             "token_endpoint_auth_methods_supported": ["client_secret_post"],
@@ -53,7 +52,7 @@ async def oauth_authorize(request: Request) -> JSONResponse | RedirectResponse:
     if response_type != "code":
         return JSONResponse({"error": "unsupported_response_type"}, status_code=400)
 
-    if client_id and client_id != config.OAUTH2_GATEWAY_CLIENT_ID:
+    if client_id != config.OAUTH2_GATEWAY_CLIENT_ID:
         return JSONResponse({"error": "invalid_client"}, status_code=401)
 
     if not redirect_uri:
@@ -91,13 +90,11 @@ async def oauth_token(request: Request) -> JSONResponse:
 
     if grant_type == "authorization_code":
         return await _handle_authorization_code(form, client_id, client_secret)
-    if grant_type == "client_credentials":
-        return await _handle_client_credentials(client_id, client_secret)
 
     return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
 
 
-async def _handle_authorization_code(form, client_id: str, _client_secret: str) -> JSONResponse:
+async def _handle_authorization_code(form, client_id: str, client_secret: str) -> JSONResponse:
     code = form.get("code", "")
     redirect_uri = form.get("redirect_uri", "")
     code_verifier = form.get("code_verifier", "")
@@ -107,10 +104,16 @@ async def _handle_authorization_code(form, client_id: str, _client_secret: str) 
     if code not in _auth_codes:
         return JSONResponse({"error": "invalid_grant", "error_description": "Invalid or expired code"}, status_code=400)
 
-    code_data = _auth_codes.pop(code)
-
-    if client_id and client_id != config.OAUTH2_GATEWAY_CLIENT_ID:
+    if client_id != config.OAUTH2_GATEWAY_CLIENT_ID:
         return JSONResponse({"error": "invalid_client"}, status_code=401)
+
+    if not config.OAUTH2_GATEWAY_CLIENT_SECRET:
+        return JSONResponse({"error": "server_error"}, status_code=500)
+
+    if not hmac.compare_digest(client_secret, config.OAUTH2_GATEWAY_CLIENT_SECRET):
+        return JSONResponse({"error": "invalid_client"}, status_code=401)
+
+    code_data = _auth_codes.pop(code)
 
     if redirect_uri and code_data["redirect_uri"] and redirect_uri != code_data["redirect_uri"]:
         return JSONResponse({"error": "invalid_grant", "error_description": "redirect_uri mismatch"}, status_code=400)
@@ -134,50 +137,8 @@ async def _handle_authorization_code(form, client_id: str, _client_secret: str) 
     )
 
 
-async def _handle_client_credentials(client_id: str, client_secret: str) -> JSONResponse:
-    if not config.OAUTH2_GATEWAY_CLIENT_SECRET:
-        return JSONResponse({"error": "server_error"}, status_code=500)
-
-    id_match = hmac.compare_digest(client_id, config.OAUTH2_GATEWAY_CLIENT_ID)
-    secret_match = hmac.compare_digest(client_secret, config.OAUTH2_GATEWAY_CLIENT_SECRET)
-
-    if not (id_match and secret_match):
-        logger.warning(f"OAuth client_credentials failed (client_id={client_id!r})")
-        return JSONResponse({"error": "invalid_client"}, status_code=401)
-
-    logger.info("OAuth token issued via client_credentials grant")
-    return JSONResponse(
-        {
-            "access_token": config.OAUTH2_GATEWAY_ACCESS_TOKEN,
-            "token_type": "bearer",
-            "expires_in": 86400,
-        }
-    )
-
-
-async def oauth_register(request: Request) -> JSONResponse:
-    try:
-        body = await request.json()
-    except Exception:
-        body = {}
-
-    return JSONResponse(
-        {
-            "client_id": config.OAUTH2_GATEWAY_CLIENT_ID,
-            "client_secret": config.OAUTH2_GATEWAY_CLIENT_SECRET,
-            "client_name": body.get("client_name", "OAuth2 Gateway Client"),
-            "grant_types": ["authorization_code", "client_credentials"],
-            "response_types": ["code"],
-            "redirect_uris": body.get("redirect_uris", []),
-            "token_endpoint_auth_method": "client_secret_post",
-        },
-        status_code=201,
-    )
-
-
 oauth_routes = [
     Route("/.well-known/oauth-authorization-server", oauth_metadata, methods=["GET"]),
     Route("/oauth/authorize", oauth_authorize, methods=["GET"]),
     Route("/oauth/token", oauth_token, methods=["POST"]),
-    Route("/oauth/register", oauth_register, methods=["POST"]),
 ]
