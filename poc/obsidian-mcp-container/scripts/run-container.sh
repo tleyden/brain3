@@ -17,6 +17,7 @@ CONTAINER_NAME="${CONTAINER_NAME:-obsidian-mcp-server}"
 HOST_PORT="${HOST_PORT:-8420}"
 HOST_VAULT_PATH="${HOST_VAULT_PATH:-${VAULT_PATH:-}}"
 SOURCE_MOUNT_PATH="/workspace/obsidian-mcp-container"
+CONTAINER_RUNTIME="macos-container"
 DETACH=true
 REMOVE=true
 
@@ -25,6 +26,7 @@ usage() {
 Usage: ./scripts/run-container.sh [options]
 
 Options:
+  --container-runtime    Run with macos-container or docker (default: macos-container)
   --bind-source         Run the mounted host source tree instead of the code baked into the image
   --image               Run the code baked into the image (default)
   --vault-path PATH     Host vault directory to mount into /vault
@@ -37,8 +39,56 @@ Options:
 EOF
 }
 
+require_macos_container() {
+    if ! command -v container >/dev/null 2>&1; then
+        echo "Error: Apple 'container' CLI not found in PATH." >&2
+        exit 1
+    fi
+}
+
+require_docker() {
+    if ! command -v docker >/dev/null 2>&1; then
+        echo "Error: Docker CLI not found in PATH." >&2
+        exit 1
+    fi
+}
+
+ensure_runtime_image_exists() {
+    if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
+        if ! container image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+            echo "Error: image not found in Apple container image store: $IMAGE_NAME" >&2
+            echo "Build it with: ./scripts/build-container.sh --container-runtime macos-container" >&2
+            exit 1
+        fi
+    else
+        if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
+            echo "Error: image not found in Docker image store: $IMAGE_NAME" >&2
+            echo "Build it with: ./scripts/build-container.sh --container-runtime docker" >&2
+            exit 1
+        fi
+    fi
+}
+
+cleanup_existing_container() {
+    if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
+        container stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
+        container delete "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    else
+        docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+    fi
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
+        --container-runtime)
+            if [ "$#" -lt 2 ]; then
+                echo "Error: missing value for --container-runtime" >&2
+                usage >&2
+                exit 1
+            fi
+            CONTAINER_RUNTIME="$2"
+            shift 2
+            ;;
         --bind-source)
             MODE="bind"
             shift
@@ -83,10 +133,19 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-if ! command -v container >/dev/null 2>&1; then
-    echo "Error: Apple 'container' CLI not found in PATH." >&2
-    exit 1
-fi
+case "$CONTAINER_RUNTIME" in
+    macos-container)
+        require_macos_container
+        ;;
+    docker)
+        require_docker
+        ;;
+    *)
+        echo "Error: unknown container runtime: $CONTAINER_RUNTIME" >&2
+        usage >&2
+        exit 1
+        ;;
+esac
 
 if [ -z "$HOST_VAULT_PATH" ]; then
     echo "Error: no vault path provided. Set HOST_VAULT_PATH, VAULT_PATH, or pass --vault-path." >&2
@@ -98,8 +157,8 @@ if [ ! -d "$HOST_VAULT_PATH" ]; then
     exit 1
 fi
 
-container stop "$CONTAINER_NAME" >/dev/null 2>&1 || true
-container delete "$CONTAINER_NAME" >/dev/null 2>&1 || true
+ensure_runtime_image_exists
+cleanup_existing_container
 
 run_args=(
     run
@@ -136,10 +195,19 @@ else
     run_args+=("$IMAGE_NAME")
 fi
 
-echo "Running $CONTAINER_NAME from $IMAGE_NAME in $MODE mode"
-container "${run_args[@]}"
+echo "Running $CONTAINER_NAME from $IMAGE_NAME in $MODE mode with runtime $CONTAINER_RUNTIME"
+
+if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
+    container "${run_args[@]}"
+else
+    docker "${run_args[@]}"
+fi
 
 if [ "$DETACH" = true ]; then
     echo "Published MCP endpoint: http://127.0.0.1:${HOST_PORT}/mcp"
-    echo "View logs with: container logs $CONTAINER_NAME"
+    if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
+        echo "View logs with: container logs $CONTAINER_NAME"
+    else
+        echo "View logs with: docker logs $CONTAINER_NAME"
+    fi
 fi

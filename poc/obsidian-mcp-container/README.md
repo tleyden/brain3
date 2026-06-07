@@ -121,11 +121,28 @@ IMAGE_NAME=obsidian-mcp-server:dev ./scripts/build-container.sh --container-runt
 
 The Obsidian MCP server is the only process that runs inside the container. The OAuth gateway stays outside the container and talks to the MCP server over the published local HTTP port.
 
-Run the baked image against a host vault:
+Run the baked image against a host vault with the default native macOS runtime:
 
 ```bash
 ./scripts/run-container.sh --vault-path /absolute/path/to/vault
 ```
+
+Run explicitly with Apple `container`:
+
+```bash
+./scripts/run-container.sh --container-runtime macos-container --vault-path /absolute/path/to/vault
+```
+
+Run explicitly with Docker:
+
+```bash
+./scripts/run-container.sh --container-runtime docker --vault-path /absolute/path/to/vault
+```
+
+Each runtime expects its image to exist in that runtime's local image store first:
+
+- native macOS run mode expects `./scripts/build-container.sh --container-runtime macos-container`
+- Docker run mode expects `./scripts/build-container.sh --container-runtime docker`
 
 This:
 
@@ -141,6 +158,12 @@ For faster Python edit loops, you can run the mounted source tree instead of reb
 
 ```bash
 ./scripts/run-container.sh --bind-source --vault-path /absolute/path/to/vault
+```
+
+Docker bind-mounted source mode:
+
+```bash
+./scripts/run-container.sh --container-runtime docker --bind-source --vault-path /absolute/path/to/vault
 ```
 
 In bind mode:
