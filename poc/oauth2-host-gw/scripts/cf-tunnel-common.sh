@@ -157,6 +157,9 @@ ERROR: cloudflared is not logged into Cloudflare for locally managed named tunne
 Run:
   cloudflared tunnel login
 
+When Cloudflare asks which domain to authorize for the tunnel, choose:
+  $CF_DOMAIN
+
 Then rerun this script.
 EOF
     echo >&2
