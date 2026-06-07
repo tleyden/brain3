@@ -7,4 +7,5 @@ wheels/
 *.egg-info
 .venv/
 .env
+.cloudflared/
 uv.lock
