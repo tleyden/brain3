@@ -4,3 +4,4 @@
 - We are using the macos native containers.  We have container CLI installed.  It is new, and it is different than docker.  NO docker, except what is compatible with macos container.
 - Don't suggest subagents.  We will always do this in smaller steps in serial to manage context window rather than spawning subagents.
 - Don't commit to git, I will commit.
+- Security rule: this gateway is intentionally closed to preregistered clients only. Do not enable CIMD, DCR, public-client OAuth (`token_endpoint_auth_method=none`), or any other flow that allows access without the hardcoded client ID and client secret, unless explicitly requested by the user. Do not advertise OAuth capabilities the server is not supposed to allow, and do not expose `/oauth/register` in a way that hands out usable credentials or broadens access. Any auth change must preserve the policy that only explicitly preregistered clients can obtain tokens and reach protected MCP data.
