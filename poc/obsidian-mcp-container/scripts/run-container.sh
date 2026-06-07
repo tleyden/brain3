@@ -106,6 +106,34 @@ cleanup_existing_container() {
     fi
 }
 
+check_and_prompt_existing_container() {
+    local exists=false
+    if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
+        if container inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+            exists=true
+        fi
+    else
+        if docker inspect "$CONTAINER_NAME" >/dev/null 2>&1; then
+            exists=true
+        fi
+    fi
+
+    if [ "$exists" = true ]; then
+        echo "Warning: a container named '$CONTAINER_NAME' already exists."
+        printf "Stop and remove it to start a fresh one? [y/N] "
+        read -r answer
+        case "$answer" in
+            [yY]*)
+                cleanup_existing_container
+                ;;
+            *)
+                echo "Aborted. Use --name to specify a different container name." >&2
+                exit 1
+                ;;
+        esac
+    fi
+}
+
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --container-runtime)
@@ -186,7 +214,7 @@ if [ ! -d "$HOST_VAULT_PATH" ]; then
 fi
 
 ensure_runtime_image_exists
-cleanup_existing_container
+check_and_prompt_existing_container
 
 run_args=(
     run
