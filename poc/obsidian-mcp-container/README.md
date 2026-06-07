@@ -77,12 +77,32 @@ For metadata-only changes:
 
 ## Container Build
 
-This project includes a native `Containerfile` for the Apple `container` CLI.
+This project includes a `Containerfile` that can be built with either Apple's native `container` CLI or Docker.
 
-Build the image from the latest local code in this directory:
+Build the image from the latest local code in this directory with the default native macOS runtime:
 
 ```bash
 ./scripts/build-container.sh
+```
+
+Build explicitly with Apple `container`:
+
+```bash
+./scripts/build-container.sh --container-runtime macos-container
+```
+
+Build explicitly with Docker:
+
+```bash
+./scripts/build-container.sh --container-runtime docker
+```
+
+If you want the image available in both runtimes on the same machine, run the script twice, once per runtime.
+
+On a Linux machine that only has Docker installed, build with:
+
+```bash
+./scripts/build-container.sh --container-runtime docker
 ```
 
 This uses:
@@ -94,7 +114,7 @@ This uses:
 If you want a different tag:
 
 ```bash
-IMAGE_NAME=obsidian-mcp-server:dev ./scripts/build-container.sh
+IMAGE_NAME=obsidian-mcp-server:dev ./scripts/build-container.sh --container-runtime docker
 ```
 
 ## Container Run
