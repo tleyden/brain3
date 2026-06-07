@@ -4,8 +4,7 @@ This fork is the OAuth-only half of the original `obsidian-web-mcp` codebase.
 
 It keeps only:
 - OAuth metadata discovery
-- dynamic client registration
-- authorization-code redirect handling
+- preregistered confidential-client authorization-code handling
 - token exchange with PKCE support
 - a tiny CLI HTTP runner
 - optional helper scripts for Cloudflare Tunnel exposure
@@ -22,13 +21,21 @@ It intentionally removes:
 
 Environment variables:
 - `OAUTH2_GATEWAY_PORT`: HTTP port, defaults to `8421`
-- `OAUTH2_GATEWAY_CLIENT_ID`: client id returned by registration
-- `OAUTH2_GATEWAY_CLIENT_SECRET`: client secret returned by registration and accepted by token exchange
+- `OAUTH2_GATEWAY_CLIENT_ID`: preregistered client id accepted by `/oauth/authorize` and `/oauth/token`
+- `OAUTH2_GATEWAY_CLIENT_SECRET`: preregistered client secret required by `/oauth/token`
 - `OAUTH2_GATEWAY_ACCESS_TOKEN`: static bearer token returned after successful token exchange
 - `CF_TUNNEL_NAME`: optional, only for a named Cloudflare tunnel on your domain
 - `CF_DOMAIN`: optional, only for a named Cloudflare tunnel on your domain
 
 See [.env.template](.env.template).
+
+## Security Model
+
+- Only the single preregistered client configured by `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` may obtain tokens.
+- Dynamic client registration is disabled.
+- CIMD and other public-client registration methods are disabled.
+- The token endpoint requires `client_secret_post` for the authorization-code exchange.
+- Protected MCP traffic still requires the bearer token returned by the token exchange.
 
 ## Prerequisites
 
@@ -80,6 +87,27 @@ Or with the wrapper script:
 ```
 
 Do this only if you intentionally want the app itself listening on the network. It is not required for either the tunnel flow or a same-host reverse proxy.
+
+## Manual Verification
+
+Verify the discovery metadata:
+
+```bash
+curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server
+```
+
+Expected:
+- no `registration_endpoint`
+- `grant_types_supported` is exactly `["authorization_code"]`
+- `token_endpoint_auth_methods_supported` is exactly `["client_secret_post"]`
+
+Verify dynamic registration is disabled:
+
+```bash
+curl -i -X POST http://127.0.0.1:8421/oauth/register
+```
+
+Expected: `404 Not Found`
 
 ## Public Exposure Options
 
