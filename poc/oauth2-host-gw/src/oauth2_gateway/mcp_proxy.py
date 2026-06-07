@@ -52,6 +52,14 @@ def _is_authorized(request: Request) -> bool:
     scheme, _, token = auth_header.partition(" ")
     if scheme.lower() != "bearer" or not token:
         return False
+
+    token_store = getattr(request.app.state, "token_store", None)
+    if token_store is not None:
+        token_data = token_store.get_access_token(token)
+        if token_data is not None:
+            requested_resource = f"{_base_url(request)}/mcp"
+            return hmac.compare_digest(token_data.resource, requested_resource)
+
     return bool(config.OAUTH2_GATEWAY_ACCESS_TOKEN) and hmac.compare_digest(
         token,
         config.OAUTH2_GATEWAY_ACCESS_TOKEN,

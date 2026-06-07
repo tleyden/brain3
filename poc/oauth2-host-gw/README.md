@@ -4,9 +4,13 @@ This fork is the OAuth-only half of the original `obsidian-web-mcp` codebase.
 
 It keeps only:
 - OAuth metadata discovery
+- OpenID discovery compatibility
 - dynamic client registration
+- CIMD client registration support for public clients
 - authorization-code redirect handling
 - token exchange with PKCE support
+- protected resource metadata for `/mcp`
+- reverse proxying of authenticated MCP traffic to a local authless MCP server
 - a tiny CLI HTTP runner
 - optional helper scripts for Cloudflare Tunnel exposure
 
@@ -22,13 +26,34 @@ It intentionally removes:
 
 Environment variables:
 - `OAUTH2_GATEWAY_PORT`: HTTP port, defaults to `8421`
-- `OAUTH2_GATEWAY_CLIENT_ID`: client id returned by registration
-- `OAUTH2_GATEWAY_CLIENT_SECRET`: client secret returned by registration and accepted by token exchange
-- `OAUTH2_GATEWAY_ACCESS_TOKEN`: static bearer token returned after successful token exchange
+- `OAUTH2_GATEWAY_CLIENT_ID`: preregistered client id for fallback/manual flows, defaults to `oauth2-gateway-client`
+- `OAUTH2_GATEWAY_CLIENT_SECRET`: preregistered client secret for fallback/manual flows
+- `OAUTH2_GATEWAY_MCP_UPSTREAM_URL`: upstream MCP base URL, defaults to `http://127.0.0.1:8420`
+- `OAUTH2_GATEWAY_ACCESS_TOKEN`: optional legacy static bearer-token fallback for local debugging
 - `CF_TUNNEL_NAME`: optional, only for a named Cloudflare tunnel on your domain
 - `CF_DOMAIN`: optional, only for a named Cloudflare tunnel on your domain
 
 See [.env.template](.env.template).
+
+## Supported Client Registration Modes
+
+This gateway supports three client registration modes:
+
+- CIMD for ChatGPT-style public clients. The client uses an HTTPS URL as `client_id`, and the gateway fetches the metadata document and validates `redirect_uri`.
+- Preregistered clients for manual testing or clients that already have a configured `client_id` and `client_secret`.
+- Dynamic client registration at `/oauth/register` as a compatibility fallback.
+
+For CIMD flows, the token endpoint supports public-client token exchange with `token_endpoint_auth_method=none` and PKCE.
+
+## Discovery Endpoints
+
+The gateway publishes:
+
+- `/.well-known/oauth-authorization-server`
+- `/.well-known/openid-configuration`
+- `/.well-known/oauth-protected-resource/mcp`
+
+Unauthenticated requests to `/mcp` return `401 Unauthorized` with a `WWW-Authenticate` header that includes the `resource_metadata` URL pointing at the protected-resource metadata document.
 
 ## Prerequisites
 
@@ -80,6 +105,38 @@ Or with the wrapper script:
 ```
 
 Do this only if you intentionally want the app itself listening on the network. It is not required for either the tunnel flow or a same-host reverse proxy.
+
+## Local Verification
+
+Run the test suite:
+
+```bash
+cd /Users/tleyden/Development/agentzoo/poc/oauth2-host-gw
+uv run python -m unittest discover -s tests -v
+```
+
+Inspect the discovery surface:
+
+```bash
+curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server
+curl -s http://127.0.0.1:8421/.well-known/openid-configuration
+curl -s http://127.0.0.1:8421/.well-known/oauth-protected-resource/mcp
+```
+
+Probe the public hostname:
+
+```bash
+curl -i -sS https://agentbrain.mcpnative.dev/.well-known/oauth-authorization-server
+curl -i -sS https://agentbrain.mcpnative.dev/.well-known/openid-configuration
+curl -i -sS https://agentbrain.mcpnative.dev/.well-known/oauth-protected-resource/mcp
+curl -i -sS https://agentbrain.mcpnative.dev/mcp
+```
+
+Expected:
+
+- the `.well-known` endpoints return `200`
+- `/mcp` without a bearer token returns `401`
+- the `/mcp` `WWW-Authenticate` header includes `resource_metadata="https://agentbrain.mcpnative.dev/.well-known/oauth-protected-resource/mcp"`
 
 ## Public Exposure Options
 

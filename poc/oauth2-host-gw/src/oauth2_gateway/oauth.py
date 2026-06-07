@@ -8,11 +8,13 @@ import secrets
 import time
 from urllib.parse import urlencode
 
+import httpx
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.routing import Route
 
 from . import config
+from .client_metadata import fetch_client_metadata, is_cimd_client_id
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +29,33 @@ def _cleanup_codes() -> None:
 
 
 async def oauth_metadata(request: Request) -> JSONResponse:
-    base_url = str(request.base_url).rstrip("/")
-    return JSONResponse(
-        {
-            "issuer": base_url,
-            "authorization_endpoint": f"{base_url}/oauth/authorize",
-            "token_endpoint": f"{base_url}/oauth/token",
-            "registration_endpoint": f"{base_url}/oauth/register",
-            "grant_types_supported": ["authorization_code", "client_credentials"],
-            "response_types_supported": ["code"],
-            "code_challenge_methods_supported": ["S256"],
-            "token_endpoint_auth_methods_supported": ["client_secret_post"],
-        }
-    )
+    return JSONResponse(_metadata_payload(str(request.base_url).rstrip("/")))
+
+
+async def openid_metadata(request: Request) -> JSONResponse:
+    return JSONResponse(_metadata_payload(str(request.base_url).rstrip("/")))
+
+
+def _metadata_payload(base_url: str) -> dict:
+    return {
+        "issuer": base_url,
+        "authorization_endpoint": f"{base_url}/oauth/authorize",
+        "token_endpoint": f"{base_url}/oauth/token",
+        "registration_endpoint": f"{base_url}/oauth/register",
+        "grant_types_supported": ["authorization_code", "client_credentials"],
+        "response_types_supported": ["code"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none", "client_secret_post"],
+        "client_id_metadata_document_supported": True,
+    }
+
+
+def _canonical_resource(request: Request) -> str:
+    return request.query_params.get("resource") or form_resource(request)
+
+
+def form_resource(request: Request) -> str:
+    return f"{str(request.base_url).rstrip('/')}/mcp"
 
 
 async def oauth_authorize(request: Request) -> JSONResponse | RedirectResponse:
@@ -53,17 +69,25 @@ async def oauth_authorize(request: Request) -> JSONResponse | RedirectResponse:
     if response_type != "code":
         return JSONResponse({"error": "unsupported_response_type"}, status_code=400)
 
-    if client_id and client_id != config.OAUTH2_GATEWAY_CLIENT_ID:
-        return JSONResponse({"error": "invalid_client"}, status_code=401)
-
     if not redirect_uri:
         return JSONResponse({"error": "invalid_request", "error_description": "redirect_uri required"}, status_code=400)
+
+    if is_cimd_client_id(client_id):
+        try:
+            metadata = await fetch_client_metadata(request.app.state.http_client, client_id)
+        except (httpx.HTTPError, ValueError):
+            return JSONResponse({"error": "invalid_client"}, status_code=401)
+        if redirect_uri not in metadata.redirect_uris:
+            return JSONResponse({"error": "invalid_request", "error_description": "redirect_uri not allowed"}, status_code=400)
+    elif client_id and client_id != config.OAUTH2_GATEWAY_CLIENT_ID:
+        return JSONResponse({"error": "invalid_client"}, status_code=401)
 
     _cleanup_codes()
     code = secrets.token_urlsafe(32)
     _auth_codes[code] = {
         "client_id": client_id,
         "redirect_uri": redirect_uri,
+        "resource": _canonical_resource(request),
         "code_challenge": code_challenge,
         "code_challenge_method": code_challenge_method,
         "expires_at": time.time() + 300,
@@ -90,17 +114,18 @@ async def oauth_token(request: Request) -> JSONResponse:
     client_secret = form.get("client_secret", "")
 
     if grant_type == "authorization_code":
-        return await _handle_authorization_code(form, client_id, client_secret)
+        return await _handle_authorization_code(request, form, client_id, client_secret)
     if grant_type == "client_credentials":
-        return await _handle_client_credentials(client_id, client_secret)
+        return await _handle_client_credentials(request, form, client_id, client_secret)
 
     return JSONResponse({"error": "unsupported_grant_type"}, status_code=400)
 
 
-async def _handle_authorization_code(form, client_id: str, _client_secret: str) -> JSONResponse:
+async def _handle_authorization_code(request: Request, form, client_id: str, _client_secret: str) -> JSONResponse:
     code = form.get("code", "")
     redirect_uri = form.get("redirect_uri", "")
     code_verifier = form.get("code_verifier", "")
+    requested_resource = form.get("resource", "")
 
     _cleanup_codes()
 
@@ -109,11 +134,21 @@ async def _handle_authorization_code(form, client_id: str, _client_secret: str) 
 
     code_data = _auth_codes.pop(code)
 
-    if client_id and client_id != config.OAUTH2_GATEWAY_CLIENT_ID:
+    if is_cimd_client_id(client_id):
+        try:
+            metadata = await fetch_client_metadata(request.app.state.http_client, client_id)
+        except (httpx.HTTPError, ValueError):
+            return JSONResponse({"error": "invalid_client"}, status_code=401)
+        if metadata.token_endpoint_auth_method != "none":
+            return JSONResponse({"error": "invalid_client"}, status_code=401)
+    elif client_id and client_id != config.OAUTH2_GATEWAY_CLIENT_ID:
         return JSONResponse({"error": "invalid_client"}, status_code=401)
 
     if redirect_uri and code_data["redirect_uri"] and redirect_uri != code_data["redirect_uri"]:
         return JSONResponse({"error": "invalid_grant", "error_description": "redirect_uri mismatch"}, status_code=400)
+
+    if requested_resource and requested_resource != code_data["resource"]:
+        return JSONResponse({"error": "invalid_target"}, status_code=400)
 
     if code_data["code_challenge"]:
         if not code_verifier:
@@ -125,16 +160,20 @@ async def _handle_authorization_code(form, client_id: str, _client_secret: str) 
             return JSONResponse({"error": "invalid_grant", "error_description": "PKCE verification failed"}, status_code=400)
 
     logger.info("OAuth token issued via authorization_code grant")
+    access_token = request.app.state.token_store.issue_access_token(
+        client_id=client_id,
+        resource=code_data["resource"],
+    )
     return JSONResponse(
         {
-            "access_token": config.OAUTH2_GATEWAY_ACCESS_TOKEN,
+            "access_token": access_token.token,
             "token_type": "bearer",
             "expires_in": 86400,
         }
     )
 
 
-async def _handle_client_credentials(client_id: str, client_secret: str) -> JSONResponse:
+async def _handle_client_credentials(request: Request, form, client_id: str, client_secret: str) -> JSONResponse:
     if not config.OAUTH2_GATEWAY_CLIENT_SECRET:
         return JSONResponse({"error": "server_error"}, status_code=500)
 
@@ -146,9 +185,14 @@ async def _handle_client_credentials(client_id: str, client_secret: str) -> JSON
         return JSONResponse({"error": "invalid_client"}, status_code=401)
 
     logger.info("OAuth token issued via client_credentials grant")
+    resource = form.get("resource", "") or form_resource(request)
+    access_token = request.app.state.token_store.issue_access_token(
+        client_id=client_id,
+        resource=resource,
+    )
     return JSONResponse(
         {
-            "access_token": config.OAUTH2_GATEWAY_ACCESS_TOKEN,
+            "access_token": access_token.token,
             "token_type": "bearer",
             "expires_in": 86400,
         }
@@ -177,6 +221,7 @@ async def oauth_register(request: Request) -> JSONResponse:
 
 oauth_routes = [
     Route("/.well-known/oauth-authorization-server", oauth_metadata, methods=["GET"]),
+    Route("/.well-known/openid-configuration", openid_metadata, methods=["GET"]),
     Route("/oauth/authorize", oauth_authorize, methods=["GET"]),
     Route("/oauth/token", oauth_token, methods=["POST"]),
     Route("/oauth/register", oauth_register, methods=["POST"]),

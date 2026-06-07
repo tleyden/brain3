@@ -15,6 +15,7 @@ from starlette.routing import Route
 from .config import OAUTH2_GATEWAY_MCP_UPSTREAM_URL, OAUTH2_GATEWAY_PORT
 from .mcp_proxy import mcp_routes
 from .oauth import oauth_routes
+from .token_store import TokenStore
 
 logger = logging.getLogger(__name__)
 DEFAULT_HOST = "127.0.0.1"
@@ -38,11 +39,13 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         app.state.mcp_upstream_url = mcp_upstream_url.rstrip("/")
-        app.state.mcp_proxy_client = client_factory()
+        app.state.http_client = client_factory()
+        app.state.mcp_proxy_client = app.state.http_client
+        app.state.token_store = TokenStore()
         try:
             yield
         finally:
-            await app.state.mcp_proxy_client.aclose()
+            await app.state.http_client.aclose()
 
     return Starlette(
         lifespan=lifespan,
