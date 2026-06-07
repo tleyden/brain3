@@ -17,6 +17,7 @@ missing=()
 
 if [ ${#missing[@]} -gt 0 ]; then
     echo "ERROR: missing required values: ${missing[*]}"
+    echo "Generate secrets with generate_secrets.sh and add to .env"
     exit 1
 fi
 
