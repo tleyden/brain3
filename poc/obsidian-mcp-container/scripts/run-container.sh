@@ -191,6 +191,7 @@ cleanup_existing_container
 run_args=(
     run
     --name "$CONTAINER_NAME"
+    --user "$(id -u):$(id -g)"
     --publish "${HOST_BIND_ADDRESS}:${HOST_PORT}:${CONTAINER_PORT}"
     --env "VAULT_MCP_HOST=${CONTAINER_LISTEN_HOST}"
     --env "VAULT_PATH=/vault"
