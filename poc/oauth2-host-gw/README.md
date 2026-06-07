@@ -28,17 +28,49 @@ Environment variables:
 
 See [.env.template](.env.template).
 
+## Prerequisites
+
+Install `uv` first.
+
+### macOS
+
+```bash
+brew install uv
+```
+
+### Linux
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+If `uv` is not on your `PATH` after the Linux install, restart your shell or add `~/.local/bin` to `PATH`.
+
 ## Entry Point
+
+Once `uv` is installed, the run commands are the same on macOS and Linux.
 
 ```bash
 uv sync
 uv run oauth2-gateway
 ```
 
+By default the gateway binds only to `127.0.0.1`. To expose it on all interfaces intentionally, pass an explicit host:
+
+```bash
+uv run oauth2-gateway --host 0.0.0.0
+```
+
 Or:
 
 ```bash
 ./scripts/start-oauth2-server.sh
+```
+
+Or with the wrapper script:
+
+```bash
+./scripts/start-oauth2-server.sh --host 0.0.0.0
 ```
 
 ## Scope

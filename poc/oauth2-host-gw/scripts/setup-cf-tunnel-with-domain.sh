@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Tip: for quick testing before creating a named tunnel, you can start
+# with a temporary tunnel against the gateway:
+#   cloudflared tunnel --url http://localhost:8421
+
 echo "=== Obsidian Vault MCP -- Cloudflare Tunnel Setup ==="
 echo ""
 

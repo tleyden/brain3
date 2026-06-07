@@ -18,6 +18,9 @@ HOST_PORT="${HOST_PORT:-8420}"
 HOST_VAULT_PATH="${HOST_VAULT_PATH:-${VAULT_PATH:-}}"
 SOURCE_MOUNT_PATH="/workspace/obsidian-mcp-container"
 CONTAINER_RUNTIME="macos-container"
+HOST_BIND_ADDRESS="127.0.0.1"
+CONTAINER_LISTEN_HOST="0.0.0.0"
+CONTAINER_PORT="8420"
 DETACH=true
 REMOVE=true
 
@@ -30,13 +33,38 @@ Options:
   --bind-source         Run the mounted host source tree instead of the code baked into the image
   --image               Run the code baked into the image (default)
   --vault-path PATH     Host vault directory to mount into /vault
-  --port PORT           Host port to publish to container port 8420 (default: 8420)
+  --port PORT           Host loopback port to publish as 127.0.0.1:PORT -> container port 8420
   --name NAME           Container name (default: obsidian-mcp-server)
   --image-name NAME     Image reference to run (default: obsidian-mcp-server:latest)
   --foreground          Run attached instead of detached
   --keep                Do not pass --rm
   -h, --help            Show this help
+
+Networking:
+  The server listens on 0.0.0.0:8420 inside the container so published traffic can reach it.
+  The host publishes that port on 127.0.0.1 only, so it is not exposed on other host interfaces.
+  VAULT_MCP_ALLOWED_HOSTS adds allowed HTTP Host headers for DNS rebinding protection; it does not
+  publish the port on additional host interfaces.
 EOF
+}
+
+print_networking_summary() {
+    echo "Networking:"
+    echo "  Inside container: ${CONTAINER_LISTEN_HOST}:${CONTAINER_PORT}"
+    echo "  On host:          ${HOST_BIND_ADDRESS}:${HOST_PORT} -> container:${CONTAINER_PORT}"
+    echo "  Host exposure:    loopback only; remote hosts cannot connect via other host interfaces"
+    echo "  Host header ACL:  defaults to 127.0.0.1, localhost, [::1]"
+
+    if [ -n "${VAULT_MCP_ALLOWED_HOSTS:-}" ]; then
+        echo "                    plus VAULT_MCP_ALLOWED_HOSTS=${VAULT_MCP_ALLOWED_HOSTS}"
+    fi
+
+    echo "                    this changes allowed HTTP Host headers, not socket binding"
+
+    if [ "$CONTAINER_RUNTIME" = "docker" ]; then
+        echo "  Docker note:      Docker documents a localhost publishing caveat on releases older than 28.0.0"
+        echo "                    where hosts on the same L2 segment may still reach the port"
+    fi
 }
 
 require_macos_container() {
@@ -163,8 +191,8 @@ cleanup_existing_container
 run_args=(
     run
     --name "$CONTAINER_NAME"
-    --publish "127.0.0.1:${HOST_PORT}:8420"
-    --env "VAULT_MCP_HOST=0.0.0.0"
+    --publish "${HOST_BIND_ADDRESS}:${HOST_PORT}:${CONTAINER_PORT}"
+    --env "VAULT_MCP_HOST=${CONTAINER_LISTEN_HOST}"
     --env "VAULT_PATH=/vault"
     --mount "type=bind,source=${HOST_VAULT_PATH},target=/vault"
 )
@@ -196,6 +224,7 @@ else
 fi
 
 echo "Running $CONTAINER_NAME from $IMAGE_NAME in $MODE mode with runtime $CONTAINER_RUNTIME"
+print_networking_summary
 
 if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
     container "${run_args[@]}"
@@ -204,7 +233,8 @@ else
 fi
 
 if [ "$DETACH" = true ]; then
-    echo "Published MCP endpoint: http://127.0.0.1:${HOST_PORT}/mcp"
+    echo "Published MCP endpoint on host loopback: http://${HOST_BIND_ADDRESS}:${HOST_PORT}/mcp"
+    echo "Container listener: http://${CONTAINER_LISTEN_HOST}:${CONTAINER_PORT}/mcp"
     if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
         echo "View logs with: container logs $CONTAINER_NAME"
     else
