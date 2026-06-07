@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config import (
     CONTEXT_LINES,
@@ -25,12 +25,35 @@ class VaultReadInput(BaseModel):
         min_length=1,
         max_length=500,
     )
+    start_line: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional 1-based starting line for a partial read",
+    )
+    end_line: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional 1-based ending line for a partial read",
+    )
+    tail_lines: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional number of lines to read from the end of the file",
+    )
+
+    @model_validator(mode="after")
+    def validate_line_window(self):
+        if self.tail_lines is not None and (self.start_line is not None or self.end_line is not None):
+            raise ValueError("tail_lines cannot be combined with start_line or end_line")
+        if self.start_line is not None and self.end_line is not None and self.start_line > self.end_line:
+            raise ValueError("start_line cannot be greater than end_line")
+        return self
 
 
-class VaultWriteInput(BaseModel):
-    """Write or overwrite a file in the vault."""
+class VaultCreateOverwriteFileInput(BaseModel):
+    """Create a new file or overwrite an existing file in the vault."""
 
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(str_strip_whitespace=False, extra="forbid")
 
     path: str = Field(
         ...,
@@ -47,9 +70,34 @@ class VaultWriteInput(BaseModel):
         default=True,
         description="Create parent directories if they don't exist",
     )
-    merge_frontmatter: bool = Field(
+
+
+class VaultApplyUnifiedDiffInput(BaseModel):
+    """Apply a unified diff patch to an existing text file."""
+
+    model_config = ConfigDict(str_strip_whitespace=False, extra="forbid")
+
+    path: str = Field(
+        ...,
+        description="Relative path from vault root",
+        min_length=1,
+        max_length=500,
+    )
+    diff: str = Field(
+        ...,
+        description="Unified diff text for a single file",
+        min_length=1,
+        max_length=MAX_CONTENT_SIZE * 2,
+    )
+    dry_run: bool = Field(
         default=False,
-        description="If true, merge YAML frontmatter with existing file's frontmatter instead of replacing",
+        description="If true, validate and simulate the patch without writing the file",
+    )
+    expected_hash: str | None = Field(
+        default=None,
+        description="Optional SHA-256 hash of the full file content expected by the caller",
+        min_length=64,
+        max_length=64,
     )
 
 

@@ -9,22 +9,24 @@ from mcp.server.transport_security import TransportSecuritySettings
 from .config import VAULT_MCP_EXTRA_ALLOWED_HOSTS, VAULT_MCP_PORT, VAULT_PATH
 from .frontmatter_index import FrontmatterIndex
 from .models import (
+    VaultApplyUnifiedDiffInput,
     VaultBatchFrontmatterUpdateInput,
     VaultBatchReadInput,
+    VaultCreateOverwriteFileInput,
     VaultDeleteInput,
     VaultListInput,
     VaultMoveInput,
     VaultReadInput,
     VaultSearchFrontmatterInput,
     VaultSearchInput,
-    VaultWriteInput,
 )
 from .tools.manage import vault_delete as _vault_delete, vault_list as _vault_list, vault_move as _vault_move
+from .tools.patch import vault_apply_unified_diff as _vault_apply_unified_diff
 from .tools.read import vault_batch_read as _vault_batch_read, vault_read as _vault_read
 from .tools.search import vault_search as _vault_search, vault_search_frontmatter as _vault_search_frontmatter
 from .tools.write import (
     vault_batch_frontmatter_update as _vault_batch_frontmatter_update,
-    vault_write as _vault_write,
+    vault_create_overwrite_file as _vault_create_overwrite_file,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,12 +65,17 @@ mcp = FastMCP(
 
 @mcp.tool(
     name="vault_read",
-    description="Read a file from the Obsidian vault, returning content, metadata, and parsed YAML frontmatter.",
+    description="Read a vault file. Supports full reads or line-window reads and always returns the hash of the full file content for safe follow-up patches.",
     annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
-def vault_read(path: str) -> str:
-    inp = VaultReadInput(path=path)
-    return _vault_read(inp.path)
+def vault_read(
+    path: str,
+    start_line: int | None = None,
+    end_line: int | None = None,
+    tail_lines: int | None = None,
+) -> str:
+    inp = VaultReadInput(path=path, start_line=start_line, end_line=end_line, tail_lines=tail_lines)
+    return _vault_read(inp.path, inp.start_line, inp.end_line, inp.tail_lines)
 
 
 @mcp.tool(
@@ -82,18 +89,33 @@ def vault_batch_read(paths: list[str], include_content: bool = True) -> str:
 
 
 @mcp.tool(
-    name="vault_write",
-    description="Write a file to the Obsidian vault. Supports frontmatter merging with existing files. Creates parent directories by default.",
+    name="vault_create_overwrite_file",
+    description="Create a new file or replace an existing file with the full provided content. Use this for new notes or intentional full-document replacement, not routine edits to existing notes.",
     annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
 )
-def vault_write(path: str, content: str, create_dirs: bool = True, merge_frontmatter: bool = False) -> str:
-    inp = VaultWriteInput(path=path, content=content, create_dirs=create_dirs, merge_frontmatter=merge_frontmatter)
-    return _vault_write(inp.path, inp.content, inp.create_dirs, inp.merge_frontmatter)
+def vault_create_overwrite_file(path: str, content: str, create_dirs: bool = True) -> str:
+    inp = VaultCreateOverwriteFileInput(path=path, content=content, create_dirs=create_dirs)
+    return _vault_create_overwrite_file(inp.path, inp.content, inp.create_dirs)
+
+
+@mcp.tool(
+    name="vault_apply_unified_diff",
+    description="Apply a unified diff to a single existing text file. Preferred tool for precise edits to existing notes, including one-line changes in large files and small EOF appends.",
+    annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
+)
+def vault_apply_unified_diff(
+    path: str,
+    diff: str,
+    dry_run: bool = False,
+    expected_hash: str | None = None,
+) -> str:
+    inp = VaultApplyUnifiedDiffInput(path=path, diff=diff, dry_run=dry_run, expected_hash=expected_hash)
+    return _vault_apply_unified_diff(inp.path, inp.diff, inp.dry_run, inp.expected_hash)
 
 
 @mcp.tool(
     name="vault_batch_frontmatter_update",
-    description="Update YAML frontmatter fields on multiple files without changing body content.",
+    description="Update YAML frontmatter fields on multiple files. This preserves note body semantics but may rewrite the full markdown file to serialize the updated frontmatter.",
     annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 def vault_batch_frontmatter_update(updates: list[dict]) -> str:
