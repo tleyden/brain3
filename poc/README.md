@@ -44,7 +44,7 @@ This gives you:
 
 No domain is required.
 
-## TryCloudflare
+## Cloudflare Tunnel via trycloudflare (easy, no domain or account required)
 
 Install:
 
@@ -67,7 +67,7 @@ This gives you:
 
 This is temporary: it lasts only while the `cloudflared` process is running, and it is best used for testing or quick demos.
 
-## Cloudflare Tunnel
+## Cloudflare Tunnel with Custom Domain
 
 Note: domain required.
 

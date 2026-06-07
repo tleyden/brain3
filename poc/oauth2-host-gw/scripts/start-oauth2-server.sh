@@ -30,4 +30,4 @@ if [ ! -d ".venv" ]; then
     fi
 fi
 
-uv run oauth2-gateway
+uv run oauth2-gateway "$@"

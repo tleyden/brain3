@@ -35,10 +35,22 @@ uv sync
 uv run oauth2-gateway
 ```
 
+By default the gateway binds only to `127.0.0.1`. To expose it on all interfaces intentionally, pass an explicit host:
+
+```bash
+uv run oauth2-gateway --host 0.0.0.0
+```
+
 Or:
 
 ```bash
 ./scripts/start-oauth2-server.sh
+```
+
+Or with the wrapper script:
+
+```bash
+./scripts/start-oauth2-server.sh --host 0.0.0.0
 ```
 
 ## Scope

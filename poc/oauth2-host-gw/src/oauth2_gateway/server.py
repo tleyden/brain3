@@ -1,5 +1,6 @@
 """CLI entrypoint for the OAuth + MCP gateway."""
 
+import argparse
 import logging
 import sys
 from collections.abc import AsyncIterator, Callable
@@ -16,6 +17,7 @@ from .mcp_proxy import mcp_routes
 from .oauth import oauth_routes
 
 logger = logging.getLogger(__name__)
+DEFAULT_HOST = "127.0.0.1"
 
 
 async def health(_request) -> JSONResponse:
@@ -48,18 +50,30 @@ def create_app(
     )
 
 
-def main() -> None:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the OAuth2 gateway server.")
+    parser.add_argument(
+        "--host",
+        default=DEFAULT_HOST,
+        help=f"Host interface to bind to. Defaults to {DEFAULT_HOST}.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
 
-    logger.info("Starting OAuth2 gateway on port %s", OAUTH2_GATEWAY_PORT)
+    logger.info("Starting OAuth2 gateway on %s:%s", args.host, OAUTH2_GATEWAY_PORT)
     logger.info("Proxying MCP traffic to %s", OAUTH2_GATEWAY_MCP_UPSTREAM_URL)
     uvicorn.run(
         create_app(),
-        host="0.0.0.0",
+        host=args.host,
         port=OAUTH2_GATEWAY_PORT,
         log_level="info",
         proxy_headers=True,
