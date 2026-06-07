@@ -6,7 +6,7 @@ import sys
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
-from .config import VAULT_MCP_EXTRA_ALLOWED_HOSTS, VAULT_MCP_PORT, VAULT_PATH
+from .config import VAULT_MCP_EXTRA_ALLOWED_HOSTS, VAULT_MCP_HOST, VAULT_MCP_PORT, VAULT_PATH
 from .frontmatter_index import FrontmatterIndex
 from .models import (
     VaultApplyUnifiedDiffInput,
@@ -49,6 +49,7 @@ def _stop_process_resources() -> None:
 
 mcp = FastMCP(
     "obsidian_mcp_server",
+    host=VAULT_MCP_HOST,
     port=VAULT_MCP_PORT,
     stateless_http=True,
     json_response=True,
@@ -65,7 +66,7 @@ mcp = FastMCP(
 
 @mcp.tool(
     name="vault_read",
-    description="Read a vault file. Supports full reads or line-window reads and always returns the hash of the full file content for safe follow-up patches.",
+    description="Read a vault file. Prefer line-window reads when preparing an edit to an existing file, then follow with vault_apply_unified_diff using the returned full-file content hash.",
     annotations={"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 def vault_read(
@@ -90,7 +91,7 @@ def vault_batch_read(paths: list[str], include_content: bool = True) -> str:
 
 @mcp.tool(
     name="vault_create_overwrite_file",
-    description="Create a new file or replace an existing file with the full provided content. Use this for new notes or intentional full-document replacement, not routine edits to existing notes.",
+    description="Create a new file or replace an existing file with the full provided content. Use this for new notes or deliberate whole-document replacement only. Prefer vault_apply_unified_diff for feasible edits to existing files because full overwrite is more token-expensive and more error-prone.",
     annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
 )
 def vault_create_overwrite_file(path: str, content: str, create_dirs: bool = True) -> str:
@@ -100,7 +101,7 @@ def vault_create_overwrite_file(path: str, content: str, create_dirs: bool = Tru
 
 @mcp.tool(
     name="vault_apply_unified_diff",
-    description="Apply a unified diff to a single existing text file. Preferred tool for precise edits to existing notes, including one-line changes in large files and small EOF appends.",
+    description="Apply a unified diff to a single existing text file. This is the default edit path for existing notes when feasible, including one-line changes in large files and small EOF appends. Lean toward this instead of vault_create_overwrite_file because it is cheaper in tokens and safer.",
     annotations={"readOnlyHint": False, "destructiveHint": True, "idempotentHint": False, "openWorldHint": False},
 )
 def vault_apply_unified_diff(
@@ -115,7 +116,7 @@ def vault_apply_unified_diff(
 
 @mcp.tool(
     name="vault_batch_frontmatter_update",
-    description="Update YAML frontmatter fields on multiple files. This preserves note body semantics but may rewrite the full markdown file to serialize the updated frontmatter.",
+    description="Update YAML frontmatter fields on multiple files. Prefer this over whole-file replacement for metadata-only changes. It preserves note body semantics but may rewrite the full markdown file to serialize the updated frontmatter.",
     annotations={"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False},
 )
 def vault_batch_frontmatter_update(updates: list[dict]) -> str:

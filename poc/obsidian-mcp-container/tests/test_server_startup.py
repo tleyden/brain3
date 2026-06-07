@@ -20,6 +20,31 @@ def import_server_module():
 
 
 class ServerStartupTests(unittest.TestCase):
+    def test_fastmcp_host_defaults_to_loopback(self):
+        with patch.dict(
+            os.environ,
+            {
+                "VAULT_PATH": str(TEST_VAULT),
+            },
+            clear=False,
+        ):
+            server = import_server_module()
+
+        self.assertEqual(server.mcp.settings.host, "127.0.0.1")
+
+    def test_fastmcp_host_is_configured_from_vault_mcp_host(self):
+        with patch.dict(
+            os.environ,
+            {
+                "VAULT_PATH": str(TEST_VAULT),
+                "VAULT_MCP_HOST": "0.0.0.0",
+            },
+            clear=False,
+        ):
+            server = import_server_module()
+
+        self.assertEqual(server.mcp.settings.host, "0.0.0.0")
+
     def test_fastmcp_port_is_configured_from_vault_mcp_port(self):
         with patch.dict(
             os.environ,

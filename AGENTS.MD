@@ -1,3 +1,6 @@
 - The point of the app is to run mcp servers and skills locally on your desktop in a safe manner, ideally inside of a native macos container, but opt-out is allowed
-- Also the other point of the app is to open it up 
+- Also the other point of the app is to open it up to remote access since that what Claude and ChatGPT demand for access from mobile and web.
 - Be very judidicous about writing unit tests, they create a lot of tech debt.  Never write tests for log output for example.  It must just be core functionality on public apis.  Never test private apis, because they constantly break.
+- We are using the macos native containers.  We have container CLI installed.  It is new, and it is different than docker.  NO docker, except what is compatible with macos container.
+- Don't suggest subagents.  We will always do this in smaller steps in serial to manage context window rather than spawning subagents.
+- Don't commit to git, I will commit.
