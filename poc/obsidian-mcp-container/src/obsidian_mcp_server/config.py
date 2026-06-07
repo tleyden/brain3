@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 VAULT_PATH = Path(os.environ.get("VAULT_PATH", os.path.expanduser("~/Obsidian/MyVault")))
+VAULT_MCP_HOST = os.environ.get("VAULT_MCP_HOST", "127.0.0.1")
 VAULT_MCP_PORT = int(os.environ.get("VAULT_MCP_PORT", "8420"))
 
 _extra = os.environ.get("VAULT_MCP_ALLOWED_HOSTS", "")

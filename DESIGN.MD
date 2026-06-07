@@ -5,13 +5,13 @@ See PRD.MD
 
 ## Design Sketch
 
-![Architecture](./Architecture.png)
+![Architecture](Architecture.png)
 
 ## Design Decisions
 
 ### DD: Swift vs Tauri2?
 
-#### Option 1: Swift with SwiftUI (rec'd)
+#### Option 1: Swift with SwiftUI 
 
 ##### Strengths 
 
@@ -20,6 +20,7 @@ See PRD.MD
 
 ##### Risks
 
+- Doesn't meet requirement to run on headless linux server
 - Windows Port
 
 #### Option 2: Swift with React UI in Webview
@@ -28,7 +29,7 @@ See PRD.MD
 
 ##### Risks
 
-#### Option 3: Tauri2 
+#### Option 3: Tauri2  (rec'd)
 
 ##### Strengths 
 
