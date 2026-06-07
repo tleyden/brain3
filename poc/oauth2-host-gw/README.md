@@ -28,7 +28,27 @@ Environment variables:
 
 See [.env.template](.env.template).
 
+## Prerequisites
+
+Install `uv` first.
+
+### macOS
+
+```bash
+brew install uv
+```
+
+### Linux
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+If `uv` is not on your `PATH` after the Linux install, restart your shell or add `~/.local/bin` to `PATH`.
+
 ## Entry Point
+
+Once `uv` is installed, the run commands are the same on macOS and Linux.
 
 ```bash
 uv sync

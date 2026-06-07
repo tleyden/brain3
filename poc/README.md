@@ -4,12 +4,65 @@ If the goal is to give a local MCP server a public HTTPS URL quickly, `ngrok` is
 
 For the `oauth2-host-gw` POC, the default local port is `8421`. Replace it below only if you changed `OAUTH2_GATEWAY_PORT`.
 
+## Nix
+
+If you want to install tunnel clients on Linux with Nix, install Nix first:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix | sh -s -- install
+```
+
+Then either start a new shell or run:
+
+```bash
+source ~/.bashrc
+```
+
+Verify:
+
+```bash
+nix --version
+```
+
+With Nix installed, you can install either tunnel client without adding extra apt repositories:
+
+```bash
+nix profile install nixpkgs#cloudflared
+nix profile install nixpkgs#ngrok
+```
+
 ## ngrok
 
 Install:
 
+### macOS
+
 ```bash
 brew install ngrok
+```
+
+### Linux
+
+```bash
+nix profile install nixpkgs#ngrok
+```
+
+Verify:
+
+```bash
+ngrok version
+```
+
+If you do not want to install it permanently:
+
+```bash
+nix run nixpkgs#ngrok
+```
+
+Or:
+
+```bash
+nix shell nixpkgs#ngrok
 ```
 
 Log in once:
@@ -44,12 +97,27 @@ This gives you:
 
 No domain is required.
 
+For Agent Zoo, installing both clients side-by-side is quick:
+
+```bash
+nix profile install nixpkgs#cloudflared
+nix profile install nixpkgs#ngrok
+```
+
 ## Cloudflare Tunnel via trycloudflare (easy, no domain or account required)
 
 Install:
 
+### macOS
+
 ```bash
 brew install cloudflared
+```
+
+### Linux
+
+```bash
+nix profile install nixpkgs#cloudflared
 ```
 
 Run:
@@ -66,6 +134,8 @@ This gives you:
 - No domain required
 
 This is temporary: it lasts only while the `cloudflared` process is running, and it is best used for testing or quick demos.
+
+Unlike `ngrok`, Cloudflare Quick Tunnels do not require login for this basic flow. `ngrok` still requires `ngrok config add-authtoken YOUR_TOKEN` for normal authenticated use.
 
 ## Cloudflare Tunnel with Custom Domain
 

@@ -25,7 +25,53 @@ Environment variables:
 
 See [.env.template](.env.template).
 
+## Prerequisites
+
+Install `uv` first.
+
+### macOS
+
+```bash
+brew install uv
+```
+
+### Linux
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+If `uv` is not on your `PATH` after the Linux install, restart your shell or add `~/.local/bin` to `PATH`.
+
+Container runtime notes:
+- macOS examples default to Apple's native `container` CLI. Docker is still supported if you choose `--container-runtime docker`.
+- Linux examples use Docker. Apple's `container` CLI is macOS-only.
+
+### Linux Docker install
+
+```bash
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+```
+
+The run/build scripts assume `docker` is directly runnable by your user on Linux.
+
 ## Entry Point
+
+Once `uv` is installed, the run commands are the same on macOS and Linux.
 
 ```bash
 uv sync
@@ -40,7 +86,7 @@ Or:
 
 ## Scope
 
-This POC fork is only the stripped server code plus a minimal native macOS container workflow. It does not include OAuth or Cloudflare tunnel setup.
+This POC fork is only the stripped server code plus a minimal container workflow: Apple `container` on macOS, Docker on Linux. It does not include OAuth or Cloudflare tunnel setup.
 
 ## Tool Surface
 
@@ -77,33 +123,27 @@ For metadata-only changes:
 
 ## Container Build
 
-This project includes a `Containerfile` that can be built with either Apple's native `container` CLI or Docker.
+This project includes a `Containerfile` that can be built with Apple's native `container` CLI on macOS or Docker on Linux. Docker examples also work on macOS if you explicitly choose that runtime.
 
-Build the image from the latest local code in this directory with the default native macOS runtime:
+Build the image from the latest local code in this directory on macOS with the default Apple runtime:
 
 ```bash
 ./scripts/build-container.sh
 ```
 
-Build explicitly with Apple `container`:
+Build explicitly with Apple `container` on macOS:
 
 ```bash
 ./scripts/build-container.sh --container-runtime macos-container
 ```
 
-Build explicitly with Docker:
+Build with Docker on Linux:
 
 ```bash
 ./scripts/build-container.sh --container-runtime docker
 ```
 
-If you want the image available in both runtimes on the same machine, run the script twice, once per runtime.
-
-On a Linux machine that only has Docker installed, build with:
-
-```bash
-./scripts/build-container.sh --container-runtime docker
-```
+If you want the image available in both runtimes on the same macOS machine, run the script twice, once per runtime.
 
 This uses:
 
@@ -121,19 +161,19 @@ IMAGE_NAME=obsidian-mcp-server:dev ./scripts/build-container.sh --container-runt
 
 The Obsidian MCP server is the only process that runs inside the container. The OAuth gateway stays outside the container and talks to the MCP server over the published local HTTP port.
 
-Run the baked image against a host vault with the default native macOS runtime:
+Run the baked image against a host vault on macOS with the default Apple runtime:
 
 ```bash
 ./scripts/run-container.sh --vault-path /absolute/path/to/vault
 ```
 
-Run explicitly with Apple `container`:
+Run explicitly with Apple `container` on macOS:
 
 ```bash
 ./scripts/run-container.sh --container-runtime macos-container --vault-path /absolute/path/to/vault
 ```
 
-Run explicitly with Docker:
+Run with Docker on Linux:
 
 ```bash
 ./scripts/run-container.sh --container-runtime docker --vault-path /absolute/path/to/vault
