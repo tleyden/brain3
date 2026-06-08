@@ -40,6 +40,13 @@ def _resource_metadata_url(request: Request) -> str:
     return f"{_base_url(request)}/.well-known/oauth-protected-resource/mcp"
 
 
+def _misdirected_request(description: str) -> JSONResponse:
+    return JSONResponse(
+        {"error": "misdirected_request", "error_description": description},
+        status_code=421,
+    )
+
+
 def _log_request_host_details(request: Request, *, route_name: str) -> None:
     logger.info(
         (
@@ -56,6 +63,26 @@ def _log_request_host_details(request: Request, *, route_name: str) -> None:
         request.base_url,
         request.client,
     )
+
+
+def _validate_request_host(request: Request) -> JSONResponse | None:
+    expected_host = getattr(request.app.state, "expected_host", None)
+    if not expected_host:
+        logger.warning(
+            "Skipping hostname validation; a named Cloudflare tunnel on your own domain is recommended instead of a quick tunnel."
+        )
+        return None
+
+    request_host = request.url.hostname
+    if request_host == expected_host:
+        return None
+
+    logger.warning(
+        "Rejecting MCP request for unexpected host: got=%r expected=%r",
+        request_host,
+        expected_host,
+    )
+    return _misdirected_request("Request host does not match the configured named tunnel hostname")
 
 
 def _unauthorized(request: Request, description: str) -> JSONResponse:
@@ -108,6 +135,10 @@ def _filter_response_headers(response: httpx.Response) -> dict[str, str]:
 
 async def protected_resource_metadata(request: Request) -> JSONResponse:
     _log_request_host_details(request, route_name="protected_resource_metadata")
+    host_validation_error = _validate_request_host(request)
+    if host_validation_error is not None:
+        return host_validation_error
+
     base_url = _base_url(request)
     return JSONResponse(
         {
@@ -119,6 +150,10 @@ async def protected_resource_metadata(request: Request) -> JSONResponse:
 
 async def mcp_reverse_proxy(request: Request) -> Response | JSONResponse:
     _log_request_host_details(request, route_name="mcp_reverse_proxy")
+    host_validation_error = _validate_request_host(request)
+    if host_validation_error is not None:
+        return host_validation_error
+
     if not _is_authorized(request):
         return _unauthorized(request, "Missing or invalid bearer token")
 

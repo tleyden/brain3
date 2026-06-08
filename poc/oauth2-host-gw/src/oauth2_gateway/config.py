@@ -8,6 +8,14 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _named_tunnel_host() -> str | None:
+    tunnel_name = os.environ.get("CF_TUNNEL_NAME", "").strip().strip(".")
+    domain = os.environ.get("CF_DOMAIN", "").strip().strip(".")
+    if not tunnel_name or not domain:
+        return None
+    return f"{tunnel_name}.{domain}".lower()
+
+
 OAUTH2_GATEWAY_PORT = int(os.environ.get("OAUTH2_GATEWAY_PORT", "8421"))
 OAUTH2_GATEWAY_CLIENT_ID = os.environ.get("OAUTH2_GATEWAY_CLIENT_ID", "oauth2-gateway-client")
 OAUTH2_GATEWAY_CLIENT_SECRET = os.environ.get("OAUTH2_GATEWAY_CLIENT_SECRET", "")
@@ -20,3 +28,4 @@ OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE = os.environ.get(
 OAUTH2_PKCE_REQUIRED = _env_bool("OAUTH2_PKCE_REQUIRED", True)
 USERNAME = os.environ.get("USERNAME", "")
 PASSWORD = os.environ.get("PASSWORD", "")
+OAUTH2_GATEWAY_EXPECTED_HOST = _named_tunnel_host()

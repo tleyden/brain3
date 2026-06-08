@@ -14,6 +14,7 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from .config import (
+    OAUTH2_GATEWAY_EXPECTED_HOST,
     OAUTH2_GATEWAY_MCP_UPSTREAM_URL,
     OAUTH2_GATEWAY_PORT,
     OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE,
@@ -52,6 +53,7 @@ def create_app(
     *,
     mcp_upstream_url: str = OAUTH2_GATEWAY_MCP_UPSTREAM_URL,
     mcp_upstream_secret: str = "",
+    expected_host: str | None = None,
     http_client_factory: Callable[[], httpx.AsyncClient] | None = None,
 ) -> Starlette:
     client_factory = http_client_factory or _default_http_client_factory
@@ -60,6 +62,7 @@ def create_app(
     async def lifespan(app: Starlette) -> AsyncIterator[None]:
         app.state.mcp_upstream_url = mcp_upstream_url.rstrip("/")
         app.state.mcp_upstream_secret = mcp_upstream_secret
+        app.state.expected_host = expected_host
         app.state.mcp_proxy_client = client_factory()
         try:
             yield
@@ -96,6 +99,7 @@ def main(argv: list[str] | None = None) -> None:
     uvicorn.run(
         create_app(
             mcp_upstream_secret=_read_required_upstream_secret(OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE),
+            expected_host=OAUTH2_GATEWAY_EXPECTED_HOST,
         ),
         host=args.host,
         port=OAUTH2_GATEWAY_PORT,
