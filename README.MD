@@ -102,17 +102,7 @@ PASSWORD=your_password
 
 The username and password are the credentials you will enter when your AI app prompts you to sign in.
 
-### 4. Create the upstream shared secret
-
-The gateway authenticates to the MCP server with a shared secret file. Generate it:
-
-```bash
-./scripts/ensure-mcp-upstream-secret.sh
-```
-
-This creates a secret at `/tmp/brain3-mcp-upstream-secret/upstream_secret` (the default path the gateway expects).
-
-### 5. Start the MCP server container
+### 4. Start the MCP server container
 
 ```bash
 ./scripts/run-mcp-container.sh \
@@ -122,13 +112,13 @@ This creates a secret at `/tmp/brain3-mcp-upstream-secret/upstream_secret` (the 
 
 Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian vault or markdown folder.
 
-### 6. Start the gateway
+### 5. Start the gateway
 
 ```bash
 ./target/release/brain3-gateway
 ```
 
-### 7. Verify locally
+### 6. Verify locally
 
 In another terminal:
 
@@ -140,7 +130,7 @@ curl -s http://127.0.0.1:8421/health
 curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server | python3 -m json.tool
 ```
 
-### 8. Expose via Cloudflare Tunnel
+### 7. Expose via Cloudflare Tunnel
 
 For your AI app to reach Brain3, you need a public URL. The quickest way:
 
@@ -150,13 +140,13 @@ cloudflared tunnel --url http://localhost:8421
 
 `cloudflared` prints a temporary public URL like `https://xxx-yyy-zzz.trycloudflare.com`. Copy this URL.
 
-### 9. Connect your AI app
+### 8. Connect your AI app
 
 In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), add a new MCP server connection with:
 
 | Field | Value |
 |---|---|
-| Server URL | The Cloudflare Tunnel URL from step 8 |
+| Server URL | The Cloudflare Tunnel URL from step 7 |
 | Client ID | `oauth2-gateway-client` (or whatever you set in `.env`) |
 | Client Secret | The value of `OAUTH2_GATEWAY_CLIENT_SECRET` from your `.env` |
 

@@ -22,26 +22,6 @@ struct Args {
     env_file: Option<PathBuf>,
 }
 
-fn read_upstream_secret(path: &std::path::Path) -> Result<String> {
-    let path_str = path
-        .to_str()
-        .context("upstream secret file path is not valid UTF-8")?;
-    if path_str.trim().is_empty() {
-        anyhow::bail!("MCP upstream shared secret file path is empty");
-    }
-    let secret = std::fs::read_to_string(path)
-        .with_context(|| format!("Unable to read MCP upstream shared secret file: {}", path.display()))?
-        .trim()
-        .to_string();
-    if secret.is_empty() {
-        anyhow::bail!(
-            "MCP upstream shared secret file is empty: {}",
-            path.display()
-        );
-    }
-    Ok(secret)
-}
-
 async fn shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
@@ -63,7 +43,9 @@ async fn main() -> Result<()> {
     let config_adapter = EnvFileConfigAdapter::new(args.env_file);
     let config = Arc::new(config_adapter.load().context("failed to load configuration")?);
 
-    let upstream_secret = read_upstream_secret(&config.mcp_reverse_proxy.upstream_secret_file)?;
+    let upstream_secret = brain3_platform::config::upstream_secret::read_or_create(
+        &config.mcp_reverse_proxy.upstream_secret_file,
+    )?;
 
     let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
