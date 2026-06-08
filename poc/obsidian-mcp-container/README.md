@@ -196,9 +196,11 @@ This:
 
 If your local `.env` already sets `VAULT_PATH` to a host directory, the run script will use that path by default.
 
-### Bind-Mounted Source Mode
+### Bind-Mounted Source Development Mode
 
-For faster Python edit loops, use `--bind-mount-sourcecode`. This runs the mounted host source tree instead of the code baked into the image, so normal `src/` edits do not require rebuilding the image.
+For faster Python edit loops during local development, use `--bind-mount-sourcecode`. This is mainly a development-mode workflow: it runs the mounted host source tree instead of the code baked into the image, so normal `src/` edits do not require rebuilding the image.
+
+For normal runs, prefer the default image-backed mode above.
 
 Apple `container` bind-mounted source mode:
 
@@ -212,7 +214,7 @@ Docker bind-mounted source mode:
 ./scripts/run-container.sh --container-runtime docker --bind-mount-sourcecode --vault-path /absolute/path/to/vault
 ```
 
-In bind mode:
+In this development mode:
 
 - dependencies still come from the image
 - source code comes from the mounted host checkout
