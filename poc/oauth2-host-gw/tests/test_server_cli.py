@@ -43,6 +43,22 @@ class ServerCliTests(unittest.TestCase):
 
         self.assertEqual(mock_create_app.call_args.kwargs["expected_host"], "agentzoo.yourserver.com")
 
+    def test_main_disables_hostname_validation_when_configured(self):
+        with patch.object(sys, "argv", ["oauth2-gateway"]):
+            with patch.dict(
+                os.environ,
+                {"OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK": "false"},
+                clear=True,
+            ):
+                with (
+                    patch("oauth2_gateway.server._read_required_upstream_secret", return_value="shared-secret"),
+                    patch("oauth2_gateway.server.create_app", return_value=object()) as mock_create_app,
+                    patch("oauth2_gateway.server.uvicorn.run"),
+                ):
+                    server.main()
+
+        self.assertIs(mock_create_app.call_args.kwargs["enforce_host_validation"], False)
+
     def test_main_rejects_conflicting_public_hostname_configuration(self):
         with patch.object(sys, "argv", ["oauth2-gateway"]):
             with patch.dict(

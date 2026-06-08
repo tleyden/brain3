@@ -67,6 +67,20 @@ def _log_request_host_details(request: Request, *, route_name: str) -> None:
 
 def _validate_request_host(request: Request) -> JSONResponse | None:
     expected_host = getattr(request.app.state, "expected_host", None)
+    enforce_host_validation = getattr(request.app.state, "enforce_host_validation", True)
+
+    if not enforce_host_validation:
+        logger.warning(
+            (
+                "Skipping hostname validation because "
+                "OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK is disabled: "
+                "request_host=%r expected_host=%r"
+            ),
+            request.url.hostname,
+            expected_host,
+        )
+        return None
+
     if not expected_host:
         logger.warning(
             "Skipping hostname validation; configure either a named Cloudflare tunnel on your own domain or DIRECT_PUBLIC_ORIGIN_HOSTNAME for a direct public origin deployment."

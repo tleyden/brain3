@@ -28,6 +28,7 @@ Environment variables:
 - `CF_TUNNEL_NAME`: optional, only for a named Cloudflare tunnel on your domain
 - `CF_DOMAIN`: optional, only for a named Cloudflare tunnel on your domain
 - `DIRECT_PUBLIC_ORIGIN_HOSTNAME`: optional, only for a direct public origin behind Cloudflare proxy, such as `agenzoo.yourserver.com`
+- `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK`: optional boolean, defaults to `true`; controls whether requests must match the configured public hostname
 
 See [.env.template](.env.template).
 
@@ -215,7 +216,9 @@ Notes:
 - This repo does not currently ship helper scripts for the direct-origin path.
 - In the direct-origin path, Caddy or nginx is the component that handles local TLS, not `cloudflared`.
 - If you proxy through Cloudflare, use an origin TLS setup that matches your Cloudflare SSL/TLS mode. For example, `Full (Strict)` requires a valid origin certificate on the server.
-- Setting `DIRECT_PUBLIC_ORIGIN_HOSTNAME` enables strict hostname checking for this path.
+- Setting `DIRECT_PUBLIC_ORIGIN_HOSTNAME` gives the gateway an expected public hostname for this path.
+- `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=true` keeps strict hostname checking enabled and is the recommended setting.
+- If you set `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=false`, the gateway will skip hostname matching even when a public hostname is configured. This only affects hostname validation; it does not enable public-client OAuth, dynamic client registration, or any non-preregistered client access path.
 
 ## Scope
 

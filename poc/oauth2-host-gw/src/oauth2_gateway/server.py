@@ -15,8 +15,10 @@ from starlette.routing import Route
 
 from .config import (
     OAUTH2_GATEWAY_MCP_UPSTREAM_URL,
+    OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK,
     OAUTH2_GATEWAY_PORT,
     OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE,
+    resolve_enforce_host_validation,
     resolve_expected_host,
 )
 from .mcp_proxy import mcp_routes
@@ -54,6 +56,7 @@ def create_app(
     mcp_upstream_url: str = OAUTH2_GATEWAY_MCP_UPSTREAM_URL,
     mcp_upstream_secret: str = "",
     expected_host: str | None = None,
+    enforce_host_validation: bool = OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK,
     http_client_factory: Callable[[], httpx.AsyncClient] | None = None,
 ) -> Starlette:
     client_factory = http_client_factory or _default_http_client_factory
@@ -63,6 +66,7 @@ def create_app(
         app.state.mcp_upstream_url = mcp_upstream_url.rstrip("/")
         app.state.mcp_upstream_secret = mcp_upstream_secret
         app.state.expected_host = expected_host
+        app.state.enforce_host_validation = enforce_host_validation
         app.state.mcp_proxy_client = client_factory()
         try:
             yield
@@ -100,6 +104,7 @@ def main(argv: list[str] | None = None) -> None:
         create_app(
             mcp_upstream_secret=_read_required_upstream_secret(OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE),
             expected_host=resolve_expected_host(),
+            enforce_host_validation=resolve_enforce_host_validation(),
         ),
         host=args.host,
         port=OAUTH2_GATEWAY_PORT,

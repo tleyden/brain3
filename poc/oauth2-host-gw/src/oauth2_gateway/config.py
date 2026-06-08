@@ -38,6 +38,10 @@ def resolve_expected_host() -> str | None:
     return named_tunnel_host or direct_public_origin_host
 
 
+def resolve_enforce_host_validation() -> bool:
+    return _env_bool("OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", True)
+
+
 OAUTH2_GATEWAY_PORT = int(os.environ.get("OAUTH2_GATEWAY_PORT", "8421"))
 OAUTH2_GATEWAY_CLIENT_ID = os.environ.get("OAUTH2_GATEWAY_CLIENT_ID", "oauth2-gateway-client")
 OAUTH2_GATEWAY_CLIENT_SECRET = os.environ.get("OAUTH2_GATEWAY_CLIENT_SECRET", "")
@@ -47,6 +51,7 @@ OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE = os.environ.get(
     "OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
     "/tmp/agentzoo-mcp-upstream-secret",
 )
+OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK = resolve_enforce_host_validation()
 OAUTH2_PKCE_REQUIRED = _env_bool("OAUTH2_PKCE_REQUIRED", True)
 USERNAME = os.environ.get("USERNAME", "")
 PASSWORD = os.environ.get("PASSWORD", "")
