@@ -14,3 +14,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
 tracing = "0.1"
 urlencoding = "2"
+
+[dev-dependencies]
+axum-test = "17"
+tokio = { version = "1", features = ["full"] }
