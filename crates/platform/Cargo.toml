@@ -1,0 +1,16 @@
+[package]
+name = "brain3-platform"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+brain3-core = { path = "../core" }
+async-trait = "0.1"
+axum = "0.8"
+dotenvy = "0.15"
+reqwest = { version = "0.12", features = ["rustls-tls"], default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync"] }
+tracing = "0.1"
+urlencoding = "2"

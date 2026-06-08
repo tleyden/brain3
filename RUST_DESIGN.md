@@ -127,7 +127,7 @@ pub struct GatewayConfig {
     pub port: u16,
     pub host: String,
     pub oauth: OAuthConfig,
-    pub proxy: ProxyConfig,
+    pub proxy: MCPReverseProxyConfig,
     pub hostname_validation: HostnameValidationConfig,
 }
 
@@ -140,7 +140,7 @@ pub struct OAuthConfig {
     pub password: String,
 }
 
-pub struct ProxyConfig {
+pub struct MCPReverseProxyConfig {
     pub mcp_upstream_url: String,
     pub upstream_secret_file: PathBuf,
 }
@@ -793,8 +793,8 @@ This is the **only file** that knows `InMemoryAuthCodeStore`, `ReqwestMcpProxy`,
 | `OAUTH2_GATEWAY_CLIENT_ID` | `config.py:46` | `OAuthConfig.client_id` |
 | `OAUTH2_GATEWAY_CLIENT_SECRET` | `config.py:47` | `OAuthConfig.client_secret` |
 | `OAUTH2_GATEWAY_ACCESS_TOKEN` | `config.py:48` | `OAuthConfig.access_token` |
-| `OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `config.py:49` | `ProxyConfig.mcp_upstream_url` |
-| `OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `config.py:50-53` | `ProxyConfig.upstream_secret_file` |
+| `OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `config.py:49` | `MCPReverseProxyConfig.mcp_upstream_url` |
+| `OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `config.py:50-53` | `MCPReverseProxyConfig.upstream_secret_file` |
 | `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `config.py:54` | `HostnameValidationConfig.enforce` |
 | `OAUTH2_PKCE_REQUIRED` | `config.py:55` | `OAuthConfig.pkce_required` |
 | `USERNAME` | `config.py:56` | `OAuthConfig.username` |
@@ -893,10 +893,59 @@ Per AGENTS.MD: "Be very judicious about writing unit tests... It must just be co
 
 ---
 
-## Open Questions
+## Resolved Design Decisions
 
-1. **Streaming SSE support**: The Python PoC reads the full upstream response body before forwarding (`await upstream_response.aread()`). Should the Rust version support streaming for SSE? This matters for MCP's Server-Sent Events transport. **Recommendation**: Start with buffered (matching PoC), add streaming in M2.
+### 1. Streaming SSE: Buffered only (M1)
 
-2. **Graceful shutdown**: The Python server doesn't handle SIGTERM gracefully. Should Rust? **Recommendation**: Yes — `axum::serve` with `with_graceful_shutdown` and `tokio::signal::ctrl_c()` is trivial to add.
+The Python PoC reads the full upstream response body before forwarding (`await upstream_response.aread()`). The Rust version will do the same — buffer the entire upstream response, then send it to the client. No streaming.
 
-3. **`proxy_headers` / `forwarded_allow_ips`**: The Python server runs behind uvicorn with `proxy_headers=True` and `forwarded_allow_ips="*"`. Axum doesn't do this automatically. **Recommendation**: Parse `X-Forwarded-Host` and `X-Forwarded-Proto` in the HTTP adapter to reconstruct `base_url` for OAuth metadata endpoints. Use `axum::extract::ConnectInfo` if needed.
+This matches the working PoC exactly. Streaming SSE support for MCP's Server-Sent Events transport is deferred to a future milestone.
+
+### 2. Graceful Shutdown: Yes
+
+The Python server doesn't handle SIGTERM gracefully, but the Rust version will. Use `axum::serve` with `with_graceful_shutdown` and `tokio::signal::ctrl_c()`. This is trivial to add in Rust and is good practice — it lets in-flight requests complete before the process exits.
+
+```rust
+// In main.rs, after building the router:
+let listener = tokio::net::TcpListener::bind(&addr).await?;
+axum::serve(listener, router)
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
+
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c().await.expect("failed to install CTRL+C handler");
+    tracing::info!("Received shutdown signal, draining connections...");
+}
+```
+
+### 3. Proxy Headers: Parse X-Forwarded-Host / X-Forwarded-Proto
+
+The Python server runs behind uvicorn with `proxy_headers=True` and `forwarded_allow_ips="*"`, which means Starlette's `request.base_url` automatically uses `X-Forwarded-Host` and `X-Forwarded-Proto` when present.
+
+The Rust HTTP adapter layer will do the same. A helper function in the HTTP adapter reconstructs the effective base URL:
+
+```rust
+fn resolve_base_url(headers: &HeaderMap, original_uri: &Uri) -> String {
+    let proto = headers
+        .get("x-forwarded-proto")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("http");
+    let host = headers
+        .get("x-forwarded-host")
+        .or_else(|| headers.get("host"))
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("localhost");
+    format!("{}://{}", proto, host)
+}
+```
+
+This is used by:
+- `oauth_metadata` handler — to build `issuer`, `authorization_endpoint`, `token_endpoint`
+- `protected_resource_metadata` handler — to build `resource` and `authorization_servers`
+- `mcp_reverse_proxy` handler — to build the `resource_metadata` URL in `WWW-Authenticate` headers
+
+The domain and use case layers never see this — it's purely an HTTP adapter concern. The `X-Forwarded-*` headers are trusted unconditionally (matching the Python behavior of `forwarded_allow_ips="*"`), since the gateway is designed to sit behind Cloudflare Tunnel or a reverse proxy that sets these headers.
+
+### 4. Host Validation: Uses Effective Host
+
+The host validation logic (`validate_host` in the domain) receives the **effective** request host, which the HTTP adapter resolves from `X-Forwarded-Host` (if present) or the `Host` header. This matches the Python behavior where `request.url.hostname` reflects proxy headers.
