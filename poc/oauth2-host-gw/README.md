@@ -113,7 +113,7 @@ curl -i -X POST http://127.0.0.1:8421/oauth/register
 
 Expected: `404 Not Found`
 
-## Public Exposure Options
+## Options to Expose Server to Public Internet
 
 If this machine already has a public IPv4 address, Cloudflare Tunnel is not your only option.
 
