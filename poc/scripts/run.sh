@@ -255,7 +255,7 @@ prepare_gateway_log_path() {
         mkdir -p "$(dirname "$GATEWAY_LOG_PATH")"
         : >"$GATEWAY_LOG_PATH"
     else
-        GATEWAY_LOG_PATH="$(mktemp "${TMPDIR:-/tmp}/agentzoo-oauth2-gateway.XXXXXX.log")"
+        GATEWAY_LOG_PATH="$(mktemp "${TMPDIR:-/tmp}/agentzoo-oauth2-gateway.XXXXXX")"
     fi
 
     echo "OAuth gateway log: $GATEWAY_LOG_PATH"

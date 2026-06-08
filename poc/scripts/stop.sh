@@ -203,8 +203,14 @@ stop_container() {
 
         echo "Stopping container '$TARGET_CONTAINER_NAME' in Apple container runtime."
         container stop "$TARGET_CONTAINER_NAME" >/dev/null 2>&1 || true
-        container delete "$TARGET_CONTAINER_NAME" >/dev/null
-        echo "Container '$TARGET_CONTAINER_NAME' removed."
+
+        if container inspect "$TARGET_CONTAINER_NAME" >/dev/null 2>&1; then
+            container delete "$TARGET_CONTAINER_NAME" >/dev/null 2>&1
+            echo "Container '$TARGET_CONTAINER_NAME' removed."
+        else
+            echo "Container '$TARGET_CONTAINER_NAME' was auto-removed after stop."
+        fi
+
         return 0
     fi
 
