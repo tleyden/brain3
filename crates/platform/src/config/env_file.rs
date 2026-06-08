@@ -138,7 +138,9 @@ fn load_container_startup_config(
 ) -> Result<Option<ContainerStartupConfig>, ConfigError> {
     let runtime_str = env_var_or("BRAIN3_CONTAINER_RUNTIME", "");
     if runtime_str.is_empty() {
-        return Ok(None);
+        return Err(ConfigError::Missing(
+            "BRAIN3_CONTAINER_RUNTIME is required; set it to 'macos-container' or 'docker'".into(),
+        ));
     }
 
     let runtime = match runtime_str.trim() {
