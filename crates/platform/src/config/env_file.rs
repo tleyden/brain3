@@ -19,9 +19,15 @@ impl EnvFileConfigAdapter {
 
     fn load_env_file(&self) {
         if let Some(ref path) = self.env_path {
-            let _ = dotenvy::from_path(path);
+            match dotenvy::from_path(path) {
+                Ok(_) => tracing::info!(path = %path.display(), "loaded env file"),
+                Err(e) => tracing::warn!(path = %path.display(), error = %e, "failed to load env file"),
+            }
         } else {
-            let _ = dotenvy::dotenv();
+            match dotenvy::dotenv() {
+                Ok(path) => tracing::info!(path = %path.display(), "loaded .env file"),
+                Err(_) => tracing::warn!("no .env file found; falling back to environment variables"),
+            }
         }
     }
 }
@@ -44,16 +50,28 @@ impl ConfigPort for EnvFileConfigAdapter {
 
         let container = load_container_startup_config(&upstream_secret_file)?;
 
+        let mut missing = Vec::new();
+        let client_secret = require_nonempty("OAUTH2_GATEWAY_CLIENT_SECRET", &mut missing);
+        let access_token = require_nonempty("OAUTH2_GATEWAY_ACCESS_TOKEN", &mut missing);
+        let username = require_nonempty("USERNAME", &mut missing);
+        let password = require_nonempty("PASSWORD", &mut missing);
+        if !missing.is_empty() {
+            return Err(ConfigError::Missing(format!(
+                "required env vars not set: {}",
+                missing.join(", ")
+            )));
+        }
+
         Ok(GatewayConfig {
             port,
             host: "127.0.0.1".to_string(),
             oauth: OAuthConfig {
                 client_id: env_var_or("OAUTH2_GATEWAY_CLIENT_ID", "oauth2-gateway-client"),
-                client_secret: env_var_or("OAUTH2_GATEWAY_CLIENT_SECRET", ""),
-                access_token: env_var_or("OAUTH2_GATEWAY_ACCESS_TOKEN", ""),
+                client_secret,
+                access_token,
                 pkce_required: env_bool("OAUTH2_PKCE_REQUIRED", true),
-                username: env_var_or("USERNAME", ""),
-                password: env_var_or("PASSWORD", ""),
+                username,
+                password,
             },
             mcp_reverse_proxy: MCPReverseProxyConfig {
                 mcp_upstream_url: env_var_or(
@@ -73,6 +91,16 @@ impl ConfigPort for EnvFileConfigAdapter {
 
 fn env_var_or(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+fn require_nonempty(name: &str, errors: &mut Vec<String>) -> String {
+    match env::var(name) {
+        Ok(val) if !val.trim().is_empty() => val,
+        _ => {
+            errors.push(name.to_string());
+            String::new()
+        }
+    }
 }
 
 fn env_bool(name: &str, default: bool) -> bool {

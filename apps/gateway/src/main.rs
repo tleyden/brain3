@@ -43,6 +43,7 @@ async fn main() -> Result<()> {
 
     let config_adapter = EnvFileConfigAdapter::new(args.env_file);
     let config = Arc::new(config_adapter.load().context("failed to load configuration")?);
+    brain3_platform::config::log_config::log_startup_config(&config);
 
     let upstream_secret = brain3_platform::config::upstream_secret::read_or_create(
         &config.mcp_reverse_proxy.upstream_secret_file,
