@@ -86,6 +86,13 @@ pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + '
     let req = parse_authorize_request(&query);
 
     if let Err(e) = state.authorize.validate(&req) {
+        tracing::warn!(
+            client_id = %req.client_id,
+            redirect_uri = %req.redirect_uri,
+            response_type = %req.response_type,
+            error = ?e,
+            "authorize request rejected"
+        );
         return oauth_error_response(e);
     }
 
@@ -103,6 +110,13 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
     let req = parse_authorize_request(&form);
 
     if let Err(e) = state.authorize.validate(&req) {
+        tracing::warn!(
+            client_id = %req.client_id,
+            redirect_uri = %req.redirect_uri,
+            response_type = %req.response_type,
+            error = ?e,
+            "authorize POST rejected at validation"
+        );
         return oauth_error_response(e);
     }
 
@@ -114,6 +128,7 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
     let password = form.get("password").cloned().unwrap_or_default();
 
     if !state.authorize.check_credentials(&username, &password) {
+        tracing::warn!(username = %username, "authorize POST rejected: invalid credentials");
         return (
             StatusCode::UNAUTHORIZED,
             Html(render_login_form(&req, Some("Invalid username or password"))),

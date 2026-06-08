@@ -9,6 +9,7 @@
 - Security rule: this gateway is intentionally closed to preregistered clients only. Do not enable CIMD, DCR, public-client OAuth (`token_endpoint_auth_method=none`), or any other flow that allows access without the hardcoded client ID and client secret, unless explicitly requested by the user. Do not advertise OAuth capabilities the server is not supposed to allow, and do not expose `/oauth/register` in a way that hands out usable credentials or broadens access. Any auth change must preserve the policy that only explicitly preregistered clients can obtain tokens and reach protected MCP data.
 - Keep apps/gateway/src/main.rs as lean as possible.  Only add code that would otherwise be awkward in platform or core crates. 
 - To keep architecture simple, we only support remote mcp with https and oauth2.1, like the major apps require.  Local mcp access is not supported yet.  Therefore, in order to function, the gateway must have a public ingress via a cloudflare tunnel or otherwises.
+- We need fairly verbose logging and tracing to diagnose errors.  Just use the appropriate log level so we can control the noise.  Without this, its a black box.
 
 # Rust Development & Hexagonal Architecture: Best Practices
 
