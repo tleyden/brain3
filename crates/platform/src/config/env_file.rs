@@ -1,0 +1,231 @@
+use std::env;
+use std::path::PathBuf;
+
+use brain3_core::domain::errors::ConfigError;
+use brain3_core::domain::model::{
+    ContainerRuntime, ContainerStartupConfig, GatewayConfig, HostnameValidationConfig,
+    MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
+};
+use brain3_core::ports::config::ConfigPort;
+
+pub struct EnvFileConfigAdapter {
+    env_path: Option<PathBuf>,
+}
+
+impl EnvFileConfigAdapter {
+    pub fn new(env_path: Option<PathBuf>) -> Self {
+        Self { env_path }
+    }
+
+    fn load_env_file(&self) {
+        if let Some(ref path) = self.env_path {
+            match dotenvy::from_path(path) {
+                Ok(_) => tracing::info!(path = %path.display(), "loaded env file"),
+                Err(e) => tracing::warn!(path = %path.display(), error = %e, "failed to load env file"),
+            }
+        } else {
+            match dotenvy::dotenv() {
+                Ok(path) => tracing::info!(path = %path.display(), "loaded .env file"),
+                Err(_) => tracing::warn!("no .env file found; falling back to environment variables"),
+            }
+        }
+    }
+}
+
+impl ConfigPort for EnvFileConfigAdapter {
+    fn load(&self) -> Result<GatewayConfig, ConfigError> {
+        self.load_env_file();
+
+        let port = env_var_or("OAUTH2_GATEWAY_PORT", "8421")
+            .parse::<u16>()
+            .map_err(|e| ConfigError::Invalid(format!("OAUTH2_GATEWAY_PORT: {e}")))?;
+
+        let expected_host = resolve_expected_host()?;
+        let enforce_hostname = env_bool("OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
+
+        let upstream_secret_file = PathBuf::from(env_var_or(
+            "OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
+            "/tmp/brain3-mcp-upstream-secret",
+        ));
+
+        let container = load_container_startup_config(&upstream_secret_file)?;
+
+        let mut missing = Vec::new();
+        let client_secret = require_nonempty("OAUTH2_GATEWAY_CLIENT_SECRET", &mut missing);
+        let access_token = require_nonempty("OAUTH2_GATEWAY_ACCESS_TOKEN", &mut missing);
+        let username = require_nonempty("USERNAME", &mut missing);
+        let password = require_nonempty("PASSWORD", &mut missing);
+        if !missing.is_empty() {
+            return Err(ConfigError::Missing(format!(
+                "required env vars not set: {}",
+                missing.join(", ")
+            )));
+        }
+
+        let tunnel = load_tunnel_config(port)?;
+
+        Ok(GatewayConfig {
+            port,
+            host: "127.0.0.1".to_string(),
+            oauth: OAuthConfig {
+                client_id: env_var_or("OAUTH2_GATEWAY_CLIENT_ID", "oauth2-gateway-client"),
+                client_secret,
+                access_token,
+                pkce_required: env_bool("OAUTH2_PKCE_REQUIRED", true),
+                username,
+                password,
+            },
+            mcp_reverse_proxy: MCPReverseProxyConfig {
+                mcp_upstream_url: env_var_or(
+                    "OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
+                    "http://127.0.0.1:8420",
+                ),
+                upstream_secret_file,
+            },
+            hostname_validation: HostnameValidationConfig {
+                expected_host,
+                enforce: enforce_hostname,
+            },
+            container,
+            tunnel,
+        })
+    }
+}
+
+fn env_var_or(name: &str, default: &str) -> String {
+    env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+fn require_nonempty(name: &str, errors: &mut Vec<String>) -> String {
+    match env::var(name) {
+        Ok(val) if !val.trim().is_empty() => val,
+        _ => {
+            errors.push(name.to_string());
+            String::new()
+        }
+    }
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    match env::var(name) {
+        Ok(val) => !["0", "false", "no", "off"]
+            .contains(&val.trim().to_lowercase().as_str()),
+        Err(_) => default,
+    }
+}
+
+fn normalize_hostname(value: &str) -> String {
+    value.trim().trim_matches('.').to_lowercase()
+}
+
+fn named_tunnel_host() -> Option<String> {
+    let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
+    let domain = normalize_hostname(&env_var_or("CF_DOMAIN", ""));
+    if tunnel_name.is_empty() || domain.is_empty() {
+        return None;
+    }
+    Some(format!("{tunnel_name}.{domain}"))
+}
+
+fn direct_public_origin_hostname() -> Option<String> {
+    let hostname = normalize_hostname(&env_var_or("DIRECT_PUBLIC_ORIGIN_HOSTNAME", ""));
+    if hostname.is_empty() {
+        None
+    } else {
+        Some(hostname)
+    }
+}
+
+fn load_container_startup_config(
+    upstream_secret_file: &PathBuf,
+) -> Result<Option<ContainerStartupConfig>, ConfigError> {
+    let runtime_str = env_var_or("BRAIN3_CONTAINER_RUNTIME", "");
+    if runtime_str.is_empty() {
+        return Err(ConfigError::Missing(
+            "BRAIN3_CONTAINER_RUNTIME is required; set it to 'macos-container' or 'docker'".into(),
+        ));
+    }
+
+    let runtime = match runtime_str.trim() {
+        "docker" => ContainerRuntime::Docker,
+        "macos-container" => ContainerRuntime::MacOSContainer,
+        other => {
+            return Err(ConfigError::Invalid(format!(
+                "BRAIN3_CONTAINER_RUNTIME: unknown value '{other}'; expected 'docker' or 'macos-container'"
+            )))
+        }
+    };
+
+    let vault_path_str = env_var_or("BRAIN3_VAULT_PATH", "");
+    if vault_path_str.is_empty() {
+        return Err(ConfigError::Missing(
+            "BRAIN3_VAULT_PATH is required when BRAIN3_CONTAINER_RUNTIME is set".into(),
+        ));
+    }
+
+    let host_port = env_var_or("BRAIN3_CONTAINER_HOST_PORT", "8420")
+        .parse::<u16>()
+        .map_err(|e| ConfigError::Invalid(format!("BRAIN3_CONTAINER_HOST_PORT: {e}")))?;
+
+    let upstream_secret_dir = upstream_secret_file
+        .parent()
+        .unwrap_or(std::path::Path::new("/tmp"))
+        .to_path_buf();
+
+    Ok(Some(ContainerStartupConfig {
+        runtime,
+        image: env_var_or("BRAIN3_CONTAINER_IMAGE", "obsidian-mcp-server:latest"),
+        container_name: env_var_or("BRAIN3_CONTAINER_NAME", "obsidian-mcp-server"),
+        vault_path: PathBuf::from(vault_path_str),
+        upstream_secret_dir,
+        host_port,
+    }))
+}
+
+fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigError> {
+    let quick = env_bool("CF_QUICK_TUNNEL", false);
+    let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
+    let domain = normalize_hostname(&env_var_or("CF_DOMAIN", ""));
+    let named = !tunnel_name.is_empty() && !domain.is_empty();
+
+    if quick && named {
+        return Err(ConfigError::Conflict(
+            "Both CF_QUICK_TUNNEL and CF_TUNNEL_NAME/CF_DOMAIN are set. Choose one tunnel type.".into(),
+        ));
+    }
+
+    if quick {
+        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
+    }
+
+    if named {
+        let config_file_str = env_var_or("CF_TUNNEL_CONFIG_FILE", "");
+        if config_file_str.is_empty() {
+            return Err(ConfigError::Missing(
+                "CF_TUNNEL_CONFIG_FILE is required when CF_TUNNEL_NAME and CF_DOMAIN are set".into(),
+            ));
+        }
+        return Ok(Some(TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            domain,
+            config_file: PathBuf::from(config_file_str),
+        }));
+    }
+
+    Ok(None)
+}
+
+fn resolve_expected_host() -> Result<Option<String>, ConfigError> {
+    let named = named_tunnel_host();
+    let direct = direct_public_origin_hostname();
+
+    if named.is_some() && direct.is_some() {
+        return Err(ConfigError::Conflict(
+            "Both named Cloudflare tunnel hostname settings (CF_TUNNEL_NAME and CF_DOMAIN) \
+             and DIRECT_PUBLIC_ORIGIN_HOSTNAME are set. Choose only one public hostname configuration."
+                .into(),
+        ));
+    }
+
+    Ok(named.or(direct))
+}

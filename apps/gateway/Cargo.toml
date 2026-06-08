@@ -1,0 +1,18 @@
+[package]
+name = "brain3-gateway"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "brain3-gateway"
+path = "src/main.rs"
+
+[dependencies]
+brain3-core = { path = "../../crates/core" }
+brain3-platform = { path = "../../crates/platform" }
+anyhow = "1"
+axum = "0.8"
+clap = { version = "4", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

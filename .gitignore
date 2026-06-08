@@ -1,1 +1,10 @@
 *~
+.env
+.DS_Store
+
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+.brain3_test_vault
