@@ -56,6 +56,21 @@ async fn main() -> Result<()> {
             .context("failed to start MCP container")?;
     }
 
+    let _tunnel = if let Some(ref tunnel_config) = config.tunnel {
+        match brain3_platform::tunnel::start_tunnel(tunnel_config).await {
+            Ok((adapter, info)) => {
+                tracing::info!(url = %info.public_url, "tunnel started");
+                Some(adapter)
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "failed to start tunnel");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
 

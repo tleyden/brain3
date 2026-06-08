@@ -8,6 +8,7 @@ pub struct GatewayConfig {
     pub mcp_reverse_proxy: MCPReverseProxyConfig,
     pub hostname_validation: HostnameValidationConfig,
     pub container: Option<ContainerStartupConfig>,
+    pub tunnel: Option<TunnelConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,11 +79,7 @@ pub struct ContainerStartupConfig {
 }
 
 #[derive(Debug, Clone)]
-pub enum TunnelProvider {
-    Cloudflare,
-}
-
-#[derive(Debug, Clone)]
-pub struct TunnelConfig {
-    pub provider: TunnelProvider,
+pub enum TunnelConfig {
+    CloudflareQuick { local_port: u16 },
+    CloudflareNamed { tunnel_name: String, domain: String, config_file: PathBuf },
 }

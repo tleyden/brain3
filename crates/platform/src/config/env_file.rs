@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
     ContainerRuntime, ContainerStartupConfig, GatewayConfig, HostnameValidationConfig,
-    MCPReverseProxyConfig, OAuthConfig,
+    MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
 };
 use brain3_core::ports::config::ConfigPort;
 
@@ -62,6 +62,8 @@ impl ConfigPort for EnvFileConfigAdapter {
             )));
         }
 
+        let tunnel = load_tunnel_config(port)?;
+
         Ok(GatewayConfig {
             port,
             host: "127.0.0.1".to_string(),
@@ -85,6 +87,7 @@ impl ConfigPort for EnvFileConfigAdapter {
                 enforce: enforce_hostname,
             },
             container,
+            tunnel,
         })
     }
 }
@@ -177,6 +180,39 @@ fn load_container_startup_config(
         upstream_secret_dir,
         host_port,
     }))
+}
+
+fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigError> {
+    let quick = env_bool("CF_QUICK_TUNNEL", false);
+    let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
+    let domain = normalize_hostname(&env_var_or("CF_DOMAIN", ""));
+    let named = !tunnel_name.is_empty() && !domain.is_empty();
+
+    if quick && named {
+        return Err(ConfigError::Conflict(
+            "Both CF_QUICK_TUNNEL and CF_TUNNEL_NAME/CF_DOMAIN are set. Choose one tunnel type.".into(),
+        ));
+    }
+
+    if quick {
+        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
+    }
+
+    if named {
+        let config_file_str = env_var_or("CF_TUNNEL_CONFIG_FILE", "");
+        if config_file_str.is_empty() {
+            return Err(ConfigError::Missing(
+                "CF_TUNNEL_CONFIG_FILE is required when CF_TUNNEL_NAME and CF_DOMAIN are set".into(),
+            ));
+        }
+        return Ok(Some(TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            domain,
+            config_file: PathBuf::from(config_file_str),
+        }));
+    }
+
+    Ok(None)
 }
 
 fn resolve_expected_host() -> Result<Option<String>, ConfigError> {

@@ -1,4 +1,4 @@
-use brain3_core::domain::model::GatewayConfig;
+use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
 
 pub fn log_startup_config(config: &GatewayConfig) {
     tracing::info!(
@@ -17,8 +17,20 @@ pub fn log_startup_config(config: &GatewayConfig) {
             "{:?} image={} name={} vault={} port={}",
             c.runtime, c.image, c.container_name, c.vault_path.display(), c.host_port
         )),
+        tunnel = ?config.tunnel.as_ref().map(tunnel_summary),
         "startup config"
     );
+}
+
+fn tunnel_summary(t: &TunnelConfig) -> String {
+    match t {
+        TunnelConfig::CloudflareQuick { local_port } => {
+            format!("cloudflare-quick port={local_port}")
+        }
+        TunnelConfig::CloudflareNamed { tunnel_name, domain, config_file } => {
+            format!("cloudflare-named {tunnel_name}.{domain} config={}", config_file.display())
+        }
+    }
 }
 
 fn mask(s: &str) -> &str {
