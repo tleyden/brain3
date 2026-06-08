@@ -200,7 +200,8 @@ Typical default-mode edit loop:
 This:
 
 - mounts the host vault into the container at `/vault`
-- mounts a host-managed shared-secret file into the container at `/run/agentzoo/upstream_secret`
+- mounts the host directory containing the shared-secret file read-only into `/run/agentzoo`
+- exposes the shared-secret file inside the container at `/run/agentzoo/upstream_secret`
 - sets `VAULT_PATH=/vault` inside the container
 - publishes `127.0.0.1:8420` on the host to port `8420` in the container
 
