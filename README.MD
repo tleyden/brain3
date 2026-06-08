@@ -22,8 +22,8 @@ You can also view and update your Brain3 repository via Obsidian directly, howev
                    │ HTTPS (MCP over OAuth2)
                    ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  Cloudflare Tunnel                                           │
-│  (encrypted tunnel to your machine — no open ports needed)   │
+│  Cloudflare Proxy + Caddy/nginx                              │
+│  TLS termination; reverse-proxies to localhost:8421          │
 └──────────────────┬───────────────────────────────────────────┘
                    │ HTTP localhost:8421
                    ▼
@@ -55,7 +55,7 @@ Two components run on your machine:
 | macOS (Apple Silicon) | — |
 | Rust toolchain | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | Apple `container` CLI | `brew install container` |
-| `cloudflared` | `brew install cloudflared` |
+| `cloudflared` | `brew install cloudflared` *(optional — only needed for Cloudflare Tunnel approach)* |
 | Python 3 | Bundled with macOS or `brew install python` |
 | `uv` | `brew install uv` |
 
@@ -100,11 +100,14 @@ USERNAME=your_username
 PASSWORD=your_password
 BRAIN3_CONTAINER_RUNTIME=macos-container
 BRAIN3_VAULT_PATH=/absolute/path/to/your/vault
+DIRECT_PUBLIC_ORIGIN_HOSTNAME=brain3.yourdomain.com
 ```
 
 The username and password are the credentials you will enter when your AI app prompts you to sign in.
 
 Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian vault or markdown folder. Use `docker` instead of `macos-container` for `BRAIN3_CONTAINER_RUNTIME` if you prefer Docker.
+
+Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` to the public hostname your Caddy or nginx instance is serving TLS on (e.g. `brain3.yourdomain.com`). The gateway uses this for hostname validation.
 
 ### 4. Start the gateway
 
@@ -126,15 +129,21 @@ curl -s http://127.0.0.1:8421/health
 curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server | python3 -m json.tool
 ```
 
-### 6. Expose via Cloudflare Tunnel
+### 6. Expose via direct public origin
 
-For your AI app to reach Brain3, you need a public URL. The quickest way:
+This setup uses a direct public origin: Caddy or nginx terminates TLS and reverse-proxies to `127.0.0.1:8421`, optionally sitting behind Cloudflare proxy for DDoS protection.
 
-```bash
-cloudflared tunnel --url http://localhost:8421
+Example minimal Caddyfile:
+
+```
+brain3.yourdomain.com {
+    reverse_proxy 127.0.0.1:8421
+}
 ```
 
-`cloudflared` prints a temporary public URL like `https://xxx-yyy-zzz.trycloudflare.com`. Copy this URL.
+Make sure `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` matches the hostname Caddy is serving (e.g. `brain3.yourdomain.com`). The gateway enforces this to reject misdirected requests.
+
+If you'd rather use a Cloudflare Tunnel instead, see [Exposing to the Public Internet](#exposing-to-the-public-internet) below.
 
 ### 7. Connect your AI app
 
@@ -142,7 +151,7 @@ In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), 
 
 | Field | Value |
 |---|---|
-| Server URL | The Cloudflare Tunnel URL from step 6 |
+| Server URL | `https://brain3.yourdomain.com` (your public hostname from step 6) |
 | Client ID | `oauth2-gateway-client` (or whatever you set in `.env`) |
 | Client Secret | The value of `OAUTH2_GATEWAY_CLIENT_SECRET` from your `.env` |
 
@@ -221,7 +230,19 @@ Once connected, your AI app has access to these vault tools:
 
 ## Exposing to the Public Internet
 
-### Quick temporary tunnel (recommended for testing)
+### Direct public origin (recommended)
+
+If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; the gateway uses it for hostname validation.
+
+Example minimal Caddyfile:
+
+```
+brain3.yourdomain.com {
+    reverse_proxy 127.0.0.1:8421
+}
+```
+
+### Quick temporary Cloudflare Tunnel (for testing)
 
 ```bash
 cloudflared tunnel --url http://localhost:8421
@@ -229,18 +250,14 @@ cloudflared tunnel --url http://localhost:8421
 
 No DNS, no config — just a temporary public URL. The URL changes each time you restart the tunnel.
 
-### Named tunnel on your domain
+### Named Cloudflare Tunnel on your domain
 
-For a stable hostname like `brain3.yourdomain.com`:
+For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel:
 
 1. Log into Cloudflare: `cloudflared tunnel login`
 2. Set `CF_TUNNEL_NAME` and `CF_DOMAIN` in your `.env`
 3. Run setup once: `./scripts/setup-cf-tunnel-with-domain.sh`
 4. Start the tunnel: `./scripts/run-cf-tunnel-with-domain.sh`
-
-### Direct public origin
-
-If your machine already has a public IP, you can use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname. See the configuration reference above for details.
 
 ## Development
 
