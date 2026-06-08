@@ -11,6 +11,7 @@ from starlette.routing import Route
 from . import config
 
 logger = logging.getLogger(__name__)
+UPSTREAM_SHARED_SECRET_HEADER = "x-agentzoo-upstream-secret"
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -23,7 +24,12 @@ HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 
-REQUEST_STRIP_HEADERS = HOP_BY_HOP_HEADERS | {"authorization", "content-length", "host"}
+REQUEST_STRIP_HEADERS = HOP_BY_HOP_HEADERS | {
+    "authorization",
+    "content-length",
+    "host",
+    UPSTREAM_SHARED_SECRET_HEADER,
+}
 
 
 def _base_url(request: Request) -> str:
@@ -98,12 +104,14 @@ async def mcp_reverse_proxy(request: Request) -> Response | JSONResponse:
 
     client: httpx.AsyncClient = request.app.state.mcp_proxy_client
     upstream_url = _build_upstream_url(request)
+    upstream_headers = _filter_request_headers(request)
+    upstream_headers[UPSTREAM_SHARED_SECRET_HEADER] = request.app.state.mcp_upstream_secret
 
     try:
         upstream_request = client.build_request(
             request.method,
             upstream_url,
-            headers=_filter_request_headers(request),
+            headers=upstream_headers,
             content=await request.body(),
         )
         upstream_response = await client.send(upstream_request, stream=True)

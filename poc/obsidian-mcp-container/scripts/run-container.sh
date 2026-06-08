@@ -3,6 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+POC_ROOT="$(cd "$PROJECT_ROOT/.." && pwd)"
+ENSURE_UPSTREAM_SECRET="$POC_ROOT/scripts/ensure-mcp-upstream-secret.sh"
+BUILD_CONTAINER_SCRIPT="$PROJECT_ROOT/scripts/build-container.sh"
 
 if [ -f "$PROJECT_ROOT/.env" ]; then
     set -o allexport
@@ -17,7 +20,9 @@ CONTAINER_NAME="${CONTAINER_NAME:-obsidian-mcp-server}"
 HOST_PORT="${HOST_PORT:-8420}"
 HOST_VAULT_PATH="${HOST_VAULT_PATH:-${VAULT_PATH:-}}"
 SOURCE_MOUNT_PATH="/workspace/obsidian-mcp-container"
-CONTAINER_RUNTIME="macos-container"
+CONTAINER_UPSTREAM_SECRET_DIR="/run/agentzoo"
+CONTAINER_UPSTREAM_SECRET_PATH="${CONTAINER_UPSTREAM_SECRET_DIR}/upstream_secret"
+CONTAINER_RUNTIME=""
 HOST_BIND_ADDRESS="127.0.0.1"
 CONTAINER_LISTEN_HOST="0.0.0.0"
 CONTAINER_PORT="8420"
@@ -26,11 +31,12 @@ REMOVE=true
 
 usage() {
     cat <<'EOF'
-Usage: ./scripts/run-container.sh [options]
+Usage: ./scripts/run-container.sh --container-runtime <macos-container|docker> [options]
 
 Options:
-  --container-runtime    Run with macos-container or docker (default: macos-container)
-  --bind-source         Run the mounted host source tree instead of the code baked into the image
+  --container-runtime    Required: macos-container or docker
+  --bind-mount-sourcecode
+                        Run the mounted host source tree instead of the code baked into the image
   --image               Run the code baked into the image (default)
   --vault-path PATH     Host vault directory to mount into /vault
   --port PORT           Host loopback port to publish as 127.0.0.1:PORT -> container port 8420
@@ -70,6 +76,8 @@ print_networking_summary() {
 print_mount_summary() {
     echo "Mounts:"
     echo "  ${HOST_VAULT_PATH} -> /vault"
+    echo "  ${HOST_UPSTREAM_SECRET_DIR} -> ${CONTAINER_UPSTREAM_SECRET_DIR} (ro)"
+    echo "  secret file: ${HOST_UPSTREAM_SECRET_PATH} -> ${CONTAINER_UPSTREAM_SECRET_PATH}"
 
     if [ "$MODE" = "bind" ]; then
         echo "  ${PROJECT_ROOT} -> ${SOURCE_MOUNT_PATH} (ro)"
@@ -90,17 +98,27 @@ require_docker() {
     fi
 }
 
+configure_upstream_secret_mount() {
+    if [ ! -f "$HOST_UPSTREAM_SECRET_PATH" ]; then
+        echo "Error: upstream shared secret file does not exist: $HOST_UPSTREAM_SECRET_PATH" >&2
+        exit 1
+    fi
+
+    HOST_UPSTREAM_SECRET_DIR="$(dirname "$HOST_UPSTREAM_SECRET_PATH")"
+    CONTAINER_UPSTREAM_SECRET_PATH="${CONTAINER_UPSTREAM_SECRET_DIR}/$(basename "$HOST_UPSTREAM_SECRET_PATH")"
+}
+
 ensure_runtime_image_exists() {
     if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
         if ! container image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
             echo "Error: image not found in Apple container image store: $IMAGE_NAME" >&2
-            echo "Build it with: ./scripts/build-container.sh --container-runtime macos-container" >&2
+            echo "Build it with: $BUILD_CONTAINER_SCRIPT --container-runtime macos-container" >&2
             exit 1
         fi
     else
         if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
             echo "Error: image not found in Docker image store: $IMAGE_NAME" >&2
-            echo "Build it with: ./scripts/build-container.sh --container-runtime docker" >&2
+            echo "Build it with: $BUILD_CONTAINER_SCRIPT --container-runtime docker" >&2
             exit 1
         fi
     fi
@@ -154,7 +172,7 @@ while [ "$#" -gt 0 ]; do
             CONTAINER_RUNTIME="$2"
             shift 2
             ;;
-        --bind-source)
+        --bind-mount-sourcecode)
             MODE="bind"
             shift
             ;;
@@ -198,6 +216,12 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
+if [ -z "$CONTAINER_RUNTIME" ]; then
+    echo "Error: --container-runtime is required. Choose one of: macos-container, docker." >&2
+    usage >&2
+    exit 1
+fi
+
 case "$CONTAINER_RUNTIME" in
     macos-container)
         require_macos_container
@@ -222,6 +246,15 @@ if [ ! -d "$HOST_VAULT_PATH" ]; then
     exit 1
 fi
 
+if [ ! -x "$ENSURE_UPSTREAM_SECRET" ]; then
+    echo "Error: missing helper script: $ENSURE_UPSTREAM_SECRET" >&2
+    exit 1
+fi
+
+HOST_UPSTREAM_SECRET_PATH="$("$ENSURE_UPSTREAM_SECRET")"
+
+configure_upstream_secret_mount
+
 ensure_runtime_image_exists
 check_and_prompt_existing_container
 
@@ -232,7 +265,9 @@ run_args=(
     --publish "${HOST_BIND_ADDRESS}:${HOST_PORT}:${CONTAINER_PORT}"
     --env "VAULT_MCP_HOST=${CONTAINER_LISTEN_HOST}"
     --env "VAULT_PATH=/vault"
+    --env "UPSTREAM_SHARED_SECRET_FILE=${CONTAINER_UPSTREAM_SECRET_PATH}"
     --mount "type=bind,source=${HOST_VAULT_PATH},target=/vault"
+    --mount "type=bind,source=${HOST_UPSTREAM_SECRET_DIR},target=${CONTAINER_UPSTREAM_SECRET_DIR},readonly"
 )
 
 if [ -n "${VAULT_MCP_ALLOWED_HOSTS:-}" ]; then

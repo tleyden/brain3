@@ -7,6 +7,8 @@ VAULT_MCP_PORT = int(os.environ.get("VAULT_MCP_PORT", "8420"))
 
 _extra = os.environ.get("VAULT_MCP_ALLOWED_HOSTS", "")
 VAULT_MCP_EXTRA_ALLOWED_HOSTS: list[str] = [host.strip() for host in _extra.split(",") if host.strip()]
+UPSTREAM_SHARED_SECRET_FILE = os.environ.get("UPSTREAM_SHARED_SECRET_FILE", "/run/agentzoo/upstream_secret")
+UPSTREAM_SHARED_SECRET_HEADER = "x-agentzoo-upstream-secret"
 
 MAX_CONTENT_SIZE = 1_000_000
 MAX_BATCH_SIZE = 20

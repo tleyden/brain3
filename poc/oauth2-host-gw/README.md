@@ -6,6 +6,7 @@ It keeps only:
 - OAuth metadata discovery
 - preregistered confidential-client authorization-code handling
 - token exchange with PKCE support
+- shared-secret authentication to the private MCP upstream
 - a tiny CLI HTTP runner
 - optional helper scripts for Cloudflare Tunnel exposure
 
@@ -36,6 +37,7 @@ See [.env.template](.env.template).
 - CIMD and other public-client registration methods are disabled.
 - The token endpoint requires `client_secret_post` for the authorization-code exchange.
 - Protected MCP traffic still requires the bearer token returned by the token exchange.
+- The gateway also authenticates itself to the private MCP upstream with a shared secret, so direct calls to the upstream port can be rejected.
 
 ## Prerequisites
 
@@ -63,6 +65,8 @@ Once `uv` is installed, the run commands are the same on macOS and Linux.
 uv sync
 uv run oauth2-gateway
 ```
+
+The wrapper script `./scripts/start-oauth2-server.sh` also makes sure the private upstream shared-secret file exists before starting the gateway.
 
 By default the gateway binds only to `127.0.0.1`. That default is correct for:
 - Cloudflare Tunnel

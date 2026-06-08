@@ -7,14 +7,14 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 IMAGE_NAME="${IMAGE_NAME:-obsidian-mcp-server:latest}"
 IMAGE_ARCH="${IMAGE_ARCH:-arm64}"
 CONTAINERFILE_PATH="${CONTAINERFILE_PATH:-$PROJECT_ROOT/Containerfile}"
-CONTAINER_RUNTIME="macos-container"
+CONTAINER_RUNTIME=""
 
 usage() {
     cat <<'EOF'
-Usage: ./scripts/build-container.sh [options]
+Usage: ./scripts/build-container.sh --container-runtime <macos-container|docker> [options]
 
 Options:
-  --container-runtime RUNTIME   Build with macos-container or docker (default: macos-container)
+  --container-runtime RUNTIME   Required: macos-container or docker
   -h, --help                    Show this help
 EOF
 }
@@ -55,6 +55,12 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -z "$CONTAINER_RUNTIME" ]; then
+    echo "Error: --container-runtime is required. Choose one of: macos-container, docker." >&2
+    usage >&2
+    exit 1
+fi
 
 case "$CONTAINER_RUNTIME" in
     macos-container|docker)
