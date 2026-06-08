@@ -1,3 +1,4 @@
+use crate::domain::errors::ContainerError;
 use crate::domain::model::ContainerConfig;
 
 #[derive(Debug, Clone)]
@@ -5,9 +6,10 @@ pub struct ContainerId(pub String);
 
 #[async_trait::async_trait]
 pub trait ContainerPort: Send + Sync {
-    async fn exists(&self, id: &ContainerId) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-    async fn is_running(&self, id: &ContainerId) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
-    async fn create(&self, config: &ContainerConfig) -> Result<ContainerId, Box<dyn std::error::Error + Send + Sync>>;
-    async fn start(&self, id: &ContainerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
-    async fn stop(&self, id: &ContainerId) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+    async fn image_exists(&self, image: &str) -> Result<bool, ContainerError>;
+    async fn exists(&self, id: &ContainerId) -> Result<bool, ContainerError>;
+    async fn is_running(&self, id: &ContainerId) -> Result<bool, ContainerError>;
+    async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError>;
+    async fn stop(&self, id: &ContainerId) -> Result<(), ContainerError>;
+    async fn remove(&self, id: &ContainerId) -> Result<(), ContainerError>;
 }

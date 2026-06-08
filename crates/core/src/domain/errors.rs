@@ -60,6 +60,20 @@ pub enum ProxyError {
 }
 
 #[derive(Debug, Error)]
+pub enum ContainerError {
+    #[error("container runtime not found: {0}")]
+    RuntimeNotFound(String),
+    #[error("image not found: {0}")]
+    ImageNotFound(String),
+    #[error("command failed (exit {code}): {stderr}")]
+    CommandFailed { code: i32, stderr: String },
+    #[error("command could not be spawned: {0}")]
+    SpawnFailed(String),
+    #[error("container error: {0}")]
+    Other(String),
+}
+
+#[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("missing config: {0}")]
     Missing(String),

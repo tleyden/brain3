@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
-    GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig,
+    ContainerRuntime, ContainerStartupConfig, GatewayConfig, HostnameValidationConfig,
+    MCPReverseProxyConfig, OAuthConfig,
 };
 use brain3_core::ports::config::ConfigPort;
 
@@ -36,6 +37,13 @@ impl ConfigPort for EnvFileConfigAdapter {
         let expected_host = resolve_expected_host()?;
         let enforce_hostname = env_bool("OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
 
+        let upstream_secret_file = PathBuf::from(env_var_or(
+            "OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
+            "/tmp/brain3-mcp-upstream-secret",
+        ));
+
+        let container = load_container_startup_config(&upstream_secret_file)?;
+
         Ok(GatewayConfig {
             port,
             host: "127.0.0.1".to_string(),
@@ -52,15 +60,13 @@ impl ConfigPort for EnvFileConfigAdapter {
                     "OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
                     "http://127.0.0.1:8420",
                 ),
-                upstream_secret_file: PathBuf::from(env_var_or(
-                    "OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
-                    "/tmp/brain3-mcp-upstream-secret",
-                )),
+                upstream_secret_file,
             },
             hostname_validation: HostnameValidationConfig {
                 expected_host,
                 enforce: enforce_hostname,
             },
+            container,
         })
     }
 }
@@ -97,6 +103,50 @@ fn direct_public_origin_hostname() -> Option<String> {
     } else {
         Some(hostname)
     }
+}
+
+fn load_container_startup_config(
+    upstream_secret_file: &PathBuf,
+) -> Result<Option<ContainerStartupConfig>, ConfigError> {
+    let runtime_str = env_var_or("BRAIN3_CONTAINER_RUNTIME", "");
+    if runtime_str.is_empty() {
+        return Ok(None);
+    }
+
+    let runtime = match runtime_str.trim() {
+        "docker" => ContainerRuntime::Docker,
+        "macos-container" => ContainerRuntime::MacOSContainer,
+        other => {
+            return Err(ConfigError::Invalid(format!(
+                "BRAIN3_CONTAINER_RUNTIME: unknown value '{other}'; expected 'docker' or 'macos-container'"
+            )))
+        }
+    };
+
+    let vault_path_str = env_var_or("BRAIN3_VAULT_PATH", "");
+    if vault_path_str.is_empty() {
+        return Err(ConfigError::Missing(
+            "BRAIN3_VAULT_PATH is required when BRAIN3_CONTAINER_RUNTIME is set".into(),
+        ));
+    }
+
+    let host_port = env_var_or("BRAIN3_CONTAINER_HOST_PORT", "8420")
+        .parse::<u16>()
+        .map_err(|e| ConfigError::Invalid(format!("BRAIN3_CONTAINER_HOST_PORT: {e}")))?;
+
+    let upstream_secret_dir = upstream_secret_file
+        .parent()
+        .unwrap_or(std::path::Path::new("/tmp"))
+        .to_path_buf();
+
+    Ok(Some(ContainerStartupConfig {
+        runtime,
+        image: env_var_or("BRAIN3_CONTAINER_IMAGE", "obsidian-mcp-server:latest"),
+        container_name: env_var_or("BRAIN3_CONTAINER_NAME", "obsidian-mcp-server"),
+        vault_path: PathBuf::from(vault_path_str),
+        upstream_secret_dir,
+        host_port,
+    }))
 }
 
 fn resolve_expected_host() -> Result<Option<String>, ConfigError> {

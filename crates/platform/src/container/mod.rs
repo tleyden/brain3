@@ -1,2 +1,7 @@
-// Container adapters will be implemented in a future milestone.
-// The ContainerPort trait is defined in brain3-core::ports::container.
+pub mod docker;
+pub mod macos_container;
+mod process;
+pub mod startup;
+
+pub use docker::DockerContainerAdapter;
+pub use macos_container::MacOsContainerAdapter;

@@ -8,6 +8,7 @@ use tracing_subscriber::EnvFilter;
 use brain3_core::ports::config::ConfigPort;
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
+use brain3_platform::container::startup::ensure_mcp_container;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
@@ -46,6 +47,13 @@ async fn main() -> Result<()> {
     let upstream_secret = brain3_platform::config::upstream_secret::read_or_create(
         &config.mcp_reverse_proxy.upstream_secret_file,
     )?;
+
+    if let Some(ref startup) = config.container {
+        ensure_mcp_container(startup)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))
+            .context("failed to start MCP container")?;
+    }
 
     let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());

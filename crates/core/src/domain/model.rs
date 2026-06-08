@@ -7,6 +7,7 @@ pub struct GatewayConfig {
     pub oauth: OAuthConfig,
     pub mcp_reverse_proxy: MCPReverseProxyConfig,
     pub hostname_validation: HostnameValidationConfig,
+    pub container: Option<ContainerStartupConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,11 +38,25 @@ pub enum ContainerRuntime {
     MacOSContainer,
 }
 
+/// Config passed to ContainerPort::run — runtime-agnostic.
 #[derive(Debug, Clone)]
 pub struct ContainerConfig {
-    pub runtime: ContainerRuntime,
     pub image: String,
+    pub name: String,
+    pub port_mappings: Vec<PortMapping>,
+    pub env_vars: Vec<(String, String)>,
     pub bind_mounts: Vec<BindMount>,
+    /// "uid:gid" string; None means run as container default user.
+    pub user: Option<String>,
+    pub detach: bool,
+    pub remove_on_exit: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct PortMapping {
+    pub host_address: String,
+    pub host_port: u16,
+    pub container_port: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +64,17 @@ pub struct BindMount {
     pub host_path: PathBuf,
     pub container_path: PathBuf,
     pub readonly: bool,
+}
+
+/// High-level startup parameters; gateway uses this to build a ContainerConfig.
+#[derive(Debug, Clone)]
+pub struct ContainerStartupConfig {
+    pub runtime: ContainerRuntime,
+    pub image: String,
+    pub container_name: String,
+    pub vault_path: PathBuf,
+    pub upstream_secret_dir: PathBuf,
+    pub host_port: u16,
 }
 
 #[derive(Debug, Clone)]
