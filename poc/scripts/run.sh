@@ -11,7 +11,7 @@ GATEWAY_HOST="127.0.0.1"
 GATEWAY_PORT="8421"
 GATEWAY_START_TIMEOUT_SECS="${GATEWAY_START_TIMEOUT_SECS:-15}"
 GATEWAY_STOP_TIMEOUT_SECS="${GATEWAY_STOP_TIMEOUT_SECS:-10}"
-GATEWAY_LOG_PATH="${GATEWAY_LOG_PATH:-/tmp/agentzoo-oauth2-gateway.log}"
+GATEWAY_LOG_PATH="${GATEWAY_LOG_PATH:-}"
 CONTAINER_RUNTIME=""
 CONTAINER_RUN_ARGS=()
 
@@ -25,6 +25,7 @@ Behavior:
   - If the gateway is already healthy, ask whether to reuse it, restart it, or abort.
   - If the gateway port is occupied by a different process, abort with guidance.
   - If the gateway cannot become healthy, abort before starting the container.
+  - Gateway stdout/stderr is redirected to a temp log file unless GATEWAY_LOG_PATH is set.
   - The container runtime must be specified explicitly on every invocation.
 
 Common container-run args:
@@ -249,11 +250,22 @@ wait_for_gateway_health() {
     return 1
 }
 
+prepare_gateway_log_path() {
+    if [ -n "$GATEWAY_LOG_PATH" ]; then
+        mkdir -p "$(dirname "$GATEWAY_LOG_PATH")"
+        : >"$GATEWAY_LOG_PATH"
+    else
+        GATEWAY_LOG_PATH="$(mktemp "${TMPDIR:-/tmp}/agentzoo-oauth2-gateway.XXXXXX.log")"
+    fi
+
+    echo "OAuth gateway log: $GATEWAY_LOG_PATH"
+}
+
 start_gateway() {
     local gateway_pid
 
     echo "Starting OAuth gateway on $GATEWAY_HEALTH_URL"
-    : >"$GATEWAY_LOG_PATH"
+    prepare_gateway_log_path
     "$GATEWAY_START_SCRIPT" >"$GATEWAY_LOG_PATH" 2>&1 </dev/null &
     gateway_pid=$!
 
