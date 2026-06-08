@@ -27,12 +27,14 @@ pub fn read_or_create(path: &Path) -> Result<String> {
     }
 
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
-            format!(
-                "Unable to create directory for upstream secret: {}",
-                parent.display()
-            )
-        })?;
+        if !parent.is_dir() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!(
+                    "Unable to create directory for upstream secret: {}",
+                    parent.display()
+                )
+            })?;
+        }
     }
 
     let secret: String = rand::rng()
