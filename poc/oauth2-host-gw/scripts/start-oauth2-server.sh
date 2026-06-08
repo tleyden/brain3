@@ -37,6 +37,13 @@ if [ ! -x "$ENSURE_UPSTREAM_SECRET" ]; then
     exit 1
 fi
 
-export OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE="$("$ENSURE_UPSTREAM_SECRET")"
+OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE="$("$ENSURE_UPSTREAM_SECRET")"
+
+if [ -z "$OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE" ]; then
+    echo "ERROR: upstream secret helper returned an empty path" >&2
+    exit 1
+fi
+
+export OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE
 
 uv run oauth2-gateway "$@"

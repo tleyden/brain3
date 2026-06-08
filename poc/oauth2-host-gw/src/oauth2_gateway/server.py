@@ -34,6 +34,9 @@ def _default_http_client_factory() -> httpx.AsyncClient:
 
 
 def _read_required_upstream_secret(secret_file: str) -> str:
+    if not secret_file.strip():
+        raise RuntimeError("MCP upstream shared secret file path is empty")
+
     try:
         secret = Path(secret_file).read_text(encoding="utf-8").strip()
     except OSError as exc:

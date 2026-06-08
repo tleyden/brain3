@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SECRET_FILE="${1:-/private/tmp/agentzoo-mcp-upstream-secret}"
+SECRET_FILE="${1:-/tmp/agentzoo-mcp-upstream-secret}"
 
 mkdir -p "$(dirname "$SECRET_FILE")"
 
