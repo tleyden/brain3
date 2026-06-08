@@ -67,6 +67,15 @@ print_networking_summary() {
     fi
 }
 
+print_mount_summary() {
+    echo "Mounts:"
+    echo "  ${HOST_VAULT_PATH} -> /vault"
+
+    if [ "$MODE" = "bind" ]; then
+        echo "  ${PROJECT_ROOT} -> ${SOURCE_MOUNT_PATH} (ro)"
+    fi
+}
+
 require_macos_container() {
     if ! command -v container >/dev/null 2>&1; then
         echo "Error: Apple 'container' CLI not found in PATH." >&2
@@ -254,6 +263,7 @@ fi
 
 echo "Running $CONTAINER_NAME from $IMAGE_NAME in $MODE mode with runtime $CONTAINER_RUNTIME"
 print_networking_summary
+print_mount_summary
 
 if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
     container "${run_args[@]}"
