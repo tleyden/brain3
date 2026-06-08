@@ -1,9 +1,9 @@
 # General 
 
-- The point of the app is to run mcp servers and skills locally on your desktop in a safe manner, ideally inside of a native macos container, but opt-out is allowed
+- The point of the app: Brain3 is a local-first, markdown-based knowledge management system that stores information in an Obsidian-compatible repository and exposes it to AI clients such as ChatGPT and Claude through an MCP interface.
 - Also the other point of the app is to open it up to remote access since that what Claude and ChatGPT demand for access from mobile and web.
 - Be very judidicous about writing unit tests, they create a lot of tech debt.  Never write tests for log output for example.  It must just be core functionality on public apis.  Never test private apis, because they constantly break.
-- We are using the macos native containers.  We have container CLI installed.  It is new, and it is different than docker.  NO docker, except what is compatible with macos container.
+- This works on both linux and macos.  On macos, we can use macos native containers or docker.  On linux, docker only.
 - Don't suggest subagents.  We will always do this in smaller steps in serial to manage context window rather than spawning subagents.
 - Don't commit to git, I will commit.
 - Security rule: this gateway is intentionally closed to preregistered clients only. Do not enable CIMD, DCR, public-client OAuth (`token_endpoint_auth_method=none`), or any other flow that allows access without the hardcoded client ID and client secret, unless explicitly requested by the user. Do not advertise OAuth capabilities the server is not supposed to allow, and do not expose `/oauth/register` in a way that hands out usable credentials or broadens access. Any auth change must preserve the policy that only explicitly preregistered clients can obtain tokens and reach protected MCP data.

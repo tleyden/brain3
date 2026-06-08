@@ -1,2 +1,5 @@
-// Tunnel adapters will be implemented in a future milestone.
-// The TunnelPort trait is defined in brain3-core::ports::tunnel.
+pub mod cloudflare_named;
+pub mod cloudflare_quick;
+
+pub use cloudflare_named::CloudflareNamedTunnelAdapter;
+pub use cloudflare_quick::CloudflareQuickTunnelAdapter;
