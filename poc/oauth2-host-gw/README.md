@@ -27,6 +27,8 @@ Environment variables:
 - `OAUTH2_GATEWAY_ACCESS_TOKEN`: static bearer token returned after successful token exchange
 - `CF_TUNNEL_NAME`: optional, only for a named Cloudflare tunnel on your domain
 - `CF_DOMAIN`: optional, only for a named Cloudflare tunnel on your domain
+- `DIRECT_PUBLIC_ORIGIN_HOSTNAME`: optional, only for a direct public origin behind Cloudflare proxy, such as `agenzoo.yourserver.com`
+- `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK`: optional boolean, defaults to `true`; controls whether requests must match the configured public hostname
 
 See [.env.template](.env.template).
 
@@ -113,7 +115,7 @@ curl -i -X POST http://127.0.0.1:8421/oauth/register
 
 Expected: `404 Not Found`
 
-## Public Exposure Options
+## Options to Expose Server to Public Internet
 
 If this machine already has a public IPv4 address, Cloudflare Tunnel is not your only option.
 
@@ -147,6 +149,7 @@ For this flow, the public HTTPS connection terminates at Cloudflare. `cloudflare
 
 1. Install `cloudflared`.
 2. Fill in `CF_TUNNEL_NAME` and `CF_DOMAIN` in `.env`.
+   Leave `DIRECT_PUBLIC_ORIGIN_HOSTNAME` empty for this flow.
 3. Log into Cloudflare:
 
 ```bash
@@ -200,16 +203,22 @@ Use this if the machine already has a public IPv4 address and you want to expose
 Typical shape:
 
 1. Create a hostname in Cloudflare DNS pointing at the server's public IP.
-2. Open inbound `443` on the host. Optionally open `80` only to redirect to HTTPS.
-3. Run Caddy or another reverse proxy on the machine.
-4. Terminate TLS at that reverse proxy.
-5. Reverse-proxy to this gateway on `127.0.0.1:8421`.
+2. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in `.env` to that exact public hostname.
+   Example: `DIRECT_PUBLIC_ORIGIN_HOSTNAME=agenzoo.yourserver.com`
+3. Leave `CF_TUNNEL_NAME` and `CF_DOMAIN` empty for this flow.
+4. Open inbound `443` on the host. Optionally open `80` only to redirect to HTTPS.
+5. Run Caddy or another reverse proxy on the machine.
+6. Terminate TLS at that reverse proxy.
+7. Reverse-proxy to this gateway on `127.0.0.1:8421`.
 
 Notes:
 
 - This repo does not currently ship helper scripts for the direct-origin path.
 - In the direct-origin path, Caddy or nginx is the component that handles local TLS, not `cloudflared`.
 - If you proxy through Cloudflare, use an origin TLS setup that matches your Cloudflare SSL/TLS mode. For example, `Full (Strict)` requires a valid origin certificate on the server.
+- Setting `DIRECT_PUBLIC_ORIGIN_HOSTNAME` gives the gateway an expected public hostname for this path.
+- `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=true` keeps strict hostname checking enabled and is the recommended setting.
+- If you set `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=false`, the gateway will skip hostname matching even when a public hostname is configured. This only affects hostname validation; it does not enable public-client OAuth, dynamic client registration, or any non-preregistered client access path.
 
 ## Scope
 
