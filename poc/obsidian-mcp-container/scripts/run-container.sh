@@ -33,7 +33,8 @@ Usage: ./scripts/run-container.sh [options]
 
 Options:
   --container-runtime    Run with macos-container or docker (default: macos-container)
-  --bind-source         Run the mounted host source tree instead of the code baked into the image
+  --bind-mount-sourcecode
+                        Run the mounted host source tree instead of the code baked into the image
   --image               Run the code baked into the image (default)
   --vault-path PATH     Host vault directory to mount into /vault
   --port PORT           Host loopback port to publish as 127.0.0.1:PORT -> container port 8420
@@ -185,7 +186,7 @@ while [ "$#" -gt 0 ]; do
             CONTAINER_RUNTIME="$2"
             shift 2
             ;;
-        --bind-source)
+        --bind-mount-sourcecode)
             MODE="bind"
             shift
             ;;

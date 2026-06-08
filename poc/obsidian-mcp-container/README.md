@@ -188,6 +188,15 @@ Each runtime expects its image to exist in that runtime's local image store firs
 - native macOS run mode expects `./scripts/build-container.sh --container-runtime macos-container`
 - Docker run mode expects `./scripts/build-container.sh --container-runtime docker`
 
+Default run mode uses the code baked into the image. If you change files under `src/` and run `./scripts/run-container.sh` again in the default mode, you will still get the old code until you rebuild the image first.
+
+Typical default-mode edit loop:
+
+```bash
+./scripts/build-container.sh --container-runtime macos-container
+./scripts/run-container.sh --vault-path /absolute/path/to/vault
+```
+
 This:
 
 - mounts the host vault into the container at `/vault`
@@ -199,16 +208,16 @@ If your local `.env` already sets `VAULT_PATH` to a host directory, the run scri
 
 ### Bind-Mounted Source Mode
 
-For faster Python edit loops, you can run the mounted source tree instead of rebuilding the image on every code change:
+For faster Python edit loops, use `--bind-mount-sourcecode`. This runs the mounted host source tree instead of the code baked into the image, so normal `src/` edits do not require rebuilding the image:
 
 ```bash
-./scripts/run-container.sh --bind-source --vault-path /absolute/path/to/vault
+./scripts/run-container.sh --bind-mount-sourcecode --vault-path /absolute/path/to/vault
 ```
 
 Docker bind-mounted source mode:
 
 ```bash
-./scripts/run-container.sh --container-runtime docker --bind-source --vault-path /absolute/path/to/vault
+./scripts/run-container.sh --container-runtime docker --bind-mount-sourcecode --vault-path /absolute/path/to/vault
 ```
 
 In bind mode:
@@ -216,6 +225,14 @@ In bind mode:
 - dependencies still come from the image
 - source code comes from the mounted host checkout
 - changes under `src/` are picked up on the next container restart
+
+Typical bind-source edit loop:
+
+```bash
+./scripts/run-container.sh --bind-mount-sourcecode --vault-path /absolute/path/to/vault
+# edit files under src/
+./scripts/run-container.sh --bind-mount-sourcecode --vault-path /absolute/path/to/vault
+```
 
 If you change dependencies or packaging metadata (`pyproject.toml`, `uv.lock`), rebuild the image.
 
