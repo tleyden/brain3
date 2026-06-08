@@ -14,10 +14,10 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from .config import (
-    OAUTH2_GATEWAY_EXPECTED_HOST,
     OAUTH2_GATEWAY_MCP_UPSTREAM_URL,
     OAUTH2_GATEWAY_PORT,
     OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE,
+    resolve_expected_host,
 )
 from .mcp_proxy import mcp_routes
 from .oauth import oauth_routes
@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> None:
     uvicorn.run(
         create_app(
             mcp_upstream_secret=_read_required_upstream_secret(OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE),
-            expected_host=OAUTH2_GATEWAY_EXPECTED_HOST,
+            expected_host=resolve_expected_host(),
         ),
         host=args.host,
         port=OAUTH2_GATEWAY_PORT,

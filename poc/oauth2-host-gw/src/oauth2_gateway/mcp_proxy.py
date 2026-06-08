@@ -69,7 +69,7 @@ def _validate_request_host(request: Request) -> JSONResponse | None:
     expected_host = getattr(request.app.state, "expected_host", None)
     if not expected_host:
         logger.warning(
-            "Skipping hostname validation; a named Cloudflare tunnel on your own domain is recommended instead of a quick tunnel."
+            "Skipping hostname validation; configure either a named Cloudflare tunnel on your own domain or DIRECT_PUBLIC_ORIGIN_HOSTNAME for a direct public origin deployment."
         )
         return None
 
@@ -82,7 +82,7 @@ def _validate_request_host(request: Request) -> JSONResponse | None:
         request_host,
         expected_host,
     )
-    return _misdirected_request("Request host does not match the configured named tunnel hostname")
+    return _misdirected_request("Request host does not match the configured public hostname")
 
 
 def _unauthorized(request: Request, description: str) -> JSONResponse:

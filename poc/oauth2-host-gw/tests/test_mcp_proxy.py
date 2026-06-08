@@ -141,6 +141,75 @@ class GatewayProxyTests(unittest.TestCase):
         self.assertEqual(response.status_code, 421)
         self.assertEqual(response.json()["error"], "misdirected_request")
 
+    def test_mcp_proxy_allows_matching_direct_public_origin_host(self):
+        captured = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            return httpx.Response(
+                200,
+                headers={"content-type": "application/json"},
+                json={"jsonrpc": "2.0", "id": 1, "result": {"tools": []}},
+            )
+
+        app = create_app(
+            mcp_upstream_url="http://127.0.0.1:8420",
+            mcp_upstream_secret="shared-secret",
+            expected_host="agentzoo.yourserver.com",
+            http_client_factory=lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(handler),
+                timeout=None,
+                follow_redirects=False,
+                trust_env=False,
+            ),
+        )
+
+        with patch("oauth2_gateway.config.OAUTH2_GATEWAY_ACCESS_TOKEN", "test-token"):
+            with TestClient(app, base_url="https://agentzoo.yourserver.com") as client:
+                response = client.post(
+                    "/mcp",
+                    headers={
+                        "authorization": "Bearer test-token",
+                        "accept": "application/json, text/event-stream",
+                        "content-type": "application/json",
+                    },
+                    json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+                )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(captured["url"], "http://127.0.0.1:8420/mcp")
+
+    def test_mcp_proxy_rejects_mismatched_direct_public_origin_host_before_upstream_call(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise AssertionError("upstream should not be called for a misdirected request")
+
+        app = create_app(
+            mcp_upstream_url="http://127.0.0.1:8420",
+            mcp_upstream_secret="shared-secret",
+            expected_host="agentzoo.yourserver.com",
+            http_client_factory=lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(handler),
+                timeout=None,
+                follow_redirects=False,
+                trust_env=False,
+            ),
+        )
+
+        with patch("oauth2_gateway.config.OAUTH2_GATEWAY_ACCESS_TOKEN", "test-token"):
+            with TestClient(app, base_url="https://wrong-host.yourserver.com") as client:
+                response = client.post(
+                    "/mcp",
+                    headers={
+                        "authorization": "Bearer test-token",
+                        "accept": "application/json, text/event-stream",
+                        "content-type": "application/json",
+                    },
+                    json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
+                )
+
+        self.assertEqual(response.status_code, 421)
+        self.assertEqual(response.json()["error"], "misdirected_request")
+
     def test_mcp_proxy_returns_502_when_upstream_is_unreachable(self):
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ConnectError("dial tcp 127.0.0.1:8420: connect refused", request=request)
