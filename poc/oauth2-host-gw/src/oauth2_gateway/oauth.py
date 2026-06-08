@@ -115,6 +115,9 @@ async def _handle_authorization_code(form, client_id: str, client_secret: str) -
 
     code_data = _auth_codes.pop(code)
 
+    if not hmac.compare_digest(client_id, code_data["client_id"]):
+        return JSONResponse({"error": "invalid_grant", "error_description": "client_id mismatch"}, status_code=400)
+
     if redirect_uri and code_data["redirect_uri"] and redirect_uri != code_data["redirect_uri"]:
         return JSONResponse({"error": "invalid_grant", "error_description": "redirect_uri mismatch"}, status_code=400)
 

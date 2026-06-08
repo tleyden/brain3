@@ -143,3 +143,39 @@ class OAuthSecurityTests(unittest.TestCase):
 
         self.assertEqual(token.status_code, 200)
         self.assertEqual(token.json()["token_type"], "bearer")
+
+    def test_authorization_code_exchange_rejects_client_id_mismatch_with_bound_code(self):
+        app = create_app()
+
+        with patch("oauth2_gateway.config.OAUTH2_GATEWAY_CLIENT_ID", "client-one"):
+            with patch("oauth2_gateway.config.OAUTH2_GATEWAY_CLIENT_SECRET", CLIENT_SECRET):
+                with TestClient(app) as client:
+                    authorize = client.get(
+                        "/oauth/authorize",
+                        params={
+                            "response_type": "code",
+                            "client_id": "client-one",
+                            "redirect_uri": REDIRECT_URI,
+                            "code_challenge": CODE_CHALLENGE,
+                            "code_challenge_method": "S256",
+                        },
+                        follow_redirects=False,
+                    )
+                    code = authorize.headers["location"].split("code=")[1].split("&")[0]
+
+                    with patch("oauth2_gateway.config.OAUTH2_GATEWAY_CLIENT_ID", "client-two"):
+                        token = client.post(
+                            "/oauth/token",
+                            data={
+                                "grant_type": "authorization_code",
+                                "client_id": "client-two",
+                                "client_secret": CLIENT_SECRET,
+                                "redirect_uri": REDIRECT_URI,
+                                "code": code,
+                                "code_verifier": CODE_VERIFIER,
+                            },
+                        )
+
+        self.assertEqual(token.status_code, 400)
+        self.assertEqual(token.json()["error"], "invalid_grant")
+        self.assertEqual(token.json()["error_description"], "client_id mismatch")
