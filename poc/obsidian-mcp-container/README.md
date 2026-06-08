@@ -48,8 +48,9 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 If `uv` is not on your `PATH` after the Linux install, restart your shell or add `~/.local/bin` to `PATH`.
 
 Container runtime notes:
-- macOS examples default to Apple's native `container` CLI. Docker is still supported if you choose `--container-runtime docker`.
-- Linux examples use Docker. Apple's `container` CLI is macOS-only.
+- Every container build/run command requires an explicit `--container-runtime` flag.
+- macOS supports both Apple's native `container` CLI and Docker.
+- Linux uses Docker. Apple's `container` CLI is macOS-only.
 
 ### Linux Docker install
 
@@ -90,7 +91,7 @@ Or:
 
 ## Scope
 
-This POC fork is only the stripped server code plus a minimal container workflow: Apple `container` on macOS, Docker on Linux. It does not include OAuth or Cloudflare tunnel setup.
+This POC fork is only the stripped server code plus a minimal container workflow: Apple `container` or Docker on macOS, and Docker on Linux. It does not include OAuth or Cloudflare tunnel setup.
 
 ## Tool Surface
 
@@ -127,21 +128,15 @@ For metadata-only changes:
 
 ## Container Build
 
-This project includes a `Containerfile` that can be built with Apple's native `container` CLI on macOS or Docker on Linux. Docker examples also work on macOS if you explicitly choose that runtime.
+This project includes a `Containerfile` that can be built with Apple's native `container` CLI on macOS or Docker on Linux. Docker examples also work on macOS. Every build command must specify `--container-runtime` explicitly.
 
-Build the image from the latest local code in this directory on macOS with the default Apple runtime:
-
-```bash
-./scripts/build-container.sh
-```
-
-Build explicitly with Apple `container` on macOS:
+Build with Apple `container` on macOS:
 
 ```bash
 ./scripts/build-container.sh --container-runtime macos-container
 ```
 
-Build with Docker on Linux:
+Build with Docker on Linux or macOS:
 
 ```bash
 ./scripts/build-container.sh --container-runtime docker
@@ -163,21 +158,15 @@ IMAGE_NAME=obsidian-mcp-server:dev ./scripts/build-container.sh --container-runt
 
 ## Container Run
 
-The Obsidian MCP server is the only process that runs inside the container. The OAuth gateway stays outside the container and talks to the MCP server over the published local HTTP port.
+The Obsidian MCP server is the only process that runs inside the container. The OAuth gateway stays outside the container and talks to the MCP server over the published local HTTP port. Every run command must specify `--container-runtime` explicitly.
 
-Run the baked image against a host vault on macOS with the default Apple runtime:
-
-```bash
-./scripts/run-container.sh --vault-path /absolute/path/to/vault
-```
-
-Run explicitly with Apple `container` on macOS:
+Run with Apple `container` on macOS:
 
 ```bash
 ./scripts/run-container.sh --container-runtime macos-container --vault-path /absolute/path/to/vault
 ```
 
-Run with Docker on Linux:
+Run with Docker on Linux or macOS:
 
 ```bash
 ./scripts/run-container.sh --container-runtime docker --vault-path /absolute/path/to/vault
@@ -194,7 +183,7 @@ Typical default-mode edit loop:
 
 ```bash
 ./scripts/build-container.sh --container-runtime macos-container
-./scripts/run-container.sh --vault-path /absolute/path/to/vault
+./scripts/run-container.sh --container-runtime macos-container --vault-path /absolute/path/to/vault
 ```
 
 This:
@@ -209,10 +198,12 @@ If your local `.env` already sets `VAULT_PATH` to a host directory, the run scri
 
 ### Bind-Mounted Source Mode
 
-For faster Python edit loops, use `--bind-mount-sourcecode`. This runs the mounted host source tree instead of the code baked into the image, so normal `src/` edits do not require rebuilding the image:
+For faster Python edit loops, use `--bind-mount-sourcecode`. This runs the mounted host source tree instead of the code baked into the image, so normal `src/` edits do not require rebuilding the image.
+
+Apple `container` bind-mounted source mode:
 
 ```bash
-./scripts/run-container.sh --bind-mount-sourcecode --vault-path /absolute/path/to/vault
+./scripts/run-container.sh --container-runtime macos-container --bind-mount-sourcecode --vault-path /absolute/path/to/vault
 ```
 
 Docker bind-mounted source mode:
@@ -230,9 +221,9 @@ In bind mode:
 Typical bind-source edit loop:
 
 ```bash
-./scripts/run-container.sh --bind-mount-sourcecode --vault-path /absolute/path/to/vault
+./scripts/run-container.sh --container-runtime macos-container --bind-mount-sourcecode --vault-path /absolute/path/to/vault
 # edit files under src/
-./scripts/run-container.sh --bind-mount-sourcecode --vault-path /absolute/path/to/vault
+./scripts/run-container.sh --container-runtime macos-container --bind-mount-sourcecode --vault-path /absolute/path/to/vault
 ```
 
 If you change dependencies or packaging metadata (`pyproject.toml`, `uv.lock`), rebuild the image.
@@ -242,13 +233,13 @@ If you change dependencies or packaging metadata (`pyproject.toml`, `uv.lock`), 
 Run on a different host port:
 
 ```bash
-./scripts/run-container.sh --vault-path /absolute/path/to/vault --port 8422
+./scripts/run-container.sh --container-runtime macos-container --vault-path /absolute/path/to/vault --port 8422
 ```
 
 Run in the foreground:
 
 ```bash
-./scripts/run-container.sh --vault-path /absolute/path/to/vault --foreground
+./scripts/run-container.sh --container-runtime macos-container --vault-path /absolute/path/to/vault --foreground
 ```
 
 ## Tests

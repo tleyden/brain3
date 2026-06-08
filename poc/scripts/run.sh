@@ -12,10 +12,11 @@ GATEWAY_PORT="8421"
 GATEWAY_START_TIMEOUT_SECS="${GATEWAY_START_TIMEOUT_SECS:-15}"
 GATEWAY_STOP_TIMEOUT_SECS="${GATEWAY_STOP_TIMEOUT_SECS:-10}"
 GATEWAY_LOG_PATH="${GATEWAY_LOG_PATH:-/tmp/agentzoo-oauth2-gateway.log}"
+CONTAINER_RUNTIME=""
 
 usage() {
     cat <<'EOF'
-Usage: ./scripts/run.sh [container-run-args...]
+Usage: ./scripts/run.sh --container-runtime <macos-container|docker> [container-run-args...]
 
 Starts the local OAuth gateway if needed, then starts the MCP container.
 
@@ -23,10 +24,49 @@ Behavior:
   - If the gateway is already healthy, ask whether to reuse it, restart it, or abort.
   - If the gateway port is occupied by a different process, abort with guidance.
   - If the gateway cannot become healthy, abort before starting the container.
+  - The container runtime must be specified explicitly on every invocation.
 
 All arguments are passed through to:
   ./obsidian-mcp-container/scripts/run-container.sh
 EOF
+}
+
+require_explicit_container_runtime() {
+    local runtime=""
+
+    while [ "$#" -gt 0 ]; do
+        case "$1" in
+            --container-runtime)
+                if [ "$#" -lt 2 ]; then
+                    echo "Error: missing value for --container-runtime" >&2
+                    usage >&2
+                    exit 1
+                fi
+                runtime="$2"
+                shift 2
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    if [ -z "$runtime" ]; then
+        echo "Error: --container-runtime is required. Choose one of: macos-container, docker." >&2
+        usage >&2
+        exit 1
+    fi
+
+    case "$runtime" in
+        macos-container|docker)
+            CONTAINER_RUNTIME="$runtime"
+            ;;
+        *)
+            echo "Error: unknown container runtime: $runtime" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
 }
 
 load_gateway_config() {
@@ -225,6 +265,7 @@ start_gateway() {
 }
 
 main() {
+    require_explicit_container_runtime "$@"
     load_gateway_config
     require_prereqs
 
@@ -242,7 +283,7 @@ main() {
         start_gateway
     fi
 
-    echo "Starting MCP container via $CONTAINER_RUN_SCRIPT"
+    echo "Starting MCP container via $CONTAINER_RUN_SCRIPT with runtime $CONTAINER_RUNTIME"
     "$CONTAINER_RUN_SCRIPT" "$@"
 }
 

@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 POC_ROOT="$(cd "$PROJECT_ROOT/.." && pwd)"
 ENSURE_UPSTREAM_SECRET="$POC_ROOT/scripts/ensure-mcp-upstream-secret.sh"
+BUILD_CONTAINER_SCRIPT="$PROJECT_ROOT/scripts/build-container.sh"
 
 if [ -f "$PROJECT_ROOT/.env" ]; then
     set -o allexport
@@ -21,7 +22,7 @@ HOST_VAULT_PATH="${HOST_VAULT_PATH:-${VAULT_PATH:-}}"
 SOURCE_MOUNT_PATH="/workspace/obsidian-mcp-container"
 CONTAINER_UPSTREAM_SECRET_DIR="/run/agentzoo"
 CONTAINER_UPSTREAM_SECRET_PATH="${CONTAINER_UPSTREAM_SECRET_DIR}/upstream_secret"
-CONTAINER_RUNTIME="macos-container"
+CONTAINER_RUNTIME=""
 HOST_BIND_ADDRESS="127.0.0.1"
 CONTAINER_LISTEN_HOST="0.0.0.0"
 CONTAINER_PORT="8420"
@@ -30,10 +31,10 @@ REMOVE=true
 
 usage() {
     cat <<'EOF'
-Usage: ./scripts/run-container.sh [options]
+Usage: ./scripts/run-container.sh --container-runtime <macos-container|docker> [options]
 
 Options:
-  --container-runtime    Run with macos-container or docker (default: macos-container)
+  --container-runtime    Required: macos-container or docker
   --bind-mount-sourcecode
                         Run the mounted host source tree instead of the code baked into the image
   --image               Run the code baked into the image (default)
@@ -111,13 +112,13 @@ ensure_runtime_image_exists() {
     if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
         if ! container image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
             echo "Error: image not found in Apple container image store: $IMAGE_NAME" >&2
-            echo "Build it with: ./scripts/build-container.sh --container-runtime macos-container" >&2
+            echo "Build it with: $BUILD_CONTAINER_SCRIPT --container-runtime macos-container" >&2
             exit 1
         fi
     else
         if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
             echo "Error: image not found in Docker image store: $IMAGE_NAME" >&2
-            echo "Build it with: ./scripts/build-container.sh --container-runtime docker" >&2
+            echo "Build it with: $BUILD_CONTAINER_SCRIPT --container-runtime docker" >&2
             exit 1
         fi
     fi
@@ -214,6 +215,12 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -z "$CONTAINER_RUNTIME" ]; then
+    echo "Error: --container-runtime is required. Choose one of: macos-container, docker." >&2
+    usage >&2
+    exit 1
+fi
 
 case "$CONTAINER_RUNTIME" in
     macos-container)
