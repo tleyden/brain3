@@ -11,7 +11,7 @@ from starlette.routing import Route
 from . import config
 
 logger = logging.getLogger(__name__)
-UPSTREAM_SHARED_SECRET_HEADER = "x-agentzoo-upstream-secret"
+UPSTREAM_SHARED_SECRET_HEADER = "x-brain3-upstream-secret"
 
 HOP_BY_HOP_HEADERS = {
     "connection",

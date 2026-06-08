@@ -97,7 +97,7 @@ This gives you:
 
 No domain is required.
 
-For Agent Zoo, installing both clients side-by-side is quick:
+For Brain3, installing both clients side-by-side is quick:
 
 ```bash
 nix profile install nixpkgs#cloudflared

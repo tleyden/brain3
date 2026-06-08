@@ -27,7 +27,7 @@ Environment variables:
 - `OAUTH2_GATEWAY_ACCESS_TOKEN`: static bearer token returned after successful token exchange
 - `CF_TUNNEL_NAME`: optional, only for a named Cloudflare tunnel on your domain
 - `CF_DOMAIN`: optional, only for a named Cloudflare tunnel on your domain
-- `DIRECT_PUBLIC_ORIGIN_HOSTNAME`: optional, only for a direct public origin behind Cloudflare proxy, such as `agenzoo.yourserver.com`
+- `DIRECT_PUBLIC_ORIGIN_HOSTNAME`: optional, only for a direct public origin behind Cloudflare proxy, such as `brain3.yourserver.com`
 - `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK`: optional boolean, defaults to `true`; controls whether requests must match the configured public hostname
 
 See [.env.template](.env.template).
@@ -204,7 +204,7 @@ Typical shape:
 
 1. Create a hostname in Cloudflare DNS pointing at the server's public IP.
 2. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in `.env` to that exact public hostname.
-   Example: `DIRECT_PUBLIC_ORIGIN_HOSTNAME=agenzoo.yourserver.com`
+   Example: `DIRECT_PUBLIC_ORIGIN_HOSTNAME=brain3.yourserver.com`
 3. Leave `CF_TUNNEL_NAME` and `CF_DOMAIN` empty for this flow.
 4. Open inbound `443` on the host. Optionally open `80` only to redirect to HTTPS.
 5. Run Caddy or another reverse proxy on the machine.

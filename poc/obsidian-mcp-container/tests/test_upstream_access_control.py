@@ -53,7 +53,7 @@ class UpstreamAccessControlTests(unittest.TestCase):
             "content-type": "application/json",
         }
         if secret is not None:
-            headers["x-agentzoo-upstream-secret"] = secret
+            headers["x-brain3-upstream-secret"] = secret
 
         return client.post(
             "/mcp",

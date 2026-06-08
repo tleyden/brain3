@@ -31,7 +31,7 @@ class ServerCliTests(unittest.TestCase):
         with patch.object(sys, "argv", ["oauth2-gateway"]):
             with patch.dict(
                 os.environ,
-                {"DIRECT_PUBLIC_ORIGIN_HOSTNAME": "agentzoo.yourserver.com"},
+                {"DIRECT_PUBLIC_ORIGIN_HOSTNAME": "brain3.yourserver.com"},
                 clear=True,
             ):
                 with (
@@ -41,7 +41,7 @@ class ServerCliTests(unittest.TestCase):
                 ):
                     server.main()
 
-        self.assertEqual(mock_create_app.call_args.kwargs["expected_host"], "agentzoo.yourserver.com")
+        self.assertEqual(mock_create_app.call_args.kwargs["expected_host"], "brain3.yourserver.com")
 
     def test_main_disables_hostname_validation_when_configured(self):
         with patch.object(sys, "argv", ["oauth2-gateway"]):
@@ -66,7 +66,7 @@ class ServerCliTests(unittest.TestCase):
                 {
                     "CF_TUNNEL_NAME": "brain3-macos",
                     "CF_DOMAIN": "mcpnative.dev",
-                    "DIRECT_PUBLIC_ORIGIN_HOSTNAME": "agentzoo.yourserver.com",
+                    "DIRECT_PUBLIC_ORIGIN_HOSTNAME": "brain3.yourserver.com",
                 },
                 clear=True,
             ):

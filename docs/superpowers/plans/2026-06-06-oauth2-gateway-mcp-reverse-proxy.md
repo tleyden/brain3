@@ -476,12 +476,12 @@ Environment variables:
 - [ ] **Step 3: Add a README smoke test that proves the exact client flow**
 
 ```bash
-cd /Users/tleyden/Development/agentzoo/poc/obsidian-mcp-container
+cd /Users/tleyden/Development/brain3/poc/obsidian-mcp-container
 VAULT_PATH="$PWD/test_vault" uv run obsidian-mcp-server
 ```
 
 ```bash
-cd /Users/tleyden/Development/agentzoo/poc/oauth2-host-gw
+cd /Users/tleyden/Development/brain3/poc/oauth2-host-gw
 OAUTH2_GATEWAY_CLIENT_SECRET=dev-secret \
 OAUTH2_GATEWAY_ACCESS_TOKEN=dev-token \
 OAUTH2_GATEWAY_MCP_UPSTREAM_URL=http://127.0.0.1:8420 \
@@ -549,7 +549,7 @@ Expected:
 Run:
 
 ```bash
-cd /Users/tleyden/Development/agentzoo/poc/oauth2-host-gw
+cd /Users/tleyden/Development/brain3/poc/oauth2-host-gw
 uv run python - <<'PY'
 import json
 
