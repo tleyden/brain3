@@ -191,9 +191,11 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `USERNAME` | *(required)* | Login username for the sign-in page |
 | `PASSWORD` | *(required)* | Login password for the sign-in page |
 | `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
-| `CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name (for stable hostname) |
-| `CF_DOMAIN` | *(empty)* | Cloudflare domain (used with `CF_TUNNEL_NAME`) |
-| `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin instead of tunnel |
+| `CF_QUICK_TUNNEL` | `false` | Set to `true` to have the gateway start a quick Cloudflare Tunnel on startup |
+| `CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; gateway starts `cloudflared` automatically when set with `CF_DOMAIN` |
+| `CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `CF_TUNNEL_NAME`) |
+| `CF_TUNNEL_CONFIG_FILE` | *(required if `CF_TUNNEL_NAME` set)* | Path to the `cloudflared` config file written during tunnel provisioning |
+| `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
 | `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, gateway starts the container on startup |
 | `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
 | `BRAIN3_CONTAINER_IMAGE` | `obsidian-mcp-server:latest` | Container image to run |
@@ -244,20 +246,29 @@ brain3.yourdomain.com {
 
 ### Quick temporary Cloudflare Tunnel (for testing)
 
-```bash
-cloudflared tunnel --url http://localhost:8421
+Set `CF_QUICK_TUNNEL=true` in your `.env`. The gateway will start `cloudflared` automatically on startup and log the assigned public URL:
+
+```
+INFO tunnel started url=https://some-random-name.trycloudflare.com
 ```
 
-No DNS, no config — just a temporary public URL. The URL changes each time you restart the tunnel.
+No DNS or config needed. The URL changes each time you restart the gateway.
+
+Requires `cloudflared` to be installed — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
 
 ### Named Cloudflare Tunnel on your domain
 
-For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel:
+For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel, provision the tunnel once (outside the gateway), then let the gateway run it:
 
-1. Log into Cloudflare: `cloudflared tunnel login`
-2. Set `CF_TUNNEL_NAME` and `CF_DOMAIN` in your `.env`
-3. Run setup once: `./scripts/setup-cf-tunnel-with-domain.sh`
-4. Start the tunnel: `./scripts/run-cf-tunnel-with-domain.sh`
+1. Install `cloudflared` — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+2. Log in: `cloudflared tunnel login`
+3. Create the tunnel and DNS route (one-time setup — see Cloudflare docs)
+4. In your `.env`, set `CF_TUNNEL_NAME`, `CF_DOMAIN`, and `CF_TUNNEL_CONFIG_FILE` (path to the `.yml` config file written during setup)
+5. Start the gateway — it will start `cloudflared` automatically and log:
+
+```
+INFO tunnel started url=https://brain3.yourdomain.com
+```
 
 ## Development
 
