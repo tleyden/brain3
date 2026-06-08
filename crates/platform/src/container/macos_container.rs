@@ -69,6 +69,12 @@ impl ContainerPort for MacOsContainerAdapter {
 
     async fn remove(&self, id: &ContainerId) -> Result<(), ContainerError> {
         // macOS container CLI uses `delete`, not `rm`.
-        run_command("container", &["delete", &id.0]).await.map(|_| ())
+        // Treat notFound as success — goal is "container does not exist".
+        match run_command("container", &["delete", &id.0]).await {
+            Ok(_) => Ok(()),
+            Err(ContainerError::CommandFailed { ref stderr, .. })
+                if stderr.contains("notFound") => Ok(()),
+            Err(e) => Err(e),
+        }
     }
 }
