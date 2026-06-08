@@ -35,7 +35,7 @@ You can also view and update your Brain3 repository via Obsidian directly, howev
                    │ HTTP localhost:8420 + shared secret
                    ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  MCP Server  (macOS Container)                               │
+│  MCP Server  (macOS / Docker Container)                      │
 │  Vault tools: read, write, search, list, move, delete        │
 │  Read/write access to your local markdown vault              │
 └──────────────────────────────────────────────────────────────┘
@@ -72,33 +72,42 @@ The binary is at `./target/release/brain3-gateway`.
 ### 2. Build the MCP server container image
 
 ```bash
-./poc/obsidian-mcp-container/scripts/build-container.sh --container-runtime macos-container
+./scripts/build-mcp-container.sh --container-runtime macos-container
 ```
 
 ### 3. Configure
 
-Copy the environment template and generate secrets:
+Copy the environment template:
 
 ```bash
-cp poc/oauth2-host-gw/.env.template poc/oauth2-host-gw/.env
-poc/oauth2-host-gw/scripts/generate_secrets.sh
+cp .env.template .env
 ```
 
-Edit `poc/oauth2-host-gw/.env` and set your login credentials:
+Generate the two secret values and set your login credentials:
+
+```bash
+# Generate secrets (run each command, paste the output into .env)
+openssl rand -hex 32   # → paste as OAUTH2_GATEWAY_CLIENT_SECRET
+openssl rand -hex 32   # → paste as OAUTH2_GATEWAY_ACCESS_TOKEN
+```
+
+Edit `.env` and fill in:
 
 ```
+OAUTH2_GATEWAY_CLIENT_SECRET=<paste first secret>
+OAUTH2_GATEWAY_ACCESS_TOKEN=<paste second secret>
 USERNAME=your_username
 PASSWORD=your_password
 ```
 
-These are the credentials you will enter when your AI app prompts you to sign in.
+The username and password are the credentials you will enter when your AI app prompts you to sign in.
 
 ### 4. Create the upstream shared secret
 
 The gateway authenticates to the MCP server with a shared secret file. Generate it:
 
 ```bash
-poc/scripts/ensure-mcp-upstream-secret.sh
+./scripts/ensure-mcp-upstream-secret.sh
 ```
 
 This creates a secret at `/tmp/brain3-mcp-upstream-secret/upstream_secret` (the default path the gateway expects).
@@ -106,7 +115,7 @@ This creates a secret at `/tmp/brain3-mcp-upstream-secret/upstream_secret` (the 
 ### 5. Start the MCP server container
 
 ```bash
-./poc/obsidian-mcp-container/scripts/run-container.sh \
+./scripts/run-mcp-container.sh \
   --container-runtime macos-container \
   --vault-path /absolute/path/to/your/vault
 ```
@@ -116,7 +125,7 @@ Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian v
 ### 6. Start the gateway
 
 ```bash
-./target/release/brain3-gateway --env-file poc/oauth2-host-gw/.env
+./target/release/brain3-gateway
 ```
 
 ### 7. Verify locally
@@ -162,7 +171,7 @@ Stop the gateway with `Ctrl+C` in its terminal.
 Stop the MCP container:
 
 ```bash
-./poc/scripts/stop.sh --container-runtime macos-container
+./scripts/stop.sh --container-runtime macos-container
 ```
 
 ## Configuration Reference
@@ -239,8 +248,8 @@ For a stable hostname like `brain3.yourdomain.com`:
 
 1. Log into Cloudflare: `cloudflared tunnel login`
 2. Set `CF_TUNNEL_NAME` and `CF_DOMAIN` in your `.env`
-3. Run setup once: `poc/oauth2-host-gw/scripts/setup-cf-tunnel-with-domain.sh`
-4. Start the tunnel: `poc/oauth2-host-gw/scripts/run-cf-tunnel-with-domain.sh`
+3. Run setup once: `./scripts/setup-cf-tunnel-with-domain.sh`
+4. Start the tunnel: `./scripts/run-cf-tunnel-with-domain.sh`
 
 ### Direct public origin
 
@@ -256,7 +265,7 @@ brain3/
 ├── crates/
 │   ├── core/              # Domain model, business logic, port traits
 │   └── platform/          # Adapters: Axum HTTP, reqwest proxy, config, auth store
-├── poc/                   # MCP server container + scripts
+├── scripts/               # Build, run, and stop scripts
 └── RUST_DESIGN.md         # Detailed architecture documentation
 ```
 
