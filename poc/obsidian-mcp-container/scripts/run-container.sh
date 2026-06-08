@@ -94,6 +94,33 @@ require_docker() {
     fi
 }
 
+validate_upstream_secret_mount() {
+    if [ "$CONTAINER_RUNTIME" != "macos-container" ]; then
+        return
+    fi
+
+    if [ -f "$HOST_UPSTREAM_SECRET_PATH" ]; then
+        cat >&2 <<EOF
+Error: Apple 'container' cannot bind-mount the upstream shared secret from a file path.
+
+Why this happened:
+  ./scripts/run-container.sh created or reused the shared-secret file at:
+    $HOST_UPSTREAM_SECRET_PATH
+  Then it passed that file to 'container run --mount type=bind,...'.
+  Apple's native container CLI expects the bind-mount source path here to be a directory,
+  so it aborts with the generic error:
+    Error: path '$HOST_UPSTREAM_SECRET_PATH' is not a directory
+
+How to fix:
+  Change the macOS container mount flow to mount a directory that contains the secret file,
+  not the file itself.
+  Then point UPSTREAM_SHARED_SECRET_FILE at the in-container file inside that mounted directory.
+  OAuth is not required for this step; the failure happens before the container starts.
+EOF
+        exit 1
+    fi
+}
+
 ensure_runtime_image_exists() {
     if [ "$CONTAINER_RUNTIME" = "macos-container" ]; then
         if ! container image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
@@ -232,6 +259,8 @@ if [ ! -x "$ENSURE_UPSTREAM_SECRET" ]; then
 fi
 
 HOST_UPSTREAM_SECRET_PATH="$("$ENSURE_UPSTREAM_SECRET")"
+
+validate_upstream_secret_mount
 
 ensure_runtime_image_exists
 check_and_prompt_existing_container
