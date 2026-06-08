@@ -2,6 +2,8 @@
 
 This fork is the authless MCP server half of the original `obsidian-web-mcp` codebase.
 
+The HTTP server stays authless from an OAuth perspective, but the host gateway now authenticates to it with a private shared secret. Direct calls to the upstream port are expected to fail unless that private header is present.
+
 It keeps only:
 - the HTTP MCP server
 - vault read/search/list/move/delete tools
@@ -24,6 +26,8 @@ Environment variables:
 - `VAULT_MCP_ALLOWED_HOSTS`: optional comma-separated extra hosts for DNS rebinding protection
 
 See [.env.template](.env.template).
+
+For the normal POC flow, you do not need to set the upstream shared secret yourself. The startup scripts create one host-side secret file, reuse it, and mount it into the container automatically.
 
 ## Prerequisites
 
@@ -187,6 +191,7 @@ Each runtime expects its image to exist in that runtime's local image store firs
 This:
 
 - mounts the host vault into the container at `/vault`
+- mounts a host-managed shared-secret file into the container at `/run/agentzoo/upstream_secret`
 - sets `VAULT_PATH=/vault` inside the container
 - publishes `127.0.0.1:8420` on the host to port `8420` in the container
 

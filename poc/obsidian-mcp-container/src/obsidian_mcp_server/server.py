@@ -1,12 +1,24 @@
 """Authless Obsidian MCP server."""
 
+import hmac
 import logging
 import sys
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from .config import VAULT_MCP_EXTRA_ALLOWED_HOSTS, VAULT_MCP_HOST, VAULT_MCP_PORT, VAULT_PATH
+from .config import (
+    UPSTREAM_SHARED_SECRET_FILE,
+    UPSTREAM_SHARED_SECRET_HEADER,
+    VAULT_MCP_EXTRA_ALLOWED_HOSTS,
+    VAULT_MCP_HOST,
+    VAULT_MCP_PORT,
+    VAULT_PATH,
+)
 from .frontmatter_index import FrontmatterIndex
 from .models import (
     VaultApplyUnifiedDiffInput,
@@ -34,6 +46,52 @@ logger = logging.getLogger(__name__)
 frontmatter_index = FrontmatterIndex()
 
 
+def _load_upstream_shared_secret() -> str:
+    try:
+        secret = Path(UPSTREAM_SHARED_SECRET_FILE).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise RuntimeError(f"Unable to read MCP upstream shared secret file: {UPSTREAM_SHARED_SECRET_FILE}") from exc
+
+    if not secret:
+        raise RuntimeError(f"MCP upstream shared secret file is empty: {UPSTREAM_SHARED_SECRET_FILE}")
+
+    return secret
+
+
+class UpstreamSharedSecretMiddleware:
+    def __init__(self, app: ASGIApp, *, shared_secret: str, header_name: str, protected_path: str) -> None:
+        self.app = app
+        self.shared_secret = shared_secret
+        self.header_name = header_name
+        self.protected_path = protected_path
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("path") != self.protected_path:
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope, receive=receive)
+        provided_secret = request.headers.get(self.header_name, "")
+        if not provided_secret or not hmac.compare_digest(provided_secret, self.shared_secret):
+            response = JSONResponse({"error": "unauthorized"}, status_code=401)
+            await response(scope, receive, send)
+            return
+
+        await self.app(scope, receive, send)
+
+
+class GuardedFastMCP(FastMCP):
+    def streamable_http_app(self):
+        app = super().streamable_http_app()
+        app.add_middleware(
+            UpstreamSharedSecretMiddleware,
+            shared_secret=_load_upstream_shared_secret(),
+            header_name=UPSTREAM_SHARED_SECRET_HEADER,
+            protected_path=self.settings.streamable_http_path,
+        )
+        return app
+
+
 def _start_process_resources() -> None:
     """Start process-scoped resources before serving requests."""
     logger.info(f"Starting vault MCP server. Vault: {VAULT_PATH}")
@@ -47,7 +105,7 @@ def _stop_process_resources() -> None:
     logger.info("Vault MCP server shut down.")
 
 
-mcp = FastMCP(
+mcp = GuardedFastMCP(
     "obsidian_mcp_server",
     host=VAULT_MCP_HOST,
     port=VAULT_MCP_PORT,

@@ -49,6 +49,7 @@ class GatewayProxyTests(unittest.TestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             captured["url"] = str(request.url)
             captured["authorization"] = request.headers.get("authorization")
+            captured["upstream_secret"] = request.headers.get("x-agentzoo-upstream-secret")
             captured["accept"] = request.headers.get("accept")
             captured["session"] = request.headers.get("mcp-session-id")
             captured["protocol"] = request.headers.get("mcp-protocol-version")
@@ -63,6 +64,7 @@ class GatewayProxyTests(unittest.TestCase):
 
         app = create_app(
             mcp_upstream_url="http://127.0.0.1:8420",
+            mcp_upstream_secret="shared-secret",
             http_client_factory=lambda: httpx.AsyncClient(
                 transport=httpx.MockTransport(handler),
                 timeout=None,
@@ -77,6 +79,7 @@ class GatewayProxyTests(unittest.TestCase):
                     "/mcp",
                     headers={
                         "authorization": "Bearer test-token",
+                        "x-agentzoo-upstream-secret": "attacker-value",
                         "accept": "application/json, text/event-stream",
                         "content-type": "application/json",
                         "mcp-session-id": "session-123",
@@ -88,6 +91,7 @@ class GatewayProxyTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(captured["url"], "http://127.0.0.1:8420/mcp")
         self.assertIsNone(captured["authorization"])
+        self.assertEqual(captured["upstream_secret"], "shared-secret")
         self.assertEqual(captured["session"], "session-123")
         self.assertEqual(captured["protocol"], "2025-03-26")
         self.assertEqual(response.headers["mcp-session-id"], "session-123")
@@ -98,6 +102,7 @@ class GatewayProxyTests(unittest.TestCase):
 
         app = create_app(
             mcp_upstream_url="http://127.0.0.1:8420",
+            mcp_upstream_secret="shared-secret",
             http_client_factory=lambda: httpx.AsyncClient(
                 transport=httpx.MockTransport(handler),
                 timeout=None,

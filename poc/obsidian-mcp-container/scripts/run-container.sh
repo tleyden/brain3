@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+POC_ROOT="$(cd "$PROJECT_ROOT/.." && pwd)"
+ENSURE_UPSTREAM_SECRET="$POC_ROOT/scripts/ensure-mcp-upstream-secret.sh"
 
 if [ -f "$PROJECT_ROOT/.env" ]; then
     set -o allexport
@@ -17,6 +19,7 @@ CONTAINER_NAME="${CONTAINER_NAME:-obsidian-mcp-server}"
 HOST_PORT="${HOST_PORT:-8420}"
 HOST_VAULT_PATH="${HOST_VAULT_PATH:-${VAULT_PATH:-}}"
 SOURCE_MOUNT_PATH="/workspace/obsidian-mcp-container"
+CONTAINER_UPSTREAM_SECRET_PATH="/run/agentzoo/upstream_secret"
 CONTAINER_RUNTIME="macos-container"
 HOST_BIND_ADDRESS="127.0.0.1"
 CONTAINER_LISTEN_HOST="0.0.0.0"
@@ -70,6 +73,7 @@ print_networking_summary() {
 print_mount_summary() {
     echo "Mounts:"
     echo "  ${HOST_VAULT_PATH} -> /vault"
+    echo "  ${HOST_UPSTREAM_SECRET_PATH} -> ${CONTAINER_UPSTREAM_SECRET_PATH} (ro)"
 
     if [ "$MODE" = "bind" ]; then
         echo "  ${PROJECT_ROOT} -> ${SOURCE_MOUNT_PATH} (ro)"
@@ -222,6 +226,13 @@ if [ ! -d "$HOST_VAULT_PATH" ]; then
     exit 1
 fi
 
+if [ ! -x "$ENSURE_UPSTREAM_SECRET" ]; then
+    echo "Error: missing helper script: $ENSURE_UPSTREAM_SECRET" >&2
+    exit 1
+fi
+
+HOST_UPSTREAM_SECRET_PATH="$("$ENSURE_UPSTREAM_SECRET")"
+
 ensure_runtime_image_exists
 check_and_prompt_existing_container
 
@@ -232,7 +243,9 @@ run_args=(
     --publish "${HOST_BIND_ADDRESS}:${HOST_PORT}:${CONTAINER_PORT}"
     --env "VAULT_MCP_HOST=${CONTAINER_LISTEN_HOST}"
     --env "VAULT_PATH=/vault"
+    --env "UPSTREAM_SHARED_SECRET_FILE=${CONTAINER_UPSTREAM_SECRET_PATH}"
     --mount "type=bind,source=${HOST_VAULT_PATH},target=/vault"
+    --mount "type=bind,source=${HOST_UPSTREAM_SECRET_PATH},target=${CONTAINER_UPSTREAM_SECRET_PATH},readonly"
 )
 
 if [ -n "${VAULT_MCP_ALLOWED_HOSTS:-}" ]; then
