@@ -13,6 +13,7 @@ GATEWAY_START_TIMEOUT_SECS="${GATEWAY_START_TIMEOUT_SECS:-15}"
 GATEWAY_STOP_TIMEOUT_SECS="${GATEWAY_STOP_TIMEOUT_SECS:-10}"
 GATEWAY_LOG_PATH="${GATEWAY_LOG_PATH:-/tmp/agentzoo-oauth2-gateway.log}"
 CONTAINER_RUNTIME=""
+CONTAINER_RUN_ARGS=()
 
 usage() {
     cat <<'EOF'
@@ -26,6 +27,10 @@ Behavior:
   - If the gateway cannot become healthy, abort before starting the container.
   - The container runtime must be specified explicitly on every invocation.
 
+Common container-run args:
+  --bind-mount-sourcecode
+                        Run the mounted host source tree instead of the code baked into the image
+
 All arguments are passed through to:
   ./obsidian-mcp-container/scripts/run-container.sh
 EOF
@@ -33,6 +38,7 @@ EOF
 
 require_explicit_container_runtime() {
     local runtime=""
+    CONTAINER_RUN_ARGS=()
 
     while [ "$#" -gt 0 ]; do
         case "$1" in
@@ -43,9 +49,15 @@ require_explicit_container_runtime() {
                     exit 1
                 fi
                 runtime="$2"
+                CONTAINER_RUN_ARGS+=("$1" "$2")
                 shift 2
                 ;;
+            --bind-mount-sourcecode)
+                CONTAINER_RUN_ARGS+=("$1")
+                shift
+                ;;
             *)
+                CONTAINER_RUN_ARGS+=("$1")
                 shift
                 ;;
         esac
@@ -284,7 +296,7 @@ main() {
     fi
 
     echo "Starting MCP container via $CONTAINER_RUN_SCRIPT with runtime $CONTAINER_RUNTIME"
-    "$CONTAINER_RUN_SCRIPT" "$@"
+    "$CONTAINER_RUN_SCRIPT" "${CONTAINER_RUN_ARGS[@]}"
 }
 
 if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
