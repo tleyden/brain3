@@ -58,9 +58,9 @@
 
 ## Shared Secret Shape
 
-- Host file path: `/private/tmp/agentzoo-mcp-upstream-secret`
-- In-container file path: `/run/agentzoo/upstream_secret`
-- Header name: `X-AgentZoo-Upstream-Secret`
+- Host file path: `/private/tmp/brain3-mcp-upstream-secret`
+- In-container file path: `/run/brain3/upstream_secret`
+- Header name: `X-Brain3-Upstream-Secret`
 
 These paths are implementation defaults for the POC. Do not add new user-facing config unless it is needed to get the feature working.
 
@@ -73,7 +73,7 @@ These paths are implementation defaults for the POC. Do not add new user-facing 
 - [ ] **Step 1: Add a failing upstream test for missing secret**
 
 Target behavior:
-- `POST /mcp` without `X-AgentZoo-Upstream-Secret` returns `401`.
+- `POST /mcp` without `X-Brain3-Upstream-Secret` returns `401`.
 
 - [ ] **Step 2: Add a failing upstream test for wrong secret**
 
@@ -88,8 +88,8 @@ Target behavior:
 - [ ] **Step 4: Extend the gateway proxy test**
 
 Target behavior:
-- the gateway injects `X-AgentZoo-Upstream-Secret` on the upstream request
-- any client-supplied `X-AgentZoo-Upstream-Secret` is stripped and ignored
+- the gateway injects `X-Brain3-Upstream-Secret` on the upstream request
+- any client-supplied `X-Brain3-Upstream-Secret` is stripped and ignored
 
 - [ ] **Step 5: Run the relevant tests to confirm they fail before implementation**
 
@@ -112,7 +112,7 @@ Expected:
 - [ ] **Step 1: Create a tiny helper script**
 
 Helper responsibilities:
-- create `/private/tmp/agentzoo-mcp-upstream-secret` if it does not exist
+- create `/private/tmp/brain3-mcp-upstream-secret` if it does not exist
 - generate a long random value if creation is needed
 - set mode `600`
 - print the file path
@@ -121,8 +121,8 @@ Helper responsibilities:
 
 Rules:
 - call the helper before constructing `run_args`
-- mount the host secret file read-only into `/run/agentzoo/upstream_secret`
-- set `UPSTREAM_SHARED_SECRET_FILE=/run/agentzoo/upstream_secret`
+- mount the host secret file read-only into `/run/brain3/upstream_secret`
+- set `UPSTREAM_SHARED_SECRET_FILE=/run/brain3/upstream_secret`
 
 - [ ] **Step 3: Wire the helper into gateway startup**
 
@@ -144,9 +144,9 @@ Add only what is needed:
 ```python
 UPSTREAM_SHARED_SECRET_FILE = os.environ.get(
     "UPSTREAM_SHARED_SECRET_FILE",
-    "/run/agentzoo/upstream_secret",
+    "/run/brain3/upstream_secret",
 )
-UPSTREAM_SHARED_SECRET_HEADER = "x-agentzoo-upstream-secret"
+UPSTREAM_SHARED_SECRET_HEADER = "x-brain3-upstream-secret"
 ```
 
 - [ ] **Step 2: Load the secret at startup and fail closed**
@@ -177,7 +177,7 @@ Add only:
 ```python
 OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE = os.environ.get(
     "OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
-    "/private/tmp/agentzoo-mcp-upstream-secret",
+    "/private/tmp/brain3-mcp-upstream-secret",
 )
 ```
 
@@ -191,7 +191,7 @@ Rules:
 - [ ] **Step 3: Strip and replace the header during proxying**
 
 Rules:
-- add `x-agentzoo-upstream-secret` to stripped request headers
+- add `x-brain3-upstream-secret` to stripped request headers
 - inject the secret from `app.state` before sending the upstream request
 - keep stripping `Authorization` as the proxy already does
 
@@ -225,7 +225,7 @@ Expected:
 Run:
 ```bash
 curl -i \
-  -H 'X-AgentZoo-Upstream-Secret: wrong-secret' \
+  -H 'X-Brain3-Upstream-Secret: wrong-secret' \
   http://127.0.0.1:8420/mcp
 ```
 

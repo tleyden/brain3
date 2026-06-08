@@ -49,7 +49,7 @@ OAUTH2_GATEWAY_ACCESS_TOKEN = os.environ.get("OAUTH2_GATEWAY_ACCESS_TOKEN", "")
 OAUTH2_GATEWAY_MCP_UPSTREAM_URL = os.environ.get("OAUTH2_GATEWAY_MCP_UPSTREAM_URL", "http://127.0.0.1:8420")
 OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE = os.environ.get(
     "OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
-    "/tmp/agentzoo-mcp-upstream-secret",
+    "/tmp/brain3-mcp-upstream-secret",
 )
 OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK = resolve_enforce_host_validation()
 OAUTH2_PKCE_REQUIRED = _env_bool("OAUTH2_PKCE_REQUIRED", True)

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SECRET_FILE="${1:-/tmp/agentzoo-mcp-upstream-secret/upstream_secret}"
+SECRET_FILE="${1:-/tmp/brain3-mcp-upstream-secret/upstream_secret}"
 SECRET_DIR="$(dirname "$SECRET_FILE")"
 
 if [ -f "$SECRET_DIR" ]; then

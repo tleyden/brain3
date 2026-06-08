@@ -62,7 +62,7 @@ class GatewayProxyTests(unittest.TestCase):
         def handler(request: httpx.Request) -> httpx.Response:
             captured["url"] = str(request.url)
             captured["authorization"] = request.headers.get("authorization")
-            captured["upstream_secret"] = request.headers.get("x-agentzoo-upstream-secret")
+            captured["upstream_secret"] = request.headers.get("x-brain3-upstream-secret")
             captured["accept"] = request.headers.get("accept")
             captured["session"] = request.headers.get("mcp-session-id")
             captured["protocol"] = request.headers.get("mcp-protocol-version")
@@ -93,7 +93,7 @@ class GatewayProxyTests(unittest.TestCase):
                     "/mcp",
                     headers={
                         "authorization": "Bearer test-token",
-                        "x-agentzoo-upstream-secret": "attacker-value",
+                        "x-brain3-upstream-secret": "attacker-value",
                         "accept": "application/json, text/event-stream",
                         "content-type": "application/json",
                         "mcp-session-id": "session-123",
@@ -155,7 +155,7 @@ class GatewayProxyTests(unittest.TestCase):
         app = create_app(
             mcp_upstream_url="http://127.0.0.1:8420",
             mcp_upstream_secret="shared-secret",
-            expected_host="agentzoo.yourserver.com",
+            expected_host="brain3.yourserver.com",
             http_client_factory=lambda: httpx.AsyncClient(
                 transport=httpx.MockTransport(handler),
                 timeout=None,
@@ -165,7 +165,7 @@ class GatewayProxyTests(unittest.TestCase):
         )
 
         with patch("oauth2_gateway.config.OAUTH2_GATEWAY_ACCESS_TOKEN", "test-token"):
-            with TestClient(app, base_url="https://agentzoo.yourserver.com") as client:
+            with TestClient(app, base_url="https://brain3.yourserver.com") as client:
                 response = client.post(
                     "/mcp",
                     headers={
@@ -186,7 +186,7 @@ class GatewayProxyTests(unittest.TestCase):
         app = create_app(
             mcp_upstream_url="http://127.0.0.1:8420",
             mcp_upstream_secret="shared-secret",
-            expected_host="agentzoo.yourserver.com",
+            expected_host="brain3.yourserver.com",
             http_client_factory=lambda: httpx.AsyncClient(
                 transport=httpx.MockTransport(handler),
                 timeout=None,
@@ -224,7 +224,7 @@ class GatewayProxyTests(unittest.TestCase):
         app = create_app(
             mcp_upstream_url="http://127.0.0.1:8420",
             mcp_upstream_secret="shared-secret",
-            expected_host="agentzoo.yourserver.com",
+            expected_host="brain3.yourserver.com",
             enforce_host_validation=False,
             http_client_factory=lambda: httpx.AsyncClient(
                 transport=httpx.MockTransport(handler),

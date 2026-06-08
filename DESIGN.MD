@@ -5,7 +5,7 @@ See PRD.MD
 
 ## Design Sketch
 
-![Architecture](Architecture.png)
+See `Architecture.excalidraw`.
 
 ## Design Decisions
 
@@ -95,7 +95,7 @@ There is some prior art here with [CF MCP Portals](https://developers.cloudflare
 ##### Strengths 
 
 * The user can manage tools in LLM and turn off the ones they don't want
-* On the AgentZoo side, only MCPs explicitly marked as "remote tunnel" would be exposed.  This is like the Entrance Gate of the zoo that the public can potentially get into, if they have a password.
+* On the Brain3 side, only MCPs explicitly marked as "remote tunnel" would be exposed.  This is the public entrance to Brain3: reachable from the outside only when access is intentionally allowed.
 
 ##### Risks
 
@@ -252,4 +252,3 @@ Instead: create a prompt with instructions that they can copy into their locally
 ### Derisk: Can we install and manage containers with virtualization.kit?
 
 Probably pretty low risk
-
