@@ -98,27 +98,23 @@ OAUTH2_GATEWAY_CLIENT_SECRET=<paste first secret>
 OAUTH2_GATEWAY_ACCESS_TOKEN=<paste second secret>
 USERNAME=your_username
 PASSWORD=your_password
+BRAIN3_CONTAINER_RUNTIME=macos-container
+BRAIN3_VAULT_PATH=/absolute/path/to/your/vault
 ```
 
 The username and password are the credentials you will enter when your AI app prompts you to sign in.
 
-### 4. Start the MCP server container
+Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian vault or markdown folder. Use `docker` instead of `macos-container` for `BRAIN3_CONTAINER_RUNTIME` if you prefer Docker.
 
-```bash
-./scripts/run-mcp-container.sh \
-  --container-runtime macos-container \
-  --vault-path /absolute/path/to/your/vault
-```
-
-Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian vault or markdown folder.
-
-### 5. Start the gateway
+### 4. Start the gateway
 
 ```bash
 ./target/release/brain3-gateway
 ```
 
-### 6. Verify locally
+The gateway starts the MCP server container automatically on startup. You will see log lines confirming the container is running before the HTTP server binds.
+
+### 5. Verify locally
 
 In another terminal:
 
@@ -130,7 +126,7 @@ curl -s http://127.0.0.1:8421/health
 curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server | python3 -m json.tool
 ```
 
-### 7. Expose via Cloudflare Tunnel
+### 6. Expose via Cloudflare Tunnel
 
 For your AI app to reach Brain3, you need a public URL. The quickest way:
 
@@ -140,13 +136,13 @@ cloudflared tunnel --url http://localhost:8421
 
 `cloudflared` prints a temporary public URL like `https://xxx-yyy-zzz.trycloudflare.com`. Copy this URL.
 
-### 8. Connect your AI app
+### 7. Connect your AI app
 
 In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), add a new MCP server connection with:
 
 | Field | Value |
 |---|---|
-| Server URL | The Cloudflare Tunnel URL from step 7 |
+| Server URL | The Cloudflare Tunnel URL from step 6 |
 | Client ID | `oauth2-gateway-client` (or whatever you set in `.env`) |
 | Client Secret | The value of `OAUTH2_GATEWAY_CLIENT_SECRET` from your `.env` |
 
@@ -158,10 +154,14 @@ Once connected, you can ask your AI to read, search, organize, and edit your not
 
 Stop the gateway with `Ctrl+C` in its terminal.
 
-Stop the MCP container:
+The MCP container keeps running after the gateway exits (it was started detached). Stop it directly:
 
 ```bash
-./scripts/stop.sh --container-runtime macos-container
+# macOS Container
+container stop obsidian-mcp-server
+
+# Docker
+docker stop obsidian-mcp-server
 ```
 
 ## Configuration Reference
@@ -185,14 +185,11 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name (for stable hostname) |
 | `CF_DOMAIN` | *(empty)* | Cloudflare domain (used with `CF_TUNNEL_NAME`) |
 | `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin instead of tunnel |
-
-### MCP Server Container
-
-| Variable | Default | Description |
-|---|---|---|
-| `VAULT_PATH` | *(required)* | Absolute path to your markdown vault |
-| `VAULT_MCP_PORT` | `8420` | Port the MCP server listens on |
-| `VAULT_MCP_ALLOWED_HOSTS` | *(empty)* | Extra allowed Host headers (comma-separated) |
+| `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, gateway starts the container on startup |
+| `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
+| `BRAIN3_CONTAINER_IMAGE` | `obsidian-mcp-server:latest` | Container image to run |
+| `BRAIN3_CONTAINER_NAME` | `obsidian-mcp-server` | Name assigned to the container |
+| `BRAIN3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 
 ## Tool Surface
 

@@ -10,6 +10,14 @@ use brain3_core::ports::container::ContainerPort;
 use super::{DockerContainerAdapter, MacOsContainerAdapter};
 
 pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
+    tracing::info!(
+        container = %startup.container_name,
+        image = %startup.image,
+        vault = %startup.vault_path.display(),
+        host_port = startup.host_port,
+        "ensuring MCP container is running"
+    );
+
     let port: Arc<dyn ContainerPort> = match startup.runtime {
         ContainerRuntime::Docker => Arc::new(DockerContainerAdapter),
         ContainerRuntime::MacOSContainer => Arc::new(MacOsContainerAdapter),

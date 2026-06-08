@@ -2,6 +2,8 @@ use brain3_core::domain::errors::ContainerError;
 use tokio::process::Command;
 
 pub async fn run_command(bin: &str, args: &[&str]) -> Result<String, ContainerError> {
+    tracing::debug!(cmd = bin, args = ?args, "running container command");
+
     let output = Command::new(bin)
         .args(args)
         .output()
@@ -13,6 +15,7 @@ pub async fn run_command(bin: &str, args: &[&str]) -> Result<String, ContainerEr
     } else {
         let code = output.status.code().unwrap_or(-1);
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        tracing::debug!(cmd = bin, code, stderr, "container command failed");
         Err(ContainerError::CommandFailed { code, stderr })
     }
 }

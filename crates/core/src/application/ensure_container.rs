@@ -30,6 +30,8 @@ impl EnsureContainerUseCase {
         }
 
         tracing::info!(container = %config.name, image = %config.image, "starting container");
-        self.port.run(config).await
+        let id = self.port.run(config).await?;
+        tracing::info!(container = %config.name, "container started");
+        Ok(id)
     }
 }
