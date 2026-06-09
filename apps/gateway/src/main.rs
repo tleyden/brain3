@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
+use brain3_core::domain::model::TunnelConfig;
 use brain3_core::ports::config::ConfigPort;
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
@@ -12,6 +13,8 @@ use brain3_platform::container::startup::ensure_mcp_container;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
+
+mod setup_tui;
 
 #[derive(Parser)]
 #[command(name = "brain3-gateway", about = "OAuth2 gateway for MCP servers")]
@@ -21,6 +24,9 @@ struct Args {
 
     #[arg(long)]
     env_file: Option<PathBuf>,
+
+    #[arg(long, help = "Run the interactive setup wizard for Cloudflare named tunnels")]
+    setup: bool,
 }
 
 async fn shutdown_signal() {
@@ -32,6 +38,25 @@ async fn shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    let config_adapter = EnvFileConfigAdapter::new(args.env_file);
+
+    if args.setup {
+        let config = config_adapter.load().context("failed to load configuration")?;
+        match config.tunnel {
+            Some(ref tc @ TunnelConfig::CloudflareNamed { .. }) => {
+                return setup_tui::run(tc).await;
+            }
+            _ => {
+                anyhow::bail!(
+                    "--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in .env\n\
+                     The setup wizard provisions a named Cloudflare tunnel."
+                );
+            }
+        }
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -39,11 +64,25 @@ async fn main() -> Result<()> {
         .with_target(true)
         .init();
 
-    let args = Args::parse();
-
-    let config_adapter = EnvFileConfigAdapter::new(args.env_file);
     let config = Arc::new(config_adapter.load().context("failed to load configuration")?);
     brain3_platform::config::log_config::log_startup_config(&config);
+
+    if let Some(TunnelConfig::CloudflareNamed { ref config_file, .. }) = config.tunnel {
+        if !config_file.exists() {
+            eprintln!();
+            eprintln!("ERROR: Cloudflare tunnel not yet provisioned.");
+            eprintln!();
+            eprintln!("  Config file not found: {}", config_file.display());
+            eprintln!();
+            eprintln!("  Run the setup wizard:");
+            eprintln!("    brain3-gateway --setup");
+            eprintln!();
+            eprintln!("  Or use a quick tunnel instead (no setup needed):");
+            eprintln!("    Set CF_QUICK_TUNNEL=true and remove CF_TUNNEL_NAME/CF_DOMAIN in .env");
+            eprintln!();
+            std::process::exit(1);
+        }
+    }
 
     let upstream_secret = brain3_platform::config::upstream_secret::read_or_create(
         &config.mcp_reverse_proxy.upstream_secret_file,

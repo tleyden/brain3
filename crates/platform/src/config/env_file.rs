@@ -199,7 +199,7 @@ fn load_container_startup_config(
 }
 
 fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigError> {
-    let quick = env_bool("CF_QUICK_TUNNEL", false);
+    let quick = env_bool("CF_QUICK_TUNNEL", true);
     let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
     let domain = normalize_hostname(&env_var_or("CF_DOMAIN", ""));
     let named = !tunnel_name.is_empty() && !domain.is_empty();
@@ -210,22 +210,23 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
         ));
     }
 
-    if quick {
-        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
-    }
-
     if named {
         let config_file_str = env_var_or("CF_TUNNEL_CONFIG_FILE", "");
-        if config_file_str.is_empty() {
-            return Err(ConfigError::Missing(
-                "CF_TUNNEL_CONFIG_FILE is required when CF_TUNNEL_NAME and CF_DOMAIN are set".into(),
-            ));
-        }
+        let config_file = if config_file_str.is_empty() {
+            PathBuf::from(format!(".cloudflared/{tunnel_name}.yml"))
+        } else {
+            PathBuf::from(config_file_str)
+        };
         return Ok(Some(TunnelConfig::CloudflareNamed {
             tunnel_name,
             domain,
-            config_file: PathBuf::from(config_file_str),
+            config_file,
+            local_port: gateway_port,
         }));
+    }
+
+    if quick {
+        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
     }
 
     Ok(None)
