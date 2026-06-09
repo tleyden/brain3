@@ -3,6 +3,7 @@ use std::sync::{Arc, LazyLock};
 
 use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
+use crate::domain::redact::elide_secret;
 use crate::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
 
 use super::validate_request::{validate_bearer_token, validate_host};
@@ -80,7 +81,19 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             self.hostname_validation.expected_host.as_deref(),
             self.hostname_validation.enforce,
         )?;
-        validate_bearer_token(auth_header, &self.access_token)?;
+
+        let received_token = auth_header.split_once(' ').map(|(_, t)| t).unwrap_or("");
+        if let Err(e) = validate_bearer_token(auth_header, &self.access_token) {
+            tracing::warn!(
+                received_token_hint = %elide_secret(received_token),
+                expected_token_hint = %elide_secret(&self.access_token),
+                method = method,
+                path = path,
+                host = request_host,
+                "MCP proxy rejected: bearer token mismatch"
+            );
+            return Err(e);
+        }
 
         let upstream_url = self.build_upstream_url(path, query);
         let mut filtered_headers = self.filter_request_headers(headers);
