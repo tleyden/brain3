@@ -84,16 +84,27 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
 
         let received_token = auth_header.split_once(' ').map(|(_, t)| t).unwrap_or("");
         if let Err(e) = validate_bearer_token(auth_header, &self.access_token) {
-            tracing::warn!(
-                received_token_hint = %elide_secret(received_token),
-                expected_token_hint = %elide_secret(&self.access_token),
-                method = method,
-                path = path,
-                host = request_host,
-                "MCP proxy rejected: bearer token mismatch"
-            );
+            if received_token.is_empty() {
+                tracing::info!(
+                    method = method,
+                    path = path,
+                    host = request_host,
+                    "MCP proxy: unauthenticated probe, returning 401 with resource metadata"
+                );
+            } else {
+                tracing::warn!(
+                    received_token_hint = %elide_secret(received_token),
+                    expected_token_hint = %elide_secret(&self.access_token),
+                    method = method,
+                    path = path,
+                    host = request_host,
+                    "MCP proxy rejected: bearer token mismatch"
+                );
+            }
             return Err(e);
         }
+
+        tracing::info!(method = method, path = path, "MCP proxy: forwarding authenticated request to upstream");
 
         let upstream_url = self.build_upstream_url(path, query);
         let mut filtered_headers = self.filter_request_headers(headers);

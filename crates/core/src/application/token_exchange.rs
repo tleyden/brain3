@@ -126,6 +126,11 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
             }
         }
 
+        tracing::info!(
+            client_id = %req.client_id,
+            "token exchange succeeded: access token issued"
+        );
+
         Ok(TokenResponse {
             access_token: self.config.access_token.clone(),
             token_type: "bearer".into(),
