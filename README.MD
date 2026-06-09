@@ -5,6 +5,8 @@ An easy-to-use, local-first knowledge management system. Brain3 turns a pile of 
 
 You access Brain3 directly from your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile) — no separate app needed.
 
+There is no cloud service required other than Cloudflare Tunnel, which is free to use.  Support for other cloud tunneling solutions like ngrok and tailscale funnels is planned. 
+
 ## Why This Exists
 
 Brain3 is a user-friendly, agent-native implementation of the [LLMWiki](https://tleyden.github.io/blog/2024/12/22/llmwiki/) idea. It stores everything locally in markdown files in a fully private manner and is fully compatible with [Obsidian](https://obsidian.md).
@@ -298,3 +300,11 @@ cargo test
 ```bash
 cargo build --release
 ```
+
+## Roadmap 
+
+TODO
+
+## Credits
+
+- obsidian-web-mcp repo
