@@ -28,6 +28,5 @@ echo "Credentials file: $CF_TUNNEL_CREDENTIALS_FILE"
 echo
 echo "Next:"
 echo "  cargo run --release -p brain3-gateway"
-echo "  ./scripts/run-cf-tunnel-with-domain.sh"
 echo
 cf_tunnel_print_quick_tunnel_hint
