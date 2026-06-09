@@ -1,5 +1,5 @@
 
-<img width="800" alt="Image" src="https://github.com/user-attachments/assets/02e94598-2cc8-4f9a-ac10-1d2be3fc624f" />
+<img width="800" alt="Image" src="https://github.com/user-attachments/assets/752e5eed-84c0-40cb-a3b3-104d79dd5210" />
 
 An easy-to-use, local-first knowledge management system. Brain3 turns a pile of your notes, web clippings, ideas, and plans into a living, interconnected encyclopedia that an AI continuously maintains and you can chat with.
 
