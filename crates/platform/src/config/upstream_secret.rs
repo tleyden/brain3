@@ -22,8 +22,14 @@ pub fn read_or_create(path: &Path) -> Result<String> {
             .trim()
             .to_string();
         if !secret.is_empty() {
+            tracing::info!(
+                path = %path.display(),
+                secret_hint = &secret[..secret.len().min(7)],
+                "Read existing upstream shared secret"
+            );
             return Ok(secret);
         }
+        tracing::warn!(path = %path.display(), "Upstream shared secret file exists but is empty; generating a new one");
     }
 
     if let Some(parent) = path.parent() {
@@ -54,6 +60,10 @@ pub fn read_or_create(path: &Path) -> Result<String> {
             .with_context(|| format!("Unable to set permissions on: {}", path.display()))?;
     }
 
-    tracing::info!("Generated upstream shared secret at {}", path.display());
+    tracing::warn!(
+        path = %path.display(),
+        secret_hint = &secret[..secret.len().min(7)],
+        "Generated NEW upstream shared secret — MCP container must be restarted to pick it up"
+    );
     Ok(secret)
 }

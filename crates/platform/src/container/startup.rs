@@ -15,6 +15,7 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         image = %startup.image,
         vault = %startup.vault_path.display(),
         host_port = startup.host_port,
+        upstream_secret_dir = %startup.upstream_secret_dir.display(),
         "ensuring MCP container is running"
     );
 

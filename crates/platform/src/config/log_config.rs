@@ -1,6 +1,13 @@
 use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
 
 pub fn log_startup_config(config: &GatewayConfig) {
+    let upstream_secret_dir = config
+        .mcp_reverse_proxy
+        .upstream_secret_file
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "<unknown>".into());
+
     tracing::info!(
         port = config.port,
         client_id = %config.oauth.client_id,
@@ -11,6 +18,7 @@ pub fn log_startup_config(config: &GatewayConfig) {
         pkce_required = config.oauth.pkce_required,
         upstream_url = %config.mcp_reverse_proxy.mcp_upstream_url,
         upstream_secret_file = %config.mcp_reverse_proxy.upstream_secret_file.display(),
+        upstream_secret_dir = %upstream_secret_dir,
         expected_host = ?config.hostname_validation.expected_host,
         enforce_hostname = config.hostname_validation.enforce,
         container = ?config.container.as_ref().map(|c| format!(
