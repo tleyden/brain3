@@ -9,13 +9,17 @@ use brain3_core::ports::container::ContainerPort;
 
 use super::{DockerContainerAdapter, MacOsContainerAdapter};
 
+const DEV_MOUNT_TARGET: &str = "/workspace/obsidian-mcp-container";
+
 pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
+    let dev_mode = startup.dev_mount_source.is_some();
     tracing::info!(
         container = %startup.container_name,
         image = %startup.image,
         vault = %startup.vault_path.display(),
         host_port = startup.host_port,
         upstream_secret_dir = %startup.upstream_secret_dir.display(),
+        dev_mode,
         "ensuring MCP container is running"
     );
 
@@ -30,6 +34,50 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         unsafe { libc::getgid() }
     );
 
+    let mut env_vars = vec![
+        ("VAULT_MCP_HOST".into(), "0.0.0.0".into()),
+        ("VAULT_MCP_PORT".into(), startup.container_port.to_string()),
+        ("VAULT_PATH".into(), "/vault".into()),
+        (
+            "UPSTREAM_SHARED_SECRET_FILE".into(),
+            "/run/brain3/upstream_secret".into(),
+        ),
+    ];
+
+    let mut bind_mounts = vec![
+        BindMount {
+            host_path: startup.vault_path.clone(),
+            container_path: "/vault".into(),
+            readonly: false,
+        },
+        BindMount {
+            host_path: startup.upstream_secret_dir.clone(),
+            container_path: "/run/brain3".into(),
+            readonly: true,
+        },
+    ];
+
+    let mut workdir = None;
+    let mut command = Vec::new();
+
+    if let Some(ref source_path) = startup.dev_mount_source {
+        bind_mounts.push(BindMount {
+            host_path: source_path.clone(),
+            container_path: DEV_MOUNT_TARGET.into(),
+            readonly: true,
+        });
+        env_vars.push((
+            "PYTHONPATH".into(),
+            format!("{DEV_MOUNT_TARGET}/src"),
+        ));
+        workdir = Some(DEV_MOUNT_TARGET.to_string());
+        command = vec![
+            "/opt/obsidian-mcp-container/.venv/bin/python".into(),
+            "-m".into(),
+            "obsidian_mcp_server.server".into(),
+        ];
+    }
+
     let config = ContainerConfig {
         image: startup.image.clone(),
         name: startup.container_name.clone(),
@@ -38,30 +86,13 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
             host_port: startup.host_port,
             container_port: startup.container_port,
         }],
-        env_vars: vec![
-            ("VAULT_MCP_HOST".into(), "0.0.0.0".into()),
-            ("VAULT_MCP_PORT".into(), startup.container_port.to_string()),
-            ("VAULT_PATH".into(), "/vault".into()),
-            (
-                "UPSTREAM_SHARED_SECRET_FILE".into(),
-                "/run/brain3/upstream_secret".into(),
-            ),
-        ],
-        bind_mounts: vec![
-            BindMount {
-                host_path: startup.vault_path.clone(),
-                container_path: "/vault".into(),
-                readonly: false,
-            },
-            BindMount {
-                host_path: startup.upstream_secret_dir.clone(),
-                container_path: "/run/brain3".into(),
-                readonly: true,
-            },
-        ],
+        env_vars,
+        bind_mounts,
         user: Some(uid_gid),
         detach: true,
         remove_on_exit: false,
+        workdir,
+        command,
     };
 
     EnsureContainerUseCase::new(port).ensure(&config).await?;
