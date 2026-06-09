@@ -22,10 +22,10 @@ impl EnsureContainerUseCase {
 
         if self.port.exists(&id).await? {
             if self.port.is_running(&id).await? {
-                tracing::info!(container = %config.name, "container already running");
-                return Ok(id);
+                tracing::info!(container = %config.name, "stopping running container to pick up fresh shared secret");
+                self.port.stop(&id).await?;
             }
-            tracing::info!(container = %config.name, "removing stopped container before restarting");
+            tracing::info!(container = %config.name, "removing container before fresh start");
             self.port.remove(&id).await?;
         }
 
