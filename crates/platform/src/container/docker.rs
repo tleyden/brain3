@@ -57,7 +57,14 @@ impl ContainerPort for DockerContainerAdapter {
             args.push("--mount".into());
             args.push(spec);
         }
+        if let Some(ref wd) = config.workdir {
+            args.push("--workdir".into());
+            args.push(wd.clone());
+        }
         args.push(config.image.clone());
+        for c in &config.command {
+            args.push(c.clone());
+        }
 
         let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
         run_command("docker", &refs).await?;

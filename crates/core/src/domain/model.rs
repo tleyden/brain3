@@ -51,6 +51,9 @@ pub struct ContainerConfig {
     pub user: Option<String>,
     pub detach: bool,
     pub remove_on_exit: bool,
+    pub workdir: Option<String>,
+    /// Override the image's default CMD/entrypoint.
+    pub command: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -77,6 +80,9 @@ pub struct ContainerStartupConfig {
     pub upstream_secret_dir: PathBuf,
     pub host_port: u16,
     pub container_port: u16,
+    /// When set, bind-mount this host directory into the container and run
+    /// from source instead of the code baked into the image.
+    pub dev_mount_source: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]

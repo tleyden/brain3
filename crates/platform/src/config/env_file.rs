@@ -181,6 +181,11 @@ fn load_container_startup_config(
         .unwrap_or(std::path::Path::new("/tmp"))
         .to_path_buf();
 
+    let dev_mount_source = env::var("BRAIN3_DEV_CONTAINER_MOUNT_SOURCE")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .map(PathBuf::from);
+
     Ok(Some(ContainerStartupConfig {
         runtime,
         image: env_var_or("BRAIN3_CONTAINER_IMAGE", "obsidian-mcp-server:latest"),
@@ -189,6 +194,7 @@ fn load_container_startup_config(
         upstream_secret_dir,
         host_port,
         container_port,
+        dev_mount_source,
     }))
 }
 
