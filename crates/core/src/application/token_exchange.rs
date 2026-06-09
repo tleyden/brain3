@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::domain::errors::OAuthError;
 use crate::domain::model::OAuthConfig;
 use crate::domain::oauth::{constant_time_eq, verify_pkce, TokenRequest, TokenResponse, ACCESS_TOKEN_LIFETIME_SECS};
+use crate::domain::redact::elide_secret;
 use crate::ports::auth_code_store::AuthCodeStore;
 
 pub struct TokenExchangeUseCase<S: AuthCodeStore> {
@@ -16,6 +17,15 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
     }
 
     pub async fn exchange(&self, req: &TokenRequest) -> Result<TokenResponse, OAuthError> {
+        tracing::info!(
+            grant_type = %req.grant_type,
+            client_id = %req.client_id,
+            client_secret_hint = %elide_secret(&req.client_secret),
+            redirect_uri = ?req.redirect_uri,
+            has_code_verifier = req.code_verifier.is_some(),
+            "token exchange request received"
+        );
+
         if req.grant_type != "authorization_code" {
             return Err(OAuthError::UnsupportedGrantType);
         }
@@ -40,7 +50,11 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
             req.client_secret.as_bytes(),
             self.config.client_secret.as_bytes(),
         ) {
-            tracing::warn!("token exchange rejected: client_secret mismatch");
+            tracing::warn!(
+                received = %elide_secret(&req.client_secret),
+                expected = %elide_secret(&self.config.client_secret),
+                "token exchange rejected: client_secret mismatch"
+            );
             return Err(OAuthError::InvalidClient);
         }
 

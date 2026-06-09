@@ -91,6 +91,15 @@ pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + '
 ) -> Response {
     let req = parse_authorize_request(&query);
 
+    tracing::info!(
+        client_id = %req.client_id,
+        redirect_uri = %req.redirect_uri,
+        response_type = %req.response_type,
+        has_code_challenge = req.code_challenge.is_some(),
+        state = ?req.state,
+        "authorize GET received"
+    );
+
     if let Err(e) = state.authorize.validate(&req) {
         tracing::warn!(
             client_id = %req.client_id,
