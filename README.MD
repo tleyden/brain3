@@ -1,8 +1,11 @@
-# Brain3
+
+<img width="800" alt="Image" src="https://github.com/user-attachments/assets/752e5eed-84c0-40cb-a3b3-104d79dd5210" />
 
 An easy-to-use, local-first knowledge management system. Brain3 turns a pile of your notes, web clippings, ideas, and plans into a living, interconnected encyclopedia that an AI continuously maintains and you can chat with.
 
 You access Brain3 directly from your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile) — no separate app needed.
+
+There is no cloud service required other than Cloudflare Tunnel, which is free to use.  Support for other cloud tunneling solutions like ngrok and tailscale funnels is planned. 
 
 ## Why This Exists
 
@@ -297,3 +300,11 @@ cargo test
 ```bash
 cargo build --release
 ```
+
+## Roadmap 
+
+TODO
+
+## Credits
+
+- obsidian-web-mcp repo
