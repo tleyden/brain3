@@ -30,6 +30,14 @@ impl McpProxyPort for ReqwestMcpProxy {
             .parse::<reqwest::Method>()
             .map_err(|e| ProxyError::BadGateway(format!("invalid method: {e}")))?;
 
+        tracing::debug!(
+            method = %method,
+            url = %request.url,
+            header_count = request.headers.len(),
+            body_bytes = request.body.len(),
+            "reqwest: sending request to MCP container"
+        );
+
         let mut builder = self.client.request(method, &request.url);
 
         for (name, value) in &request.headers {
@@ -38,12 +46,24 @@ impl McpProxyPort for ReqwestMcpProxy {
 
         builder = builder.body(request.body);
 
-        let response = builder
-            .send()
-            .await
-            .map_err(|e| ProxyError::BadGateway(format!("MCP upstream unavailable: {e}")))?;
+        let start = std::time::Instant::now();
+        let response = builder.send().await.map_err(|e| {
+            tracing::warn!(
+                url = %request.url,
+                error = %e,
+                "reqwest: failed to reach MCP container"
+            );
+            ProxyError::BadGateway(format!("MCP upstream unavailable: {e}"))
+        })?;
+        let elapsed = start.elapsed();
 
         let status = response.status().as_u16();
+        tracing::debug!(
+            status = status,
+            elapsed_ms = elapsed.as_millis() as u64,
+            "reqwest: MCP container responded"
+        );
+
         let headers: Vec<(String, String)> = response
             .headers()
             .iter()
@@ -57,7 +77,10 @@ impl McpProxyPort for ReqwestMcpProxy {
         let body = response
             .bytes()
             .await
-            .map_err(|e| ProxyError::BadGateway(format!("failed to read upstream body: {e}")))?
+            .map_err(|e| {
+                tracing::warn!(error = %e, "reqwest: failed to read MCP container response body");
+                ProxyError::BadGateway(format!("failed to read upstream body: {e}"))
+            })?
             .to_vec();
 
         Ok(McpProxyResponse {

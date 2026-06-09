@@ -104,23 +104,55 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             return Err(e);
         }
 
-        tracing::info!(method = method, path = path, "MCP proxy: forwarding authenticated request to upstream");
-
         let upstream_url = self.build_upstream_url(path, query);
-        let mut filtered_headers = self.filter_request_headers(headers);
-        filtered_headers.push((
+        let filtered_headers = self.filter_request_headers(headers);
+
+        let header_count = filtered_headers.len() + 1; // +1 for upstream secret
+        tracing::info!(
+            method = method,
+            path = path,
+            upstream_url = %upstream_url,
+            forwarded_headers = header_count,
+            body_bytes = body.len(),
+            "MCP proxy: forwarding authenticated request to upstream"
+        );
+        tracing::debug!(
+            forwarded_header_names = ?filtered_headers.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            "MCP proxy: forwarded request headers"
+        );
+        tracing::trace!(
+            body = %String::from_utf8_lossy(&body[..body.len().min(1024)]),
+            "MCP proxy: request body"
+        );
+
+        let mut final_headers = filtered_headers;
+        final_headers.push((
             "x-brain3-upstream-secret".into(),
             self.upstream_secret.clone(),
         ));
 
-        self.proxy
+        let response = self.proxy
             .forward(McpProxyRequest {
                 method: method.into(),
-                url: upstream_url,
-                headers: filtered_headers,
+                url: upstream_url.clone(),
+                headers: final_headers,
                 body,
             })
-            .await
+            .await?;
+
+        tracing::debug!(
+            upstream_url = %upstream_url,
+            status = response.status,
+            response_headers = ?response.headers.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            body_bytes = response.body.len(),
+            "MCP proxy: upstream response received"
+        );
+        tracing::trace!(
+            body = %String::from_utf8_lossy(&response.body[..response.body.len().min(1024)]),
+            "MCP proxy: response body"
+        );
+
+        Ok(response)
     }
 
     fn build_upstream_url(&self, path: &str, query: Option<&str>) -> String {
