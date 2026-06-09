@@ -13,11 +13,11 @@ impl ContainerPort for DockerContainerAdapter {
     }
 
     async fn exists(&self, id: &ContainerId) -> Result<bool, ContainerError> {
-        command_succeeds("docker", &["inspect", &id.0]).await
+        command_succeeds("docker", &["container", "inspect", &id.0]).await
     }
 
     async fn is_running(&self, id: &ContainerId) -> Result<bool, ContainerError> {
-        match run_command("docker", &["inspect", "--format", "{{.State.Running}}", &id.0]).await {
+        match run_command("docker", &["container", "inspect", "--format", "{{.State.Running}}", &id.0]).await {
             Ok(out) => Ok(out.trim() == "true"),
             Err(ContainerError::CommandFailed { .. }) => Ok(false),
             Err(e) => Err(e),
