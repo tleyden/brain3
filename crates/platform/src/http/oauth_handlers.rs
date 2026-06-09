@@ -68,6 +68,12 @@ pub async fn oauth_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'stati
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let base_url = resolve_base_url(&headers);
+    tracing::info!(
+        base_url = %base_url,
+        host = ?headers.get("host").map(|v| v.to_str().unwrap_or("<invalid>")),
+        x_forwarded_host = ?headers.get("x-forwarded-host").map(|v| v.to_str().unwrap_or("<invalid>")),
+        "serving OAuth metadata"
+    );
     Json(json!({
         "issuer": base_url,
         "authorization_endpoint": format!("{base_url}/oauth/authorize"),
