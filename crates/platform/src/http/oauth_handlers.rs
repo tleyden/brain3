@@ -9,6 +9,7 @@ use serde_json::json;
 
 use brain3_core::domain::errors::OAuthError;
 use brain3_core::domain::oauth::{AuthorizeRequest, TokenRequest};
+use brain3_core::domain::redact::elide_secret;
 use brain3_core::ports::auth_code_store::AuthCodeStore;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
@@ -191,7 +192,12 @@ pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
 
     match state.token_exchange.exchange(&req).await {
         Ok(token_response) => {
-            tracing::info!("OAuth token issued via authorization_code grant");
+            tracing::info!(
+                access_token_hint = %elide_secret(&token_response.access_token),
+                token_type = %token_response.token_type,
+                expires_in = token_response.expires_in,
+                "OAuth token issued via authorization_code grant"
+            );
             Json(json!({
                 "access_token": token_response.access_token,
                 "token_type": token_response.token_type,

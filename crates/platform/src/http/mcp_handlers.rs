@@ -8,6 +8,7 @@ use serde_json::json;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::validate_request::validate_host;
 use brain3_core::domain::errors::ProxyError;
+use brain3_core::domain::redact::elide_secret;
 use brain3_core::ports::auth_code_store::AuthCodeStore;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
@@ -111,10 +112,20 @@ pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'st
     body: Bytes,
 ) -> Response {
     let host = effective_host(&headers);
-    let auth_header = headers
+    let raw_auth = headers
         .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+        .and_then(|v| v.to_str().ok());
+    let auth_header = raw_auth.unwrap_or("");
+
+    tracing::info!(
+        method = %method,
+        path = %uri,
+        host = %host,
+        has_auth_header = raw_auth.is_some(),
+        auth_scheme = auth_header.split_once(' ').map(|(s, _)| s).unwrap_or("<none>"),
+        token_hint = %elide_secret(auth_header.split_once(' ').map(|(_, t)| t).unwrap_or("")),
+        "MCP request received"
+    );
 
     let header_pairs: Vec<(String, String)> = headers
         .iter()
