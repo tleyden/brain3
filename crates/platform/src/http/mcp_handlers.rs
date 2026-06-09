@@ -148,6 +148,30 @@ pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'st
         Ok(upstream_response) => {
             let status = StatusCode::from_u16(upstream_response.status)
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+            let body_preview = if status.is_client_error() || status.is_server_error() {
+                String::from_utf8_lossy(
+                    &upstream_response.body[..upstream_response.body.len().min(512)]
+                ).to_string()
+            } else {
+                String::new()
+            };
+
+            if status.is_success() {
+                tracing::info!(
+                    status = status.as_u16(),
+                    body_bytes = upstream_response.body.len(),
+                    "MCP upstream responded OK"
+                );
+            } else {
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_bytes = upstream_response.body.len(),
+                    body_preview = %body_preview,
+                    "MCP upstream responded with error"
+                );
+            }
+
             let filtered_headers =
                 ProxyMcpUseCase::<P>::filter_response_headers(upstream_response.headers);
 
