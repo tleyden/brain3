@@ -76,6 +76,7 @@ pub struct ContainerStartupConfig {
     pub vault_path: PathBuf,
     pub upstream_secret_dir: PathBuf,
     pub host_port: u16,
+    pub container_port: u16,
 }
 
 #[derive(Debug, Clone)]

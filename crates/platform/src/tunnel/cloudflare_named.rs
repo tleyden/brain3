@@ -69,7 +69,7 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                tracing::debug!("cloudflared: {}", line);
+                tracing::info!("cloudflared: {}", line);
             }
         });
 

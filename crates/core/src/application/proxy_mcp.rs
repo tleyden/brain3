@@ -3,6 +3,7 @@ use std::sync::{Arc, LazyLock};
 
 use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
+use crate::domain::redact::elide_secret;
 use crate::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
 
 use super::validate_request::{validate_bearer_token, validate_host};
@@ -80,23 +81,79 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             self.hostname_validation.expected_host.as_deref(),
             self.hostname_validation.enforce,
         )?;
-        validate_bearer_token(auth_header, &self.access_token)?;
+
+        let received_token = auth_header.split_once(' ').map(|(_, t)| t).unwrap_or("");
+        if let Err(e) = validate_bearer_token(auth_header, &self.access_token) {
+            if received_token.is_empty() {
+                tracing::info!(
+                    method = method,
+                    path = path,
+                    host = request_host,
+                    "MCP proxy: unauthenticated probe, returning 401 with resource metadata"
+                );
+            } else {
+                tracing::warn!(
+                    received_token_hint = %elide_secret(received_token),
+                    expected_token_hint = %elide_secret(&self.access_token),
+                    method = method,
+                    path = path,
+                    host = request_host,
+                    "MCP proxy rejected: bearer token mismatch"
+                );
+            }
+            return Err(e);
+        }
 
         let upstream_url = self.build_upstream_url(path, query);
-        let mut filtered_headers = self.filter_request_headers(headers);
-        filtered_headers.push((
+        let filtered_headers = self.filter_request_headers(headers);
+
+        let header_count = filtered_headers.len() + 1; // +1 for upstream secret
+        tracing::info!(
+            method = method,
+            path = path,
+            upstream_url = %upstream_url,
+            forwarded_headers = header_count,
+            body_bytes = body.len(),
+            upstream_secret_hint = %elide_secret(&self.upstream_secret),
+            "MCP proxy: forwarding authenticated request to upstream"
+        );
+        tracing::debug!(
+            forwarded_header_names = ?filtered_headers.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            "MCP proxy: forwarded request headers"
+        );
+        tracing::trace!(
+            body = %String::from_utf8_lossy(&body[..body.len().min(1024)]),
+            "MCP proxy: request body"
+        );
+
+        let mut final_headers = filtered_headers;
+        final_headers.push((
             "x-brain3-upstream-secret".into(),
             self.upstream_secret.clone(),
         ));
 
-        self.proxy
+        let response = self.proxy
             .forward(McpProxyRequest {
                 method: method.into(),
-                url: upstream_url,
-                headers: filtered_headers,
+                url: upstream_url.clone(),
+                headers: final_headers,
                 body,
             })
-            .await
+            .await?;
+
+        tracing::debug!(
+            upstream_url = %upstream_url,
+            status = response.status,
+            response_headers = ?response.headers.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            body_bytes = response.body.len(),
+            "MCP proxy: upstream response received"
+        );
+        tracing::trace!(
+            body = %String::from_utf8_lossy(&response.body[..response.body.len().min(1024)]),
+            "MCP proxy: response body"
+        );
+
+        Ok(response)
     }
 
     fn build_upstream_url(&self, path: &str, query: Option<&str>) -> String {

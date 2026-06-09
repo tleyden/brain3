@@ -9,6 +9,7 @@ use serde_json::json;
 
 use brain3_core::domain::errors::OAuthError;
 use brain3_core::domain::oauth::{AuthorizeRequest, TokenRequest};
+use brain3_core::domain::redact::elide_secret;
 use brain3_core::ports::auth_code_store::AuthCodeStore;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
@@ -68,6 +69,12 @@ pub async fn oauth_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'stati
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let base_url = resolve_base_url(&headers);
+    tracing::info!(
+        base_url = %base_url,
+        host = ?headers.get("host").map(|v| v.to_str().unwrap_or("<invalid>")),
+        x_forwarded_host = ?headers.get("x-forwarded-host").map(|v| v.to_str().unwrap_or("<invalid>")),
+        "serving OAuth metadata"
+    );
     Json(json!({
         "issuer": base_url,
         "authorization_endpoint": format!("{base_url}/oauth/authorize"),
@@ -84,6 +91,15 @@ pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + '
     axum::extract::Query(query): axum::extract::Query<HashMap<String, String>>,
 ) -> Response {
     let req = parse_authorize_request(&query);
+
+    tracing::info!(
+        client_id = %req.client_id,
+        redirect_uri = %req.redirect_uri,
+        response_type = %req.response_type,
+        has_code_challenge = req.code_challenge.is_some(),
+        state = ?req.state,
+        "authorize GET received"
+    );
 
     if let Err(e) = state.authorize.validate(&req) {
         tracing::warn!(
@@ -176,7 +192,12 @@ pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
 
     match state.token_exchange.exchange(&req).await {
         Ok(token_response) => {
-            tracing::info!("OAuth token issued via authorization_code grant");
+            tracing::info!(
+                access_token_hint = %elide_secret(&token_response.access_token),
+                token_type = %token_response.token_type,
+                expires_in = token_response.expires_in,
+                "OAuth token issued via authorization_code grant"
+            );
             Json(json!({
                 "access_token": token_response.access_token,
                 "token_type": token_response.token_type,

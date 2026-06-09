@@ -8,6 +8,7 @@ use serde_json::json;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::validate_request::validate_host;
 use brain3_core::domain::errors::ProxyError;
+use brain3_core::domain::redact::elide_secret;
 use brain3_core::ports::auth_code_store::AuthCodeStore;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
@@ -111,10 +112,20 @@ pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'st
     body: Bytes,
 ) -> Response {
     let host = effective_host(&headers);
-    let auth_header = headers
+    let raw_auth = headers
         .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+        .and_then(|v| v.to_str().ok());
+    let auth_header = raw_auth.unwrap_or("");
+
+    tracing::info!(
+        method = %method,
+        path = %uri,
+        host = %host,
+        has_auth_header = raw_auth.is_some(),
+        auth_scheme = auth_header.split_once(' ').map(|(s, _)| s).unwrap_or("<none>"),
+        token_hint = %elide_secret(auth_header.split_once(' ').map(|(_, t)| t).unwrap_or("")),
+        "MCP request received"
+    );
 
     let header_pairs: Vec<(String, String)> = headers
         .iter()
@@ -137,6 +148,30 @@ pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'st
         Ok(upstream_response) => {
             let status = StatusCode::from_u16(upstream_response.status)
                 .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+            let body_preview = if status.is_client_error() || status.is_server_error() {
+                String::from_utf8_lossy(
+                    &upstream_response.body[..upstream_response.body.len().min(512)]
+                ).to_string()
+            } else {
+                String::new()
+            };
+
+            if status.is_success() {
+                tracing::info!(
+                    status = status.as_u16(),
+                    body_bytes = upstream_response.body.len(),
+                    "MCP upstream responded OK"
+                );
+            } else {
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_bytes = upstream_response.body.len(),
+                    body_preview = %body_preview,
+                    "MCP upstream responded with error"
+                );
+            }
+
             let filtered_headers =
                 ProxyMcpUseCase::<P>::filter_response_headers(upstream_response.headers);
 

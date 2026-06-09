@@ -15,6 +15,7 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         image = %startup.image,
         vault = %startup.vault_path.display(),
         host_port = startup.host_port,
+        upstream_secret_dir = %startup.upstream_secret_dir.display(),
         "ensuring MCP container is running"
     );
 
@@ -35,10 +36,11 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         port_mappings: vec![PortMapping {
             host_address: "127.0.0.1".into(),
             host_port: startup.host_port,
-            container_port: 8420,
+            container_port: startup.container_port,
         }],
         env_vars: vec![
             ("VAULT_MCP_HOST".into(), "0.0.0.0".into()),
+            ("VAULT_MCP_PORT".into(), startup.container_port.to_string()),
             ("VAULT_PATH".into(), "/vault".into()),
             (
                 "UPSTREAM_SHARED_SECRET_FILE".into(),

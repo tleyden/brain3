@@ -50,6 +50,11 @@ impl ConfigPort for EnvFileConfigAdapter {
 
         let container = load_container_startup_config(&upstream_secret_file)?;
 
+        let default_upstream_url = match &container {
+            Some(c) => format!("http://127.0.0.1:{}", c.host_port),
+            None => "http://127.0.0.1:8420".to_string(),
+        };
+
         let mut missing = Vec::new();
         let client_secret = require_nonempty("OAUTH2_GATEWAY_CLIENT_SECRET", &mut missing);
         let access_token = require_nonempty("OAUTH2_GATEWAY_ACCESS_TOKEN", &mut missing);
@@ -78,7 +83,7 @@ impl ConfigPort for EnvFileConfigAdapter {
             mcp_reverse_proxy: MCPReverseProxyConfig {
                 mcp_upstream_url: env_var_or(
                     "OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
-                    "http://127.0.0.1:8420",
+                    &default_upstream_url,
                 ),
                 upstream_secret_file,
             },
@@ -167,6 +172,10 @@ fn load_container_startup_config(
         .parse::<u16>()
         .map_err(|e| ConfigError::Invalid(format!("BRAIN3_CONTAINER_HOST_PORT: {e}")))?;
 
+    let container_port = env_var_or("BRAIN3_CONTAINER_MCP_PORT", "8420")
+        .parse::<u16>()
+        .map_err(|e| ConfigError::Invalid(format!("BRAIN3_CONTAINER_MCP_PORT: {e}")))?;
+
     let upstream_secret_dir = upstream_secret_file
         .parent()
         .unwrap_or(std::path::Path::new("/tmp"))
@@ -179,6 +188,7 @@ fn load_container_startup_config(
         vault_path: PathBuf::from(vault_path_str),
         upstream_secret_dir,
         host_port,
+        container_port,
     }))
 }
 
