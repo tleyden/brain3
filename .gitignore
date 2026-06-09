@@ -8,3 +8,4 @@
 Cargo.lock
 
 .brain3_test_vault
+.cloudflared
