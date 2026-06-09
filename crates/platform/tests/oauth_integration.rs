@@ -165,6 +165,8 @@ impl TestHarness {
                 upstream_secret_file: "/dev/null".into(),
             },
             hostname_validation: self.hostname_validation,
+            container: None,
+            tunnel: None,
         });
 
         let state = AppState {
