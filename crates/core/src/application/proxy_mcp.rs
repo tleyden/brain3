@@ -114,6 +114,7 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             upstream_url = %upstream_url,
             forwarded_headers = header_count,
             body_bytes = body.len(),
+            upstream_secret_hint = %elide_secret(&self.upstream_secret),
             "MCP proxy: forwarding authenticated request to upstream"
         );
         tracing::debug!(

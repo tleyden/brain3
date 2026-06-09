@@ -46,6 +46,12 @@ logger = logging.getLogger(__name__)
 frontmatter_index = FrontmatterIndex()
 
 
+def _elide(s: str) -> str:
+    if len(s) <= 2:
+        return f"***({len(s)} chars)"
+    return f"{s[0]}***{s[-1]}({len(s)} chars)"
+
+
 def _load_upstream_shared_secret() -> str:
     try:
         secret = Path(UPSTREAM_SHARED_SECRET_FILE).read_text(encoding="utf-8").strip()
@@ -55,6 +61,7 @@ def _load_upstream_shared_secret() -> str:
     if not secret:
         raise RuntimeError(f"MCP upstream shared secret file is empty: {UPSTREAM_SHARED_SECRET_FILE}")
 
+    logger.info("Loaded upstream shared secret file=%s secret=%s", UPSTREAM_SHARED_SECRET_FILE, _elide(secret))
     return secret
 
 
@@ -73,6 +80,11 @@ class UpstreamSharedSecretMiddleware:
         request = Request(scope, receive=receive)
         provided_secret = request.headers.get(self.header_name, "")
         if not provided_secret or not hmac.compare_digest(provided_secret, self.shared_secret):
+            logger.warning(
+                "Upstream secret mismatch: provided=%s expected=%s",
+                _elide(provided_secret),
+                _elide(self.shared_secret),
+            )
             response = JSONResponse({"error": "unauthorized"}, status_code=401)
             await response(scope, receive, send)
             return
