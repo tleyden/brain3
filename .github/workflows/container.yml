@@ -39,7 +39,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository_owner }}/brain3-mcp-server
+          images: ghcr.io/${{ github.repository_owner }}/brain3-mcp-vault-tools
           tags: |
             type=ref,event=pr
             type=raw,value=latest,enable={{is_default_branch}}
@@ -51,8 +51,8 @@ jobs:
       - name: Build and publish image
         uses: docker/build-push-action@v6
         with:
-          context: ./brain3-mcp-server
-          file: ./brain3-mcp-server/Containerfile
+          context: ./brain3-mcp-vault-tools
+          file: ./brain3-mcp-vault-tools/Containerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           tags: ${{ steps.meta.outputs.tags }}

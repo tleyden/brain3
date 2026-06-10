@@ -128,7 +128,7 @@ For metadata-only changes:
 
 ## Container Build
 
-For normal Brain3 gateway usage, you should not need to build this image locally. The gateway defaults to pulling `ghcr.io/tleyden/brain3-mcp-server:latest` automatically when `BRAIN3_CONTAINER_IMAGE` is not set.
+For normal Brain3 gateway usage, you should not need to build this image locally. The gateway defaults to pulling `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` automatically when `BRAIN3_CONTAINER_IMAGE` is not set.
 
 The commands below are for developing the container itself or testing local image changes.
 
@@ -151,13 +151,13 @@ If you want the image available in both runtimes on the same macOS machine, run 
 This uses:
 
 - base image: `python:3.14.5-slim-bookworm`
-- build context: this `brain3-mcp-server` directory only
-- image name: `brain3-mcp-server:latest` by default
+- build context: this `brain3-mcp-vault-tools` directory only
+- image name: `brain3-mcp-vault-tools:latest` by default
 
 If you want a different tag:
 
 ```bash
-IMAGE_NAME=brain3-mcp-server:dev ./scripts/build-container.sh --container-runtime docker
+IMAGE_NAME=brain3-mcp-vault-tools:dev ./scripts/build-container.sh --container-runtime docker
 ```
 
 ## Container Run

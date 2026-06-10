@@ -9,7 +9,7 @@ use brain3_core::ports::container::ContainerPort;
 
 use super::{DockerContainerAdapter, MacOsContainerAdapter};
 
-const DEV_MOUNT_TARGET: &str = "/workspace/brain3-mcp-server";
+const DEV_MOUNT_TARGET: &str = "/workspace/brain3-mcp-vault-tools";
 
 pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
     let dev_mode = startup.dev_mount_source.is_some();
@@ -67,7 +67,7 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         env_vars.push(("PYTHONPATH".into(), format!("{DEV_MOUNT_TARGET}/src")));
         workdir = Some(DEV_MOUNT_TARGET.to_string());
         command = vec![
-            "/opt/brain3-mcp-server/.venv/bin/python".into(),
+            "/opt/brain3-mcp-vault-tools/.venv/bin/python".into(),
             "-m".into(),
             "obsidian_mcp_server.server".into(),
         ];

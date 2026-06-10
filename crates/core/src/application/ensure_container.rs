@@ -134,8 +134,8 @@ mod tests {
 
     fn sample_config() -> ContainerConfig {
         ContainerConfig {
-            image: "ghcr.io/tleyden/brain3-mcp-server:latest".into(),
-            name: "brain3-mcp-server".into(),
+            image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
+            name: "brain3-mcp-vault-tools".into(),
             port_mappings: vec![],
             env_vars: vec![],
             bind_mounts: vec![],
