@@ -193,7 +193,7 @@ fn load_container_startup_config(
     Ok(Some(ContainerStartupConfig {
         runtime,
         image: env_var_or("BRAIN3_CONTAINER_IMAGE", DEFAULT_CONTAINER_IMAGE),
-        container_name: env_var_or("BRAIN3_CONTAINER_NAME", "obsidian-mcp-server"),
+        container_name: env_var_or("BRAIN3_CONTAINER_NAME", "brain3-mcp-vault-tools"),
         vault_path: PathBuf::from(vault_path_str),
         upstream_secret_dir,
         host_port,

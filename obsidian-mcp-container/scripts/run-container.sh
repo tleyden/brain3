@@ -16,7 +16,7 @@ fi
 
 MODE="image"
 IMAGE_NAME="${IMAGE_NAME:-obsidian-mcp-server:latest}"
-CONTAINER_NAME="${CONTAINER_NAME:-obsidian-mcp-server}"
+CONTAINER_NAME="${CONTAINER_NAME:-brain3-mcp-vault-tools}"
 HOST_PORT="${HOST_PORT:-8420}"
 HOST_VAULT_PATH="${HOST_VAULT_PATH:-${VAULT_PATH:-}}"
 SOURCE_MOUNT_PATH="/workspace/obsidian-mcp-container"
@@ -40,7 +40,7 @@ Options:
   --image               Run the code baked into the image (default)
   --vault-path PATH     Host vault directory to mount into /vault
   --port PORT           Host loopback port to publish as 127.0.0.1:PORT -> container port 8420
-  --name NAME           Container name (default: obsidian-mcp-server)
+  --name NAME           Container name (default: brain3-mcp-vault-tools)
   --image-name NAME     Image reference to run (default: obsidian-mcp-server:latest)
   --foreground          Run attached instead of detached
   --keep                Do not pass --rm

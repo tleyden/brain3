@@ -166,10 +166,10 @@ The MCP container keeps running after the gateway exits (it was started detached
 
 ```bash
 # macOS Container
-container stop obsidian-mcp-server
+container stop brain3-mcp-vault-tools
 
 # Docker
-docker stop obsidian-mcp-server
+docker stop brain3-mcp-vault-tools
 ```
 
 ## Configuration Reference
@@ -198,7 +198,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, gateway starts the container on startup |
 | `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
 | `BRAIN3_CONTAINER_IMAGE` | `ghcr.io/tleyden/brain3-mcp-server:latest` | Container image to run; set this to pin a published release tag |
-| `BRAIN3_CONTAINER_NAME` | `obsidian-mcp-server` | Name assigned to the container |
+| `BRAIN3_CONTAINER_NAME` | `brain3-mcp-vault-tools` | Name assigned to the container |
 | `BRAIN3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 
 ## Tool Surface
