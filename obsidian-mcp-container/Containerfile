@@ -10,11 +10,11 @@ RUN python -m pip install --no-cache-dir --upgrade pip uv
 
 COPY pyproject.toml uv.lock README.md ./
 
-RUN uv sync --frozen --no-dev --no-install-project --no-editable
+RUN uv sync --locked --no-dev --no-install-project --no-editable
 
 COPY src ./src
 
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --locked --no-dev --no-editable
 
 ENV PATH="/opt/obsidian-mcp-container/.venv/bin:${PATH}"
 

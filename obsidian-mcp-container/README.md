@@ -128,6 +128,10 @@ For metadata-only changes:
 
 ## Container Build
 
+For normal Brain3 gateway usage, you should not need to build this image locally. The gateway defaults to pulling `ghcr.io/tleyden/brain3-mcp-server:latest` automatically when `BRAIN3_CONTAINER_IMAGE` is not set.
+
+The commands below are for developing the container itself or testing local image changes.
+
 This project includes a `Containerfile` that can be built with Apple's native `container` CLI on macOS or Docker on Linux. Docker examples also work on macOS. Every build command must specify `--container-runtime` explicitly.
 
 Build with Apple `container` on macOS:

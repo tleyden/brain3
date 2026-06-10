@@ -12,12 +12,27 @@ impl ContainerPort for DockerContainerAdapter {
         command_succeeds("docker", &["image", "inspect", image]).await
     }
 
+    async fn pull_image(&self, image: &str) -> Result<(), ContainerError> {
+        run_command("docker", &["pull", image]).await.map(|_| ())
+    }
+
     async fn exists(&self, id: &ContainerId) -> Result<bool, ContainerError> {
         command_succeeds("docker", &["container", "inspect", &id.0]).await
     }
 
     async fn is_running(&self, id: &ContainerId) -> Result<bool, ContainerError> {
-        match run_command("docker", &["container", "inspect", "--format", "{{.State.Running}}", &id.0]).await {
+        match run_command(
+            "docker",
+            &[
+                "container",
+                "inspect",
+                "--format",
+                "{{.State.Running}}",
+                &id.0,
+            ],
+        )
+        .await
+        {
             Ok(out) => Ok(out.trim() == "true"),
             Err(ContainerError::CommandFailed { .. }) => Ok(false),
             Err(e) => Err(e),
@@ -39,7 +54,10 @@ impl ContainerPort for DockerContainerAdapter {
         }
         for pm in &config.port_mappings {
             args.push("--publish".into());
-            args.push(format!("{}:{}:{}", pm.host_address, pm.host_port, pm.container_port));
+            args.push(format!(
+                "{}:{}:{}",
+                pm.host_address, pm.host_port, pm.container_port
+            ));
         }
         for (k, v) in &config.env_vars {
             args.push("--env".into());

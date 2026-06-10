@@ -9,7 +9,7 @@ There is no cloud service required other than Cloudflare Tunnel, which is free t
 
 ## Why This Exists
 
-Brain3 is a user-friendly, agent-native implementation of the [LLMWiki](https://tleyden.github.io/blog/2024/12/22/llmwiki/) idea. It stores everything locally in markdown files in a fully private manner and is fully compatible with [Obsidian](https://obsidian.md).
+Brain3 is a user-friendly, agent-native implementation of the LLMWiki idea. It stores everything locally in markdown files in a fully private manner and is fully compatible with [Obsidian](https://obsidian.md).
 
 You can easily migrate your traditional "second brain" document repository into Brain3. Currently only markdown is supported, but you can request imports from other formats via GitHub.
 
@@ -47,7 +47,7 @@ You can also view and update your Brain3 repository via Obsidian directly, howev
 Two components run on your machine:
 
 - **brain3-gateway** — A Rust binary that handles OAuth2 authentication and reverse-proxies MCP traffic to the container. Your AI app talks to this.
-- **MCP server** — Runs inside a macOS Container with access to your markdown vault. Provides the vault tools that let AI read, search, and edit your notes.
+- **MCP server** — Runs inside a macOS Container or Docker container with access to your markdown vault. Provides the vault tools that let AI read, search, and edit your notes.
 
 ## Quickstart
 
@@ -57,10 +57,8 @@ Two components run on your machine:
 |---|---|
 | macOS (Apple Silicon) | — |
 | Rust toolchain | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| Apple `container` CLI | `brew install container` |
+| Container runtime | Apple `container`: `brew install container` or Docker Desktop |
 | `cloudflared` | `brew install cloudflared` *(optional — only needed for Cloudflare Tunnel approach)* |
-| Python 3 | Bundled with macOS or `brew install python` |
-| `uv` | `brew install uv` |
 
 ### 1. Clone and build the gateway
 
@@ -72,13 +70,9 @@ cargo build --release
 
 The binary is at `./target/release/brain3-gateway`.
 
-### 2. Build the MCP server container image
+No local MCP container build is required. When the gateway starts, it automatically pulls `ghcr.io/tleyden/brain3-mcp-server:latest` into your selected container runtime if the image is not already present.
 
-```bash
-./scripts/build-mcp-container.sh --container-runtime macos-container
-```
-
-### 3. Configure
+### 2. Configure
 
 Copy the environment template:
 
@@ -110,17 +104,19 @@ The username and password are the credentials you will enter when your AI app pr
 
 Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian vault or markdown folder. Use `docker` instead of `macos-container` for `BRAIN3_CONTAINER_RUNTIME` if you prefer Docker.
 
+If you want to pin the container version instead of following `latest`, set `BRAIN3_CONTAINER_IMAGE` to a published tag such as `ghcr.io/tleyden/brain3-mcp-server:v0.1.0`.
+
 Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` to the public hostname your Caddy or nginx instance is serving TLS on (e.g. `brain3.yourdomain.com`). The gateway uses this for hostname validation.
 
-### 4. Start the gateway
+### 3. Start the gateway
 
 ```bash
 ./target/release/brain3-gateway
 ```
 
-The gateway starts the MCP server container automatically on startup. You will see log lines confirming the container is running before the HTTP server binds.
+The gateway starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
 
-### 5. Verify locally
+### 4. Verify locally
 
 In another terminal:
 
@@ -132,7 +128,7 @@ curl -s http://127.0.0.1:8421/health
 curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server | python3 -m json.tool
 ```
 
-### 6. Expose via direct public origin
+### 5. Expose via direct public origin
 
 This setup uses a direct public origin: Caddy or nginx terminates TLS and reverse-proxies to `127.0.0.1:8421`, optionally sitting behind Cloudflare proxy for DDoS protection.
 
@@ -148,13 +144,13 @@ Make sure `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` matches the hostname Ca
 
 If you'd rather use a Cloudflare Tunnel instead, see [Exposing to the Public Internet](#exposing-to-the-public-internet) below.
 
-### 7. Connect your AI app
+### 6. Connect your AI app
 
 In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), add a new MCP server connection with:
 
 | Field | Value |
 |---|---|
-| Server URL | `https://brain3.yourdomain.com` (your public hostname from step 6) |
+| Server URL | `https://brain3.yourdomain.com` (your public hostname from step 5) |
 | Client ID | `oauth2-gateway-client` (or whatever you set in `.env`) |
 | Client Secret | The value of `OAUTH2_GATEWAY_CLIENT_SECRET` from your `.env` |
 
@@ -170,10 +166,10 @@ The MCP container keeps running after the gateway exits (it was started detached
 
 ```bash
 # macOS Container
-container stop obsidian-mcp-server
+container stop brain3-mcp-vault-tools
 
 # Docker
-docker stop obsidian-mcp-server
+docker stop brain3-mcp-vault-tools
 ```
 
 ## Configuration Reference
@@ -201,8 +197,8 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
 | `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, gateway starts the container on startup |
 | `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
-| `BRAIN3_CONTAINER_IMAGE` | `obsidian-mcp-server:latest` | Container image to run |
-| `BRAIN3_CONTAINER_NAME` | `obsidian-mcp-server` | Name assigned to the container |
+| `BRAIN3_CONTAINER_IMAGE` | `ghcr.io/tleyden/brain3-mcp-server:latest` | Container image to run; set this to pin a published release tag |
+| `BRAIN3_CONTAINER_NAME` | `brain3-mcp-vault-tools` | Name assigned to the container |
 | `BRAIN3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 
 ## Tool Surface

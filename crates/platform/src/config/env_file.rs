@@ -8,6 +8,8 @@ use brain3_core::domain::model::{
 };
 use brain3_core::ports::config::ConfigPort;
 
+const DEFAULT_CONTAINER_IMAGE: &str = "ghcr.io/tleyden/brain3-mcp-server:latest";
+
 pub struct EnvFileConfigAdapter {
     env_path: Option<PathBuf>,
 }
@@ -21,12 +23,16 @@ impl EnvFileConfigAdapter {
         if let Some(ref path) = self.env_path {
             match dotenvy::from_path(path) {
                 Ok(_) => tracing::info!(path = %path.display(), "loaded env file"),
-                Err(e) => tracing::warn!(path = %path.display(), error = %e, "failed to load env file"),
+                Err(e) => {
+                    tracing::warn!(path = %path.display(), error = %e, "failed to load env file")
+                }
             }
         } else {
             match dotenvy::dotenv() {
                 Ok(path) => tracing::info!(path = %path.display(), "loaded .env file"),
-                Err(_) => tracing::warn!("no .env file found; falling back to environment variables"),
+                Err(_) => {
+                    tracing::warn!("no .env file found; falling back to environment variables")
+                }
             }
         }
     }
@@ -113,8 +119,7 @@ fn require_nonempty(name: &str, errors: &mut Vec<String>) -> String {
 
 fn env_bool(name: &str, default: bool) -> bool {
     match env::var(name) {
-        Ok(val) => !["0", "false", "no", "off"]
-            .contains(&val.trim().to_lowercase().as_str()),
+        Ok(val) => !["0", "false", "no", "off"].contains(&val.trim().to_lowercase().as_str()),
         Err(_) => default,
     }
 }
@@ -145,13 +150,12 @@ fn load_container_startup_config(
     upstream_secret_file: &PathBuf,
 ) -> Result<Option<ContainerStartupConfig>, ConfigError> {
     let runtime_str = env_var_or("BRAIN3_CONTAINER_RUNTIME", "");
+    let runtime_str = runtime_str.trim();
     if runtime_str.is_empty() {
-        return Err(ConfigError::Missing(
-            "BRAIN3_CONTAINER_RUNTIME is required; set it to 'macos-container' or 'docker'".into(),
-        ));
+        return Ok(None);
     }
 
-    let runtime = match runtime_str.trim() {
+    let runtime = match runtime_str {
         "docker" => ContainerRuntime::Docker,
         "macos-container" => ContainerRuntime::MacOSContainer,
         other => {
@@ -188,8 +192,8 @@ fn load_container_startup_config(
 
     Ok(Some(ContainerStartupConfig {
         runtime,
-        image: env_var_or("BRAIN3_CONTAINER_IMAGE", "obsidian-mcp-server:latest"),
-        container_name: env_var_or("BRAIN3_CONTAINER_NAME", "obsidian-mcp-server"),
+        image: env_var_or("BRAIN3_CONTAINER_IMAGE", DEFAULT_CONTAINER_IMAGE),
+        container_name: env_var_or("BRAIN3_CONTAINER_NAME", "brain3-mcp-vault-tools"),
         vault_path: PathBuf::from(vault_path_str),
         upstream_secret_dir,
         host_port,
@@ -205,8 +209,12 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
         .unwrap_or(false);
 
     if quick_explicit {
-        tracing::info!("CF_QUICK_TUNNEL=true — using Cloudflare quick tunnel (named tunnel vars ignored)");
-        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
+        tracing::info!(
+            "CF_QUICK_TUNNEL=true — using Cloudflare quick tunnel (named tunnel vars ignored)"
+        );
+        return Ok(Some(TunnelConfig::CloudflareQuick {
+            local_port: gateway_port,
+        }));
     }
 
     let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
@@ -233,7 +241,9 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
     let quick_default = env_bool("CF_QUICK_TUNNEL", true);
     if quick_default {
         tracing::info!("CF_QUICK_TUNNEL defaulting to true — using Cloudflare quick tunnel");
-        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
+        return Ok(Some(TunnelConfig::CloudflareQuick {
+            local_port: gateway_port,
+        }));
     }
 
     tracing::info!("CF_QUICK_TUNNEL=false and no named tunnel vars set — no tunnel configured");

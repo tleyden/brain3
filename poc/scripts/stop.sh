@@ -9,7 +9,7 @@ CONTAINER_ROOT="$POC_ROOT/obsidian-mcp-container"
 GATEWAY_HOST="127.0.0.1"
 GATEWAY_PORT="8421"
 GATEWAY_STOP_TIMEOUT_SECS="${GATEWAY_STOP_TIMEOUT_SECS:-10}"
-DEFAULT_CONTAINER_NAME="obsidian-mcp-server"
+DEFAULT_CONTAINER_NAME="brain3-mcp-vault-tools"
 TARGET_CONTAINER_NAME=""
 CONTAINER_RUNTIME=""
 
@@ -22,7 +22,7 @@ Stops the local OAuth gateway started by ./scripts/run.sh and removes the MCP co
 Options:
   --container-runtime    Required: macos-container or docker
   --name NAME            Container name (defaults to CONTAINER_NAME from
-                         ./obsidian-mcp-container/.env or obsidian-mcp-server)
+                         ./obsidian-mcp-container/.env or brain3-mcp-vault-tools)
   -h, --help             Show this help
 EOF
 }
