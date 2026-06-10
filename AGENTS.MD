@@ -10,7 +10,7 @@
 - Keep apps/gateway/src/main.rs as lean as possible.  Only add code that would otherwise be awkward in platform or core crates. 
 - To keep architecture simple, we only support remote mcp with https and oauth2.1, like the major apps require.  Local mcp access is not supported yet.  Therefore, in order to function, the gateway must have a public ingress via a cloudflare tunnel or otherwises.
 - We need fairly verbose logging and tracing to diagnose errors.  Just use the appropriate log level so we can control the noise.  Without this, its a black box.
-- Everything in the poc dir is dead legacy.  Ignore it unless specifically asked.  The top level rust project and obsidian-mcp-container are the only active codebases.
+- Everything in the poc dir is dead legacy.  Ignore it unless specifically asked.  The top level rust project and brain3-mcp-server are the only active codebases.
 
 # Rust Development & Hexagonal Architecture: Best Practices
 

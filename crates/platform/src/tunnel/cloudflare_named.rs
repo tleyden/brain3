@@ -16,7 +16,11 @@ pub struct CloudflareNamedTunnelAdapter {
 }
 
 impl CloudflareNamedTunnelAdapter {
-    pub fn new(tunnel_name: impl Into<String>, domain: impl Into<String>, config_file: PathBuf) -> Self {
+    pub fn new(
+        tunnel_name: impl Into<String>,
+        domain: impl Into<String>,
+        config_file: PathBuf,
+    ) -> Self {
         Self {
             tunnel_name: tunnel_name.into(),
             domain: domain.into(),
@@ -82,7 +86,10 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
 
     async fn stop(&self) -> Result<(), TunnelError> {
         if let Some(mut child) = self.child.lock().await.take() {
-            child.kill().await.map_err(|e| TunnelError::Other(e.to_string()))?;
+            child
+                .kill()
+                .await
+                .map_err(|e| TunnelError::Other(e.to_string()))?;
         }
         *self.public_url.lock().await = None;
         Ok(())
@@ -93,7 +100,10 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
         let Some(child) = guard.as_mut() else {
             return Ok(TunnelStatus::Stopped);
         };
-        match child.try_wait().map_err(|e| TunnelError::Other(e.to_string()))? {
+        match child
+            .try_wait()
+            .map_err(|e| TunnelError::Other(e.to_string()))?
+        {
             None => {
                 let url = self.public_url.lock().await.clone().unwrap_or_default();
                 Ok(TunnelStatus::Running(TunnelInfo { public_url: url }))

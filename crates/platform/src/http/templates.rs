@@ -41,10 +41,7 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
         fields_html.push('\n');
     }
 
-    let method = req
-        .code_challenge_method
-        .as_deref()
-        .unwrap_or("S256");
+    let method = req.code_challenge_method.as_deref().unwrap_or("S256");
     fields_html.push_str(&format!(
         r#"<input type="hidden" name="code_challenge_method" value="{}">"#,
         html_escape(method),

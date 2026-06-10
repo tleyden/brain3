@@ -4,7 +4,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy
 
-WORKDIR /opt/obsidian-mcp-container
+WORKDIR /opt/brain3-mcp-server
 
 RUN python -m pip install --no-cache-dir --upgrade pip uv
 
@@ -16,7 +16,7 @@ COPY src ./src
 
 RUN uv sync --locked --no-dev --no-editable
 
-ENV PATH="/opt/obsidian-mcp-container/.venv/bin:${PATH}"
+ENV PATH="/opt/brain3-mcp-server/.venv/bin:${PATH}"
 
 EXPOSE 8420
 

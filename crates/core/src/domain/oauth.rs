@@ -62,14 +62,9 @@ pub fn validate_authorize_request(
         return Err(OAuthError::InvalidRequest("redirect_uri required".into()));
     }
     if pkce_required {
-        let challenge_empty = req
-            .code_challenge
-            .as_ref()
-            .is_none_or(|s| s.is_empty());
+        let challenge_empty = req.code_challenge.as_ref().is_none_or(|s| s.is_empty());
         if challenge_empty {
-            return Err(OAuthError::InvalidRequest(
-                "code_challenge required".into(),
-            ));
+            return Err(OAuthError::InvalidRequest("code_challenge required".into()));
         }
         if let Some(method) = &req.code_challenge_method {
             if method != "S256" {

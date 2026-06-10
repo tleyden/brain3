@@ -86,16 +86,17 @@ fn proxy_error_response(err: ProxyError, headers: &HeaderMap) -> Response {
     }
 }
 
-pub async fn protected_resource_metadata<
-    S: AuthCodeStore + 'static,
-    P: McpProxyPort + 'static,
->(
+pub async fn protected_resource_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
     State(state): State<AppState<S, P>>,
     headers: HeaderMap,
 ) -> Response {
     let host = effective_host(&headers);
     let validation = state.proxy_mcp.hostname_validation();
-    if let Err(e) = validate_host(&host, validation.expected_host.as_deref(), validation.enforce) {
+    if let Err(e) = validate_host(
+        &host,
+        validation.expected_host.as_deref(),
+        validation.enforce,
+    ) {
         return proxy_error_response(e, &headers);
     }
 
@@ -115,9 +116,7 @@ pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'st
     body: Bytes,
 ) -> Response {
     let host = effective_host(&headers);
-    let raw_auth = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok());
+    let raw_auth = headers.get("authorization").and_then(|v| v.to_str().ok());
     let auth_header = raw_auth.unwrap_or("");
 
     tracing::info!(
@@ -145,7 +144,15 @@ pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'st
 
     match state
         .proxy_mcp
-        .handle(&host, auth_header, method.as_str(), path, query, header_pairs, body.to_vec())
+        .handle(
+            &host,
+            auth_header,
+            method.as_str(),
+            path,
+            query,
+            header_pairs,
+            body.to_vec(),
+        )
         .await
     {
         Ok(upstream_response) => {
@@ -154,8 +161,9 @@ pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'st
 
             let body_preview = if status.is_client_error() || status.is_server_error() {
                 String::from_utf8_lossy(
-                    &upstream_response.body[..upstream_response.body.len().min(512)]
-                ).to_string()
+                    &upstream_response.body[..upstream_response.body.len().min(512)],
+                )
+                .to_string()
             } else {
                 String::new()
             };
@@ -184,9 +192,7 @@ pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'st
             }
             response_builder
                 .body(axum::body::Body::from(upstream_response.body))
-                .unwrap_or_else(|_| {
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
-                })
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
         Err(e) => proxy_error_response(e, &headers),
     }

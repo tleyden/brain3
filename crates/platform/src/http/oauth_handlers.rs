@@ -113,7 +113,11 @@ pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + '
     }
 
     if !state.authorize.login_configured() {
-        return (StatusCode::SERVICE_UNAVAILABLE, Html(render_misconfigured_page())).into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Html(render_misconfigured_page()),
+        )
+            .into_response();
     }
 
     Html(render_login_form(&req, None)).into_response()
@@ -137,7 +141,11 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
     }
 
     if !state.authorize.login_configured() {
-        return (StatusCode::SERVICE_UNAVAILABLE, Html(render_misconfigured_page())).into_response();
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Html(render_misconfigured_page()),
+        )
+            .into_response();
     }
 
     let username = form.get("username").cloned().unwrap_or_default();
@@ -147,7 +155,10 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
         tracing::warn!(username = %username, "authorize POST rejected: invalid credentials");
         return (
             StatusCode::UNAUTHORIZED,
-            Html(render_login_form(&req, Some("Invalid username or password"))),
+            Html(render_login_form(
+                &req,
+                Some("Invalid username or password"),
+            )),
         )
             .into_response();
     }
@@ -165,10 +176,7 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
     };
     let mut redirect_url = format!("{}{}code={}", req.redirect_uri, separator, code);
     if let Some(ref state_val) = req.state {
-        redirect_url.push_str(&format!(
-            "&state={}",
-            urlencoding::encode(state_val)
-        ));
+        redirect_url.push_str(&format!("&state={}", urlencoding::encode(state_val)));
     }
 
     Redirect::to(&redirect_url).into_response()
@@ -184,10 +192,7 @@ pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
         client_secret: form.get("client_secret").cloned().unwrap_or_default(),
         code: form.get("code").cloned().unwrap_or_default(),
         redirect_uri: form.get("redirect_uri").cloned().filter(|s| !s.is_empty()),
-        code_verifier: form
-            .get("code_verifier")
-            .cloned()
-            .filter(|s| !s.is_empty()),
+        code_verifier: form.get("code_verifier").cloned().filter(|s| !s.is_empty()),
     };
 
     match state.token_exchange.exchange(&req).await {

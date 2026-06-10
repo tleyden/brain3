@@ -87,6 +87,13 @@ pub struct ContainerStartupConfig {
 
 #[derive(Debug, Clone)]
 pub enum TunnelConfig {
-    CloudflareQuick { local_port: u16 },
-    CloudflareNamed { tunnel_name: String, domain: String, config_file: PathBuf, local_port: u16 },
+    CloudflareQuick {
+        local_port: u16,
+    },
+    CloudflareNamed {
+        tunnel_name: String,
+        domain: String,
+        config_file: PathBuf,
+        local_port: u16,
+    },
 }

@@ -132,7 +132,8 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             self.upstream_secret.clone(),
         ));
 
-        let response = self.proxy
+        let response = self
+            .proxy
             .forward(McpProxyRequest {
                 method: method.into(),
                 url: upstream_url.clone(),

@@ -51,8 +51,8 @@ jobs:
       - name: Build and publish image
         uses: docker/build-push-action@v6
         with:
-          context: ./obsidian-mcp-container
-          file: ./obsidian-mcp-container/Containerfile
+          context: ./brain3-mcp-server
+          file: ./brain3-mcp-server/Containerfile
           platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
           tags: ${{ steps.meta.outputs.tags }}

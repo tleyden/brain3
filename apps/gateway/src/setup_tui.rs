@@ -6,7 +6,7 @@ use brain3_platform::tunnel::cloudflare_setup as cf;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use crossterm::execute;
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
@@ -31,7 +31,10 @@ struct Step {
 
 impl Step {
     fn new(label: &str) -> Self {
-        Self { label: label.to_string(), status: StepStatus::Pending }
+        Self {
+            label: label.to_string(),
+            status: StepStatus::Pending,
+        }
     }
 
     fn icon(&self) -> Span<'_> {
@@ -87,9 +90,17 @@ impl SetupState {
 
 pub async fn run(tunnel_config: &TunnelConfig) -> anyhow::Result<()> {
     let (tunnel_name, domain, config_file, local_port) = match tunnel_config {
-        TunnelConfig::CloudflareNamed { tunnel_name, domain, config_file, local_port } => {
-            (tunnel_name.clone(), domain.clone(), config_file.clone(), *local_port)
-        }
+        TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            domain,
+            config_file,
+            local_port,
+        } => (
+            tunnel_name.clone(),
+            domain.clone(),
+            config_file.clone(),
+            *local_port,
+        ),
         _ => {
             eprintln!("Setup wizard only available for named Cloudflare tunnel mode.");
             eprintln!("Set CF_TUNNEL_NAME and CF_DOMAIN in your .env file first.");
@@ -122,7 +133,11 @@ async fn run_initial_checks(state: &mut SetupState) {
 
     state.steps[0].status = StepStatus::Running;
     let installed = cf::check_cloudflared_installed().await;
-    state.steps[0].status = if installed { StepStatus::Done } else { StepStatus::Failed };
+    state.steps[0].status = if installed {
+        StepStatus::Done
+    } else {
+        StepStatus::Failed
+    };
     state.log(if installed {
         "cloudflared: found".to_string()
     } else {
@@ -135,7 +150,11 @@ async fn run_initial_checks(state: &mut SetupState) {
 
     state.steps[1].status = StepStatus::Running;
     let logged_in = cf::check_cloudflared_logged_in().await;
-    state.steps[1].status = if logged_in { StepStatus::Done } else { StepStatus::Failed };
+    state.steps[1].status = if logged_in {
+        StepStatus::Done
+    } else {
+        StepStatus::Failed
+    };
     state.log(if logged_in {
         "cloudflared login: ok".to_string()
     } else {
@@ -150,7 +169,11 @@ async fn run_initial_checks(state: &mut SetupState) {
     match cf::find_tunnel_id(&state.tunnel_name).await {
         Ok(Some(id)) => {
             state.steps[2].status = StepStatus::Done;
-            state.log(format!("tunnel \"{}\": found ({})", state.tunnel_name, &id[..8]));
+            state.log(format!(
+                "tunnel \"{}\": found ({})",
+                state.tunnel_name,
+                &id[..8]
+            ));
 
             state.steps[3].status = StepStatus::Running;
             match cf::find_credentials_file(&id) {
@@ -166,7 +189,10 @@ async fn run_initial_checks(state: &mut SetupState) {
         }
         Ok(None) => {
             state.steps[2].status = StepStatus::Failed;
-            state.log(format!("tunnel \"{}\": not found — will create", state.tunnel_name));
+            state.log(format!(
+                "tunnel \"{}\": not found — will create",
+                state.tunnel_name
+            ));
         }
         Err(e) => {
             state.steps[2].status = StepStatus::Failed;
@@ -179,7 +205,10 @@ async fn run_initial_checks(state: &mut SetupState) {
         state.log(format!("config file: {}", state.config_file.display()));
     } else {
         state.steps[4].status = StepStatus::Failed;
-        state.log(format!("config file: not found at {}", state.config_file.display()));
+        state.log(format!(
+            "config file: not found at {}",
+            state.config_file.display()
+        ));
     }
 }
 
@@ -227,7 +256,11 @@ fn draw(f: &mut ratatui::Frame, state: &SetupState) {
     // Header
     let hostname = format!("{}.{}", state.tunnel_name, state.domain);
     let header = Paragraph::new(format!("Cloudflare Named Tunnel  ·  {hostname}"))
-        .block(Block::default().borders(Borders::ALL).title(" brain3 Setup "))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" brain3 Setup "),
+        )
         .style(Style::default().add_modifier(Modifier::BOLD));
     f.render_widget(header, chunks[0]);
 
@@ -245,7 +278,10 @@ fn draw(f: &mut ratatui::Frame, state: &SetupState) {
         .collect();
 
     let run_style = if state.focused_run && !state.done {
-        Style::default().fg(Color::Black).bg(Color::Cyan).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::Cyan)
+            .add_modifier(Modifier::BOLD)
     } else if state.done {
         Style::default().fg(Color::Green)
     } else {
@@ -253,9 +289,17 @@ fn draw(f: &mut ratatui::Frame, state: &SetupState) {
     };
 
     let button_line = if state.done {
-        Line::from(Span::styled("Setup complete!", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)))
+        Line::from(Span::styled(
+            "Setup complete!",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ))
     } else if state.running {
-        Line::from(Span::styled(" Running… ", Style::default().fg(Color::Yellow)))
+        Line::from(Span::styled(
+            " Running… ",
+            Style::default().fg(Color::Yellow),
+        ))
     } else {
         Line::from(Span::styled(" [ Run Setup ] ", run_style))
     };
@@ -273,7 +317,11 @@ fn draw(f: &mut ratatui::Frame, state: &SetupState) {
 
     let mid_chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(2), Constraint::Length(1)])
+        .constraints([
+            Constraint::Min(6),
+            Constraint::Length(2),
+            Constraint::Length(1),
+        ])
         .split(inner);
 
     f.render_widget(List::new(items), mid_chunks[0]);
@@ -407,7 +455,10 @@ async fn run_setup(state: &mut SetupState) {
 
     // Step 4: write config file
     state.steps[4].status = StepStatus::Running;
-    state.log(format!("Writing config to {}…", state.config_file.display()));
+    state.log(format!(
+        "Writing config to {}…",
+        state.config_file.display()
+    ));
     match cf::write_config_file(
         &state.config_file,
         &tunnel_id,

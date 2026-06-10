@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use crate::domain::errors::OAuthError;
 use crate::domain::model::OAuthConfig;
-use crate::domain::oauth::{constant_time_eq, verify_pkce, TokenRequest, TokenResponse, ACCESS_TOKEN_LIFETIME_SECS};
+use crate::domain::oauth::{
+    constant_time_eq, verify_pkce, TokenRequest, TokenResponse, ACCESS_TOKEN_LIFETIME_SECS,
+};
 use crate::domain::redact::elide_secret;
 use crate::ports::auth_code_store::AuthCodeStore;
 
@@ -93,10 +95,10 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
         if code_data.pkce_required {
             let challenge = code_data.code_challenge.as_deref().unwrap_or("");
             if challenge.is_empty() {
-                tracing::warn!("token exchange rejected: pkce required but no code_challenge in stored code");
-                return Err(OAuthError::InvalidGrant(
-                    "code_challenge required".into(),
-                ));
+                tracing::warn!(
+                    "token exchange rejected: pkce required but no code_challenge in stored code"
+                );
+                return Err(OAuthError::InvalidGrant("code_challenge required".into()));
             }
             if let Some(method) = &code_data.code_challenge_method {
                 if method != "S256" {
@@ -112,16 +114,14 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
             if !challenge.is_empty() {
                 let verifier = req.code_verifier.as_deref().unwrap_or("");
                 if verifier.is_empty() {
-                    tracing::warn!("token exchange rejected: code_challenge present but code_verifier missing");
-                    return Err(OAuthError::InvalidGrant(
-                        "code_verifier required".into(),
-                    ));
+                    tracing::warn!(
+                        "token exchange rejected: code_challenge present but code_verifier missing"
+                    );
+                    return Err(OAuthError::InvalidGrant("code_verifier required".into()));
                 }
                 if !verify_pkce(verifier, challenge) {
                     tracing::warn!("token exchange rejected: PKCE verification failed");
-                    return Err(OAuthError::InvalidGrant(
-                        "PKCE verification failed".into(),
-                    ));
+                    return Err(OAuthError::InvalidGrant("PKCE verification failed".into()));
                 }
             }
         }

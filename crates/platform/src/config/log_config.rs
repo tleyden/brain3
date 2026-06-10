@@ -35,12 +35,24 @@ fn tunnel_summary(t: &TunnelConfig) -> String {
         TunnelConfig::CloudflareQuick { local_port } => {
             format!("cloudflare-quick port={local_port}")
         }
-        TunnelConfig::CloudflareNamed { tunnel_name, domain, config_file, .. } => {
-            format!("cloudflare-named {tunnel_name}.{domain} config={}", config_file.display())
+        TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            domain,
+            config_file,
+            ..
+        } => {
+            format!(
+                "cloudflare-named {tunnel_name}.{domain} config={}",
+                config_file.display()
+            )
         }
     }
 }
 
 fn mask(s: &str) -> &str {
-    if s.is_empty() { "[not set]" } else { "****" }
+    if s.is_empty() {
+        "[not set]"
+    } else {
+        "****"
+    }
 }

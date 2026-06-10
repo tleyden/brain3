@@ -10,7 +10,9 @@ use brain3_core::ports::mcp_proxy::McpProxyPort;
 
 use super::health::health;
 use super::mcp_handlers::{mcp_reverse_proxy, protected_resource_metadata};
-use super::oauth_handlers::{oauth_authorize_get, oauth_authorize_post, oauth_metadata, oauth_token};
+use super::oauth_handlers::{
+    oauth_authorize_get, oauth_authorize_post, oauth_metadata, oauth_token,
+};
 use super::state::AppState;
 
 async fn fallback(req: Request) -> impl IntoResponse {

@@ -151,13 +151,13 @@ If you want the image available in both runtimes on the same macOS machine, run 
 This uses:
 
 - base image: `python:3.14.5-slim-bookworm`
-- build context: this `poc/obsidian-mcp-container` directory only
-- image name: `obsidian-mcp-server:latest` by default
+- build context: this `brain3-mcp-server` directory only
+- image name: `brain3-mcp-server:latest` by default
 
 If you want a different tag:
 
 ```bash
-IMAGE_NAME=obsidian-mcp-server:dev ./scripts/build-container.sh --container-runtime docker
+IMAGE_NAME=brain3-mcp-server:dev ./scripts/build-container.sh --container-runtime docker
 ```
 
 ## Container Run
