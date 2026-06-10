@@ -70,7 +70,7 @@ cargo build --release
 
 The binary is at `./target/release/brain3-gateway`.
 
-No local MCP container build is required. When the gateway starts, it automatically pulls `ghcr.io/tleyden/brain3-mcp-server:latest` into your selected container runtime if the image is not already present.
+No local MCP container build is required. Set `BRAIN3_CONTAINER_IMAGE` in `.env` to a published image such as `ghcr.io/tleyden/brain3-mcp-server:latest`. When the gateway starts, it pulls that configured image into your selected container runtime if it is not already present.
 
 ### 2. Configure
 
@@ -97,6 +97,7 @@ USERNAME=your_username
 PASSWORD=your_password
 BRAIN3_CONTAINER_RUNTIME=macos-container
 BRAIN3_VAULT_PATH=/absolute/path/to/your/vault
+BRAIN3_CONTAINER_IMAGE=ghcr.io/tleyden/brain3-mcp-server:latest
 DIRECT_PUBLIC_ORIGIN_HOSTNAME=brain3.yourdomain.com
 ```
 
@@ -104,7 +105,7 @@ The username and password are the credentials you will enter when your AI app pr
 
 Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian vault or markdown folder. Use `docker` instead of `macos-container` for `BRAIN3_CONTAINER_RUNTIME` if you prefer Docker.
 
-If you want to pin the container version instead of following `latest`, set `BRAIN3_CONTAINER_IMAGE` to a published tag such as `ghcr.io/tleyden/brain3-mcp-server:v0.1.0`.
+Set `BRAIN3_CONTAINER_IMAGE` to the published image you want the gateway to run. If you want to pin the container version instead of following `latest`, use a published tag such as `ghcr.io/tleyden/brain3-mcp-server:v0.1.0`.
 
 Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` to the public hostname your Caddy or nginx instance is serving TLS on (e.g. `brain3.yourdomain.com`). The gateway uses this for hostname validation.
 
@@ -197,7 +198,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
 | `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, gateway starts the container on startup |
 | `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
-| `BRAIN3_CONTAINER_IMAGE` | `ghcr.io/tleyden/brain3-mcp-server:latest` | Container image to run; set this to pin a published release tag |
+| `BRAIN3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-server:latest` |
 | `BRAIN3_CONTAINER_NAME` | `brain3-mcp-vault-tools` | Name assigned to the container |
 | `BRAIN3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 
