@@ -69,3 +69,40 @@ jobs:
         with:
           files: artifacts/*.tar.gz
           generate_release_notes: true
+
+  publish-s3:
+    name: Publish to S3
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Upload tarballs to S3
+        env:
+          BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          for tarball in artifacts/*.tar.gz; do
+            filename="$(basename "$tarball")"
+            aws s3 cp "$tarball" "s3://$BUCKET/releases/$VERSION/$filename" --acl public-read
+            aws s3 cp "$tarball" "s3://$BUCKET/releases/latest/$filename"  --acl public-read
+          done
+
+      - name: Upload install script to S3
+        env:
+          BUCKET: ${{ secrets.AWS_S3_BUCKET }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          aws s3 cp scripts/install.sh "s3://$BUCKET/releases/$VERSION/install.sh" --acl public-read
+          aws s3 cp scripts/install.sh "s3://$BUCKET/releases/latest/install.sh"   --acl public-read
