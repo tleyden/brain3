@@ -241,6 +241,24 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
 }
 
 fn resolve_expected_host() -> Result<Option<String>, ConfigError> {
+    // Quick tunnel hostname is ephemeral (changes every restart), so there is no
+    // stable expected host to enforce. Named tunnel vars must not bleed through.
+    let quick_explicit = env::var("CF_QUICK_TUNNEL")
+        .map(|v| !["0", "false", "no", "off"].contains(&v.trim().to_lowercase().as_str()))
+        .unwrap_or(false);
+    if quick_explicit {
+        let named = named_tunnel_host();
+        if named.is_some() {
+            tracing::warn!(
+                named_host = ?named,
+                "CF_QUICK_TUNNEL=true overrides CF_TUNNEL_NAME/CF_DOMAIN for tunnel mode; \
+                 hostname validation will be disabled (quick tunnel URL is ephemeral). \
+                 Remove CF_TUNNEL_NAME/CF_DOMAIN or switch to a named tunnel to enable hostname enforcement."
+            );
+        }
+        return Ok(None);
+    }
+
     let named = named_tunnel_host();
     let direct = direct_public_origin_hostname();
 

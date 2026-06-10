@@ -61,14 +61,17 @@ fn proxy_error_response(err: ProxyError, headers: &HeaderMap) -> Response {
             )
                 .into_response()
         }
-        ProxyError::MisdirectedRequest(desc) => (
-            StatusCode::MISDIRECTED_REQUEST,
-            Json(json!({
-                "error": "misdirected_request",
-                "error_description": desc,
-            })),
-        )
-            .into_response(),
+        ProxyError::MisdirectedRequest(desc) => {
+            tracing::warn!(error_description = %desc, "MCP request rejected with 421 Misdirected Request");
+            (
+                StatusCode::MISDIRECTED_REQUEST,
+                Json(json!({
+                    "error": "misdirected_request",
+                    "error_description": desc,
+                })),
+            )
+                .into_response()
+        }
         ProxyError::BadGateway(desc) => {
             tracing::warn!("MCP upstream unavailable: {desc}");
             (
