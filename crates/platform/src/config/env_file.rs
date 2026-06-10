@@ -199,11 +199,20 @@ fn load_container_startup_config(
 }
 
 fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigError> {
+    // CF_QUICK_TUNNEL=true takes explicit precedence over named-tunnel vars.
+    let quick_explicit = env::var("CF_QUICK_TUNNEL")
+        .map(|v| !["0", "false", "no", "off"].contains(&v.trim().to_lowercase().as_str()))
+        .unwrap_or(false);
+
+    if quick_explicit {
+        tracing::info!("CF_QUICK_TUNNEL=true — using Cloudflare quick tunnel (named tunnel vars ignored)");
+        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
+    }
+
     let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
     let domain = normalize_hostname(&env_var_or("CF_DOMAIN", ""));
     let named = !tunnel_name.is_empty() && !domain.is_empty();
 
-    // When named tunnel vars are set, always use named mode regardless of CF_QUICK_TUNNEL.
     if named {
         let config_file_str = env_var_or("CF_TUNNEL_CONFIG_FILE", "");
         let config_file = if config_file_str.is_empty() {
@@ -211,6 +220,7 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
         } else {
             PathBuf::from(config_file_str)
         };
+        tracing::info!(tunnel_name = %tunnel_name, domain = %domain, config_file = %config_file.display(), "using Cloudflare named tunnel");
         return Ok(Some(TunnelConfig::CloudflareNamed {
             tunnel_name,
             domain,
@@ -219,11 +229,14 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
         }));
     }
 
-    let quick = env_bool("CF_QUICK_TUNNEL", true);
-    if quick {
+    // Default: quick tunnel unless explicitly disabled.
+    let quick_default = env_bool("CF_QUICK_TUNNEL", true);
+    if quick_default {
+        tracing::info!("CF_QUICK_TUNNEL defaulting to true — using Cloudflare quick tunnel");
         return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
     }
 
+    tracing::info!("CF_QUICK_TUNNEL=false and no named tunnel vars set — no tunnel configured");
     Ok(None)
 }
 
