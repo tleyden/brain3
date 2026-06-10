@@ -11,13 +11,16 @@ pub async fn start_tunnel(
         TunnelConfig::CloudflareQuick { local_port } => {
             Box::new(CloudflareQuickTunnelAdapter::new(*local_port))
         }
-        TunnelConfig::CloudflareNamed { tunnel_name, domain, config_file, .. } => {
-            Box::new(CloudflareNamedTunnelAdapter::new(
-                tunnel_name,
-                domain,
-                config_file.clone(),
-            ))
-        }
+        TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            domain,
+            config_file,
+            ..
+        } => Box::new(CloudflareNamedTunnelAdapter::new(
+            tunnel_name,
+            domain,
+            config_file.clone(),
+        )),
     };
     let info = adapter.start().await?;
     Ok((adapter, info))

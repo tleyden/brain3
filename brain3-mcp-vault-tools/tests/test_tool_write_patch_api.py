@@ -9,14 +9,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 MODULE_PREFIXES = (
-    "obsidian_mcp_server.server",
-    "obsidian_mcp_server.config",
-    "obsidian_mcp_server.vault",
-    "obsidian_mcp_server.tools.read",
-    "obsidian_mcp_server.tools.write",
-    "obsidian_mcp_server.tools.patch",
+    "brain3_mcp_vault_tools.server",
+    "brain3_mcp_vault_tools.config",
+    "brain3_mcp_vault_tools.vault",
+    "brain3_mcp_vault_tools.tools.read",
+    "brain3_mcp_vault_tools.tools.write",
+    "brain3_mcp_vault_tools.tools.patch",
 )
 
 
@@ -24,7 +23,7 @@ def import_server_module():
     for module_name in tuple(sys.modules):
         if module_name in MODULE_PREFIXES:
             sys.modules.pop(module_name, None)
-    return importlib.import_module("obsidian_mcp_server.server")
+    return importlib.import_module("brain3_mcp_vault_tools.server")
 
 
 def sha256_text(value: str) -> str:
@@ -75,15 +74,21 @@ class ToolWritePatchApiTests(unittest.TestCase):
         )
 
     def test_create_overwrite_file_creates_new_file(self):
-        result = json.loads(self.server.vault_create_overwrite_file("new-note.md", "# Title\n"))
+        result = json.loads(
+            self.server.vault_create_overwrite_file("new-note.md", "# Title\n")
+        )
 
         self.assertNotIn("error", result)
         self.assertTrue(result["created"])
-        self.assertEqual((self.vault / "new-note.md").read_text(encoding="utf-8"), "# Title\n")
+        self.assertEqual(
+            (self.vault / "new-note.md").read_text(encoding="utf-8"), "# Title\n"
+        )
 
     def test_create_overwrite_file_replaces_existing_file(self):
         result = json.loads(
-            self.server.vault_create_overwrite_file("test-note.md", "# Replaced\nBody replaced.\n")
+            self.server.vault_create_overwrite_file(
+                "test-note.md", "# Replaced\nBody replaced.\n"
+            )
         )
 
         self.assertNotIn("error", result)
@@ -96,7 +101,9 @@ class ToolWritePatchApiTests(unittest.TestCase):
     def test_vault_read_returns_middle_window_and_full_file_hash(self):
         full_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
 
-        result = json.loads(self.server.vault_read("large-note.md", start_line=40, end_line=42))
+        result = json.loads(
+            self.server.vault_read("large-note.md", start_line=40, end_line=42)
+        )
 
         self.assertEqual(result["content"], "Line 40\nLine 41\nLine 42\n")
         self.assertEqual(result["returned_start_line"], 40)
@@ -117,26 +124,38 @@ class ToolWritePatchApiTests(unittest.TestCase):
         self.assertEqual(result["content_hash"], sha256_text(full_content))
 
     def test_apply_unified_diff_dry_run_reports_change_without_writing(self):
-        updated_content = (self.vault / "large-note.md").read_text(encoding="utf-8").replace(
-            "Line 50\n",
-            "Updated line 50\n",
+        updated_content = (
+            (self.vault / "large-note.md")
+            .read_text(encoding="utf-8")
+            .replace(
+                "Line 50\n",
+                "Updated line 50\n",
+            )
         )
         diff_text = self._unified_diff("large-note.md", updated_content)
         original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
 
-        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff_text, dry_run=True))
+        result = json.loads(
+            self.server.vault_apply_unified_diff(
+                "large-note.md", diff_text, dry_run=True
+            )
+        )
 
         self.assertNotIn("error", result)
         self.assertTrue(result["dry_run"])
         self.assertTrue(result["would_change"])
         self.assertFalse(result["applied"])
-        self.assertEqual((self.vault / "large-note.md").read_text(encoding="utf-8"), original_content)
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), original_content
+        )
 
     def test_apply_unified_diff_changes_one_middle_line(self):
         original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
         updated_content = original_content.replace("Line 50\n", "Updated line 50\n")
         diff_text = self._unified_diff("large-note.md", updated_content)
-        read_result = json.loads(self.server.vault_read("large-note.md", start_line=48, end_line=52))
+        read_result = json.loads(
+            self.server.vault_read("large-note.md", start_line=48, end_line=52)
+        )
 
         result = json.loads(
             self.server.vault_apply_unified_diff(
@@ -148,24 +167,32 @@ class ToolWritePatchApiTests(unittest.TestCase):
 
         self.assertNotIn("error", result)
         self.assertTrue(result["applied"])
-        self.assertEqual((self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content)
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content
+        )
 
     def test_apply_unified_diff_appends_lines_at_end_of_file(self):
         original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
         updated_content = original_content + "Append A\nAppend B\n"
         diff_text = self._unified_diff("large-note.md", updated_content)
 
-        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff_text))
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
 
         self.assertNotIn("error", result)
         self.assertTrue(result["applied"])
-        self.assertEqual((self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content)
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content
+        )
 
     def test_apply_unified_diff_rejects_stale_expected_hash(self):
         original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
         read_result = json.loads(self.server.vault_read("large-note.md"))
 
-        (self.vault / "large-note.md").write_text(original_content + "External change.\n", encoding="utf-8")
+        (self.vault / "large-note.md").write_text(
+            original_content + "External change.\n", encoding="utf-8"
+        )
 
         updated_content = original_content.replace("Line 20\n", "Updated line 20\n")
         diff_text = "".join(
@@ -202,7 +229,9 @@ class ToolWritePatchApiTests(unittest.TestCase):
             "+d\n"
         )
 
-        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff_text))
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
 
         self.assertEqual(result["error_code"], "invalid_patch")
 

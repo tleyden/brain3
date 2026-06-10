@@ -24,4 +24,4 @@ if [ ! -d ".venv" ]; then
     fi
 fi
 
-VAULT_PATH=${VAULT_PATH:-"$HOME/obsidian_vaults"} uv run obsidian-mcp-server
+VAULT_PATH=${VAULT_PATH:-"$HOME/obsidian_vaults"} uv run brain3-mcp-vault-tools

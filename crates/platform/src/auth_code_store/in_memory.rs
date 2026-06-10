@@ -36,6 +36,9 @@ impl AuthCodeStore for InMemoryAuthCodeStore {
 
     async fn cleanup_expired(&self) {
         let now = Instant::now();
-        self.codes.write().await.retain(|_, data| data.expires_at > now);
+        self.codes
+            .write()
+            .await
+            .retain(|_, data| data.expires_at > now);
     }
 }

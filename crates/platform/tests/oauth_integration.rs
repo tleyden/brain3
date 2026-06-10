@@ -57,9 +57,7 @@ impl MockMcpProxy {
         }
     }
 
-    fn capturing(
-        captured: Arc<std::sync::Mutex<Option<McpProxyRequest>>>,
-    ) -> Self {
+    fn capturing(captured: Arc<std::sync::Mutex<Option<McpProxyRequest>>>) -> Self {
         Self {
             handler: Box::new(move |req| {
                 *captured.lock().unwrap() = Some(McpProxyRequest {
@@ -207,15 +205,8 @@ async fn login_and_get_code(server: &TestServer) -> String {
     form.push(("username", LOGIN_USERNAME));
     form.push(("password", LOGIN_PASSWORD));
 
-    let resp = server
-        .post("/oauth/authorize")
-        .form(&form)
-        .await;
-    let location = resp
-        .header("location")
-        .to_str()
-        .unwrap()
-        .to_string();
+    let resp = server.post("/oauth/authorize").form(&form).await;
+    let location = resp.header("location").to_str().unwrap().to_string();
     extract_code_from_location(&location)
 }
 
@@ -227,15 +218,19 @@ async fn login_and_get_code(server: &TestServer) -> String {
 async fn oauth_metadata_only_advertises_preregistered_confidential_client_flow() {
     let server = TestHarness::default().build_server(MockMcpProxy::success());
 
-    let resp = server
-        .get("/.well-known/oauth-authorization-server")
-        .await;
+    let resp = server.get("/.well-known/oauth-authorization-server").await;
     resp.assert_status_ok();
 
     let body: Value = resp.json();
     assert!(body.get("registration_endpoint").is_none());
-    assert_eq!(body["grant_types_supported"], serde_json::json!(["authorization_code"]));
-    assert_eq!(body["response_types_supported"], serde_json::json!(["code"]));
+    assert_eq!(
+        body["grant_types_supported"],
+        serde_json::json!(["authorization_code"])
+    );
+    assert_eq!(
+        body["response_types_supported"],
+        serde_json::json!(["code"])
+    );
     assert_eq!(
         body["token_endpoint_auth_methods_supported"],
         serde_json::json!(["client_secret_post"])
@@ -474,7 +469,10 @@ async fn authorize_rejects_non_s256_code_challenge_method_when_pkce_required() {
     assert_eq!(resp.status_code(), 400);
     let body: Value = resp.json();
     assert_eq!(body["error"], "invalid_request");
-    assert_eq!(body["error_description"], "code_challenge_method must be S256");
+    assert_eq!(
+        body["error_description"],
+        "code_challenge_method must be S256"
+    );
 }
 
 #[tokio::test]
@@ -576,7 +574,11 @@ async fn mcp_requires_bearer_token() {
         .await;
 
     assert_eq!(resp.status_code(), 401);
-    let www_auth = resp.header("www-authenticate").to_str().unwrap().to_string();
+    let www_auth = resp
+        .header("www-authenticate")
+        .to_str()
+        .unwrap()
+        .to_string();
     assert!(www_auth.contains("resource_metadata="));
 }
 
@@ -1026,7 +1028,8 @@ async fn mcp_rejects_non_bearer_auth_scheme() {
 #[tokio::test]
 async fn mcp_proxy_strips_client_upstream_secret_header() {
     let captured = Arc::new(std::sync::Mutex::new(None));
-    let server = TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let server =
+        TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
 
     let resp = server
         .post("/mcp")
@@ -1143,7 +1146,8 @@ async fn token_exchange_rejects_redirect_uri_mismatch() {
 #[tokio::test]
 async fn mcp_proxy_forwards_subpath_to_upstream() {
     let captured = Arc::new(std::sync::Mutex::new(None));
-    let server = TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let server =
+        TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
 
     let resp = server
         .post("/mcp/sse")
@@ -1163,7 +1167,8 @@ async fn mcp_proxy_forwards_subpath_to_upstream() {
 #[tokio::test]
 async fn mcp_proxy_strips_authorization_header_from_upstream_request() {
     let captured = Arc::new(std::sync::Mutex::new(None));
-    let server = TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let server =
+        TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
 
     let resp = server
         .post("/mcp")
@@ -1182,16 +1187,17 @@ async fn mcp_proxy_strips_authorization_header_from_upstream_request() {
         .iter()
         .filter(|(k, _)| k == "authorization")
         .collect();
-    assert!(auth_headers.is_empty(), "authorization must not be forwarded upstream");
+    assert!(
+        auth_headers.is_empty(),
+        "authorization must not be forwarded upstream"
+    );
 }
 
 #[tokio::test]
 async fn oauth_metadata_advertises_s256_code_challenge_method() {
     let server = TestHarness::default().build_server(MockMcpProxy::success());
 
-    let resp = server
-        .get("/.well-known/oauth-authorization-server")
-        .await;
+    let resp = server.get("/.well-known/oauth-authorization-server").await;
     resp.assert_status_ok();
 
     let body: Value = resp.json();

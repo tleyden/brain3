@@ -49,9 +49,8 @@ pub fn read_or_create(path: &Path) -> Result<String> {
         .map(char::from)
         .collect();
 
-    std::fs::write(path, &secret).with_context(|| {
-        format!("Unable to write upstream secret file: {}", path.display())
-    })?;
+    std::fs::write(path, &secret)
+        .with_context(|| format!("Unable to write upstream secret file: {}", path.display()))?;
 
     #[cfg(unix)]
     {

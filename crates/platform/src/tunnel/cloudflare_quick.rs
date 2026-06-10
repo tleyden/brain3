@@ -39,10 +39,14 @@ impl TunnelPort for CloudflareQuickTunnelAdapter {
         }
 
         let mut cmd = Command::new("cloudflared");
-        cmd.args(["tunnel", "--url", &format!("http://localhost:{}", self.local_port)])
-            .stderr(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .kill_on_drop(true);
+        cmd.args([
+            "tunnel",
+            "--url",
+            &format!("http://localhost:{}", self.local_port),
+        ])
+        .stderr(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .kill_on_drop(true);
 
         let mut child = cmd
             .spawn()
@@ -81,7 +85,10 @@ impl TunnelPort for CloudflareQuickTunnelAdapter {
 
     async fn stop(&self) -> Result<(), TunnelError> {
         if let Some(mut child) = self.child.lock().await.take() {
-            child.kill().await.map_err(|e| TunnelError::Other(e.to_string()))?;
+            child
+                .kill()
+                .await
+                .map_err(|e| TunnelError::Other(e.to_string()))?;
         }
         *self.public_url.lock().await = None;
         Ok(())
@@ -92,7 +99,10 @@ impl TunnelPort for CloudflareQuickTunnelAdapter {
         let Some(child) = guard.as_mut() else {
             return Ok(TunnelStatus::Stopped);
         };
-        match child.try_wait().map_err(|e| TunnelError::Other(e.to_string()))? {
+        match child
+            .try_wait()
+            .map_err(|e| TunnelError::Other(e.to_string()))?
+        {
             None => {
                 let url = self.public_url.lock().await.clone().unwrap_or_default();
                 Ok(TunnelStatus::Running(TunnelInfo { public_url: url }))
@@ -108,7 +118,9 @@ impl TunnelPort for CloudflareQuickTunnelAdapter {
 fn extract_trycloudflare_url(line: &str) -> Option<String> {
     let start = line.find("https://")?;
     let rest = &line[start..];
-    let end = rest.find(|c: char| c.is_whitespace() || c == '|').unwrap_or(rest.len());
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == '|')
+        .unwrap_or(rest.len());
     let url = &rest[..end];
     if url.contains(".trycloudflare.com") {
         Some(url.to_string())

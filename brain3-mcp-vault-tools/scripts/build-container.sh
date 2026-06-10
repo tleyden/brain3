@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-IMAGE_NAME="${IMAGE_NAME:-obsidian-mcp-server:latest}"
+IMAGE_NAME="${IMAGE_NAME:-brain3-mcp-vault-tools:latest}"
 IMAGE_ARCH="${IMAGE_ARCH:-arm64}"
 CONTAINERFILE_PATH="${CONTAINERFILE_PATH:-$PROJECT_ROOT/Containerfile}"
 CONTAINER_RUNTIME=""

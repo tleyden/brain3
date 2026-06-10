@@ -15,11 +15,11 @@ if [ -f "$PROJECT_ROOT/.env" ]; then
 fi
 
 MODE="image"
-IMAGE_NAME="${IMAGE_NAME:-obsidian-mcp-server:latest}"
+IMAGE_NAME="${IMAGE_NAME:-brain3-mcp-vault-tools:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-brain3-mcp-vault-tools}"
 HOST_PORT="${HOST_PORT:-8420}"
 HOST_VAULT_PATH="${HOST_VAULT_PATH:-${VAULT_PATH:-}}"
-SOURCE_MOUNT_PATH="/workspace/obsidian-mcp-container"
+SOURCE_MOUNT_PATH="/workspace/brain3-mcp-vault-tools"
 CONTAINER_UPSTREAM_SECRET_DIR="/run/brain3"
 CONTAINER_UPSTREAM_SECRET_PATH="${CONTAINER_UPSTREAM_SECRET_DIR}/upstream_secret"
 CONTAINER_RUNTIME=""
@@ -41,7 +41,7 @@ Options:
   --vault-path PATH     Host vault directory to mount into /vault
   --port PORT           Host loopback port to publish as 127.0.0.1:PORT -> container port 8420
   --name NAME           Container name (default: brain3-mcp-vault-tools)
-  --image-name NAME     Image reference to run (default: obsidian-mcp-server:latest)
+  --image-name NAME     Image reference to run (default: brain3-mcp-vault-tools:latest)
   --foreground          Run attached instead of detached
   --keep                Do not pass --rm
   -h, --help            Show this help
@@ -288,9 +288,9 @@ if [ "$MODE" = "bind" ]; then
         --workdir "$SOURCE_MOUNT_PATH"
         --mount "type=bind,source=${PROJECT_ROOT},target=${SOURCE_MOUNT_PATH},readonly"
         "$IMAGE_NAME"
-        /opt/obsidian-mcp-container/.venv/bin/python
+        /opt/brain3-mcp-vault-tools/.venv/bin/python
         -m
-        obsidian_mcp_server.server
+        brain3_mcp_vault_tools.server
     )
 else
     run_args+=("$IMAGE_NAME")

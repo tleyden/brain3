@@ -8,9 +8,7 @@ pub fn validate_bearer_token(auth_header: &str, expected_token: &str) -> Result<
             "Missing or invalid bearer token".into(),
         ));
     }
-    if expected_token.is_empty()
-        || !constant_time_eq(token.as_bytes(), expected_token.as_bytes())
-    {
+    if expected_token.is_empty() || !constant_time_eq(token.as_bytes(), expected_token.as_bytes()) {
         return Err(ProxyError::Unauthorized(
             "Missing or invalid bearer token".into(),
         ));

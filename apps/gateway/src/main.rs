@@ -25,7 +25,10 @@ struct Args {
     #[arg(long)]
     env_file: Option<PathBuf>,
 
-    #[arg(long, help = "Run the interactive setup wizard for Cloudflare named tunnel provisioning")]
+    #[arg(
+        long,
+        help = "Run the interactive setup wizard for Cloudflare named tunnel provisioning"
+    )]
     setup: bool,
 }
 
@@ -48,7 +51,11 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let config_adapter = EnvFileConfigAdapter::new(args.env_file);
-    let config = Arc::new(config_adapter.load().context("failed to load configuration")?);
+    let config = Arc::new(
+        config_adapter
+            .load()
+            .context("failed to load configuration")?,
+    );
 
     if args.setup {
         match &config.tunnel {
@@ -56,7 +63,9 @@ async fn main() -> Result<()> {
                 return setup_tui::run(tc).await;
             }
             _ => {
-                eprintln!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in your .env file.");
+                eprintln!(
+                    "--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in your .env file."
+                );
                 std::process::exit(1);
             }
         }
@@ -67,14 +76,24 @@ async fn main() -> Result<()> {
         Some(TunnelConfig::CloudflareQuick { local_port }) => {
             tracing::info!(local_port = %local_port, "tunnel mode: Cloudflare quick tunnel");
         }
-        Some(TunnelConfig::CloudflareNamed { tunnel_name, domain, config_file, .. }) => {
+        Some(TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            domain,
+            config_file,
+            ..
+        }) => {
             tracing::info!(tunnel_name = %tunnel_name, domain = %domain, config_file = %config_file.display(), "tunnel mode: Cloudflare named tunnel");
         }
         None => {
             tracing::info!("tunnel mode: none (no public ingress configured)");
         }
     }
-    if let Some(TunnelConfig::CloudflareNamed { config_file, tunnel_name, .. }) = &config.tunnel {
+    if let Some(TunnelConfig::CloudflareNamed {
+        config_file,
+        tunnel_name,
+        ..
+    }) = &config.tunnel
+    {
         if !config_file.exists() {
             eprintln!(
                 "\nERROR: Cloudflare tunnel not yet provisioned.\n\
@@ -121,27 +140,23 @@ async fn main() -> Result<()> {
 
     let oauth_config = Arc::new(config.oauth.clone());
 
-    let authorize = Arc::new(
-        brain3_core::application::authorize::AuthorizeUseCase::new(
-            Arc::clone(&oauth_config),
-            Arc::clone(&auth_code_store),
-        ),
-    );
+    let authorize = Arc::new(brain3_core::application::authorize::AuthorizeUseCase::new(
+        Arc::clone(&oauth_config),
+        Arc::clone(&auth_code_store),
+    ));
     let token_exchange = Arc::new(
         brain3_core::application::token_exchange::TokenExchangeUseCase::new(
             Arc::clone(&oauth_config),
             Arc::clone(&auth_code_store),
         ),
     );
-    let proxy_mcp = Arc::new(
-        brain3_core::application::proxy_mcp::ProxyMcpUseCase::new(
-            mcp_proxy,
-            config.mcp_reverse_proxy.mcp_upstream_url.clone(),
-            upstream_secret,
-            config.oauth.access_token.clone(),
-            config.hostname_validation.clone(),
-        ),
-    );
+    let proxy_mcp = Arc::new(brain3_core::application::proxy_mcp::ProxyMcpUseCase::new(
+        mcp_proxy,
+        config.mcp_reverse_proxy.mcp_upstream_url.clone(),
+        upstream_secret,
+        config.oauth.access_token.clone(),
+        config.hostname_validation.clone(),
+    ));
 
     let app_state = AppState {
         authorize,

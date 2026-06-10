@@ -5,11 +5,7 @@ pub fn elide_secret(s: &str) -> String {
     }
     let show = (len + 9) / 10; // ceil(10%)
     let show = show.max(1);
-    format!(
-        "{}***{}({len} chars)",
-        &s[..show],
-        &s[len - show..]
-    )
+    format!("{}***{}({len} chars)", &s[..show], &s[len - show..])
 }
 
 #[cfg(test)]

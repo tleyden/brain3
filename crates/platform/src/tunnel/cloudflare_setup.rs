@@ -26,8 +26,7 @@ pub async fn check_cloudflared_logged_in() -> bool {
 
 /// Spawns `cloudflared tunnel login` and returns its stdout+stderr combined as a stream.
 /// The caller is responsible for driving the child to completion and streaming output to the TUI.
-pub async fn spawn_cloudflared_login(
-) -> Result<tokio::process::Child, TunnelError> {
+pub async fn spawn_cloudflared_login() -> Result<tokio::process::Child, TunnelError> {
     Command::new("cloudflared")
         .args(["tunnel", "login"])
         .stdout(std::process::Stdio::piped())
@@ -101,7 +100,11 @@ pub async fn create_tunnel(name: &str) -> Result<String, TunnelError> {
 pub fn find_credentials_file(tunnel_id: &str) -> Option<PathBuf> {
     let home = std::env::var("HOME").ok()?;
     let path = PathBuf::from(format!("{home}/.cloudflared/{tunnel_id}.json"));
-    if path.exists() { Some(path) } else { None }
+    if path.exists() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 /// Writes the cloudflared named tunnel config YAML to `config_path`.
