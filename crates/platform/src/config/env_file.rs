@@ -124,6 +124,30 @@ fn require_nonempty_env(name: &str, context: &str) -> Result<String, ConfigError
     }
 }
 
+fn derive_container_name_from_image(image: &str) -> Result<String, ConfigError> {
+    let last_segment = image
+        .trim()
+        .rsplit('/')
+        .next()
+        .filter(|segment| !segment.is_empty())
+        .ok_or_else(|| {
+            ConfigError::Invalid(format!(
+                "BRAIN3_CONTAINER_IMAGE: could not derive container name from '{image}'"
+            ))
+        })?;
+
+    let without_digest = last_segment.split('@').next().unwrap_or(last_segment);
+    let name = without_digest.split(':').next().unwrap_or(without_digest);
+
+    if name.is_empty() {
+        return Err(ConfigError::Invalid(format!(
+            "BRAIN3_CONTAINER_IMAGE: could not derive container name from '{image}'"
+        )));
+    }
+
+    Ok(name.to_string())
+}
+
 fn env_bool(name: &str, default: bool) -> bool {
     match env::var(name) {
         Ok(val) => !["0", "false", "no", "off"].contains(&val.trim().to_lowercase().as_str()),
@@ -180,6 +204,8 @@ fn load_container_startup_config(
         "when BRAIN3_CONTAINER_RUNTIME is set",
     )?;
 
+    let container_name = derive_container_name_from_image(&image)?;
+
     let host_port = env_var_or("BRAIN3_CONTAINER_HOST_PORT", "8420")
         .parse::<u16>()
         .map_err(|e| ConfigError::Invalid(format!("BRAIN3_CONTAINER_HOST_PORT: {e}")))?;
@@ -201,7 +227,7 @@ fn load_container_startup_config(
     Ok(Some(ContainerStartupConfig {
         runtime,
         image,
-        container_name: env_var_or("BRAIN3_CONTAINER_NAME", "brain3-mcp-vault-tools"),
+        container_name,
         vault_path: PathBuf::from(vault_path_str),
         upstream_secret_dir,
         host_port,
