@@ -290,7 +290,7 @@ if [ "$MODE" = "bind" ]; then
         "$IMAGE_NAME"
         /opt/brain3-mcp-vault-tools/.venv/bin/python
         -m
-        obsidian_mcp_server.server
+        brain3_mcp_vault_tools.server
     )
 else
     run_args+=("$IMAGE_NAME")

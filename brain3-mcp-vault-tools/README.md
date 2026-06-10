@@ -1,4 +1,4 @@
-# obsidian-mcp-server
+# brain3-mcp-vault-tools
 
 This fork is the authless MCP server half of the original `obsidian-web-mcp` codebase.
 
@@ -80,7 +80,7 @@ Once `uv` is installed, the run commands are the same on macOS and Linux.
 
 ```bash
 uv sync
-uv run obsidian-mcp-server
+uv run brain3-mcp-vault-tools
 ```
 
 Or:

@@ -20,4 +20,4 @@ ENV PATH="/opt/brain3-mcp-vault-tools/.venv/bin:${PATH}"
 
 EXPOSE 8420
 
-CMD ["obsidian-mcp-server"]
+CMD ["brain3-mcp-vault-tools"]

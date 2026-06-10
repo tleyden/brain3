@@ -5,18 +5,17 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_VAULT = PROJECT_ROOT / "test_vault"
 
 
 def import_server_module():
     for module_name in (
-        "obsidian_mcp_server.server",
-        "obsidian_mcp_server.config",
+        "brain3_mcp_vault_tools.server",
+        "brain3_mcp_vault_tools.config",
     ):
         sys.modules.pop(module_name, None)
-    return importlib.import_module("obsidian_mcp_server.server")
+    return importlib.import_module("brain3_mcp_vault_tools.server")
 
 
 class ServerStartupTests(unittest.TestCase):

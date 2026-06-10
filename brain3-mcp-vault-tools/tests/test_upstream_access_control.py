@@ -8,10 +8,9 @@ from unittest.mock import patch
 
 from starlette.testclient import TestClient
 
-
 MODULE_PREFIXES = (
-    "obsidian_mcp_server.server",
-    "obsidian_mcp_server.config",
+    "brain3_mcp_vault_tools.server",
+    "brain3_mcp_vault_tools.config",
 )
 
 
@@ -19,7 +18,7 @@ def import_server_module():
     for module_name in tuple(sys.modules):
         if module_name in MODULE_PREFIXES:
             sys.modules.pop(module_name, None)
-    return importlib.import_module("obsidian_mcp_server.server")
+    return importlib.import_module("brain3_mcp_vault_tools.server")
 
 
 class UpstreamAccessControlTests(unittest.TestCase):
