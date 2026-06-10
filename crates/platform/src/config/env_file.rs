@@ -199,39 +199,66 @@ fn load_container_startup_config(
 }
 
 fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigError> {
-    let quick = env_bool("CF_QUICK_TUNNEL", false);
+    // CF_QUICK_TUNNEL=true takes explicit precedence over named-tunnel vars.
+    let quick_explicit = env::var("CF_QUICK_TUNNEL")
+        .map(|v| !["0", "false", "no", "off"].contains(&v.trim().to_lowercase().as_str()))
+        .unwrap_or(false);
+
+    if quick_explicit {
+        tracing::info!("CF_QUICK_TUNNEL=true — using Cloudflare quick tunnel (named tunnel vars ignored)");
+        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
+    }
+
     let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
     let domain = normalize_hostname(&env_var_or("CF_DOMAIN", ""));
     let named = !tunnel_name.is_empty() && !domain.is_empty();
 
-    if quick && named {
-        return Err(ConfigError::Conflict(
-            "Both CF_QUICK_TUNNEL and CF_TUNNEL_NAME/CF_DOMAIN are set. Choose one tunnel type.".into(),
-        ));
-    }
-
-    if quick {
-        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
-    }
-
     if named {
         let config_file_str = env_var_or("CF_TUNNEL_CONFIG_FILE", "");
-        if config_file_str.is_empty() {
-            return Err(ConfigError::Missing(
-                "CF_TUNNEL_CONFIG_FILE is required when CF_TUNNEL_NAME and CF_DOMAIN are set".into(),
-            ));
-        }
+        let config_file = if config_file_str.is_empty() {
+            PathBuf::from(format!(".cloudflared/{tunnel_name}.yml"))
+        } else {
+            PathBuf::from(config_file_str)
+        };
+        tracing::info!(tunnel_name = %tunnel_name, domain = %domain, config_file = %config_file.display(), "using Cloudflare named tunnel");
         return Ok(Some(TunnelConfig::CloudflareNamed {
             tunnel_name,
             domain,
-            config_file: PathBuf::from(config_file_str),
+            config_file,
+            local_port: gateway_port,
         }));
     }
 
+    // Default: quick tunnel unless explicitly disabled.
+    let quick_default = env_bool("CF_QUICK_TUNNEL", true);
+    if quick_default {
+        tracing::info!("CF_QUICK_TUNNEL defaulting to true — using Cloudflare quick tunnel");
+        return Ok(Some(TunnelConfig::CloudflareQuick { local_port: gateway_port }));
+    }
+
+    tracing::info!("CF_QUICK_TUNNEL=false and no named tunnel vars set — no tunnel configured");
     Ok(None)
 }
 
 fn resolve_expected_host() -> Result<Option<String>, ConfigError> {
+    // Quick tunnel hostname is ephemeral (changes every restart), so there is no
+    // stable expected host to enforce. Named tunnel vars must not bleed through.
+    let quick_explicit = env::var("CF_QUICK_TUNNEL")
+        .map(|v| !["0", "false", "no", "off"].contains(&v.trim().to_lowercase().as_str()))
+        .unwrap_or(false);
+    if quick_explicit {
+        let named = named_tunnel_host();
+        if named.is_some() {
+            tracing::warn!(
+                named_host = ?named,
+                "CF_QUICK_TUNNEL=true overrides CF_TUNNEL_NAME/CF_DOMAIN for tunnel mode; \
+                 hostname validation will be disabled (quick tunnel URL is ephemeral). \
+                 Remove CF_TUNNEL_NAME/CF_DOMAIN or switch to a named tunnel to enable hostname enforcement."
+            );
+        }
+        return Ok(None);
+    }
+
     let named = named_tunnel_host();
     let direct = direct_public_origin_hostname();
 

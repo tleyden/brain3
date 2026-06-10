@@ -35,7 +35,7 @@ fn tunnel_summary(t: &TunnelConfig) -> String {
         TunnelConfig::CloudflareQuick { local_port } => {
             format!("cloudflare-quick port={local_port}")
         }
-        TunnelConfig::CloudflareNamed { tunnel_name, domain, config_file } => {
+        TunnelConfig::CloudflareNamed { tunnel_name, domain, config_file, .. } => {
             format!("cloudflare-named {tunnel_name}.{domain} config={}", config_file.display())
         }
     }

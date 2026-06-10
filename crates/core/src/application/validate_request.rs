@@ -32,7 +32,15 @@ pub fn validate_host(
     if request_host == expected {
         return Ok(());
     }
-    Err(ProxyError::MisdirectedRequest(
-        "Request host does not match the configured public hostname".into(),
-    ))
+    tracing::warn!(
+        request_host = %request_host,
+        expected_host = %expected,
+        "hostname mismatch → 421 Misdirected Request; \
+         if using CF_QUICK_TUNNEL=true alongside CF_TUNNEL_NAME/CF_DOMAIN, \
+         the named-tunnel hostname was incorrectly used as the expected host — \
+         this is a config bug that should now be fixed at startup"
+    );
+    Err(ProxyError::MisdirectedRequest(format!(
+        "request host '{request_host}' does not match expected host '{expected}'"
+    )))
 }

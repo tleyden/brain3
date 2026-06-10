@@ -1,3 +1,5 @@
+mod setup_tui;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -5,6 +7,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
+use brain3_core::domain::model::TunnelConfig;
 use brain3_core::ports::config::ConfigPort;
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
@@ -21,6 +24,9 @@ struct Args {
 
     #[arg(long)]
     env_file: Option<PathBuf>,
+
+    #[arg(long, help = "Run the interactive setup wizard for Cloudflare named tunnel provisioning")]
+    setup: bool,
 }
 
 async fn shutdown_signal() {
@@ -43,6 +49,49 @@ async fn main() -> Result<()> {
 
     let config_adapter = EnvFileConfigAdapter::new(args.env_file);
     let config = Arc::new(config_adapter.load().context("failed to load configuration")?);
+
+    if args.setup {
+        match &config.tunnel {
+            Some(tc @ TunnelConfig::CloudflareNamed { .. }) => {
+                return setup_tui::run(tc).await;
+            }
+            _ => {
+                eprintln!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in your .env file.");
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // Pre-flight: named tunnel config file must exist before startup.
+    match &config.tunnel {
+        Some(TunnelConfig::CloudflareQuick { local_port }) => {
+            tracing::info!(local_port = %local_port, "tunnel mode: Cloudflare quick tunnel");
+        }
+        Some(TunnelConfig::CloudflareNamed { tunnel_name, domain, config_file, .. }) => {
+            tracing::info!(tunnel_name = %tunnel_name, domain = %domain, config_file = %config_file.display(), "tunnel mode: Cloudflare named tunnel");
+        }
+        None => {
+            tracing::info!("tunnel mode: none (no public ingress configured)");
+        }
+    }
+    if let Some(TunnelConfig::CloudflareNamed { config_file, tunnel_name, .. }) = &config.tunnel {
+        if !config_file.exists() {
+            eprintln!(
+                "\nERROR: Cloudflare tunnel not yet provisioned.\n\
+                 \n  Config file not found: {}\
+                 \n\n  Run the setup wizard:\n    brain3-gateway --setup\
+                 \n\n  Or use a quick tunnel instead (no setup needed):\n    Set CF_QUICK_TUNNEL=true in .env (and remove CF_TUNNEL_NAME/CF_DOMAIN)\n",
+                config_file.display()
+            );
+            tracing::error!(
+                config_file = %config_file.display(),
+                tunnel_name = %tunnel_name,
+                "named tunnel config file not found — run: brain3-gateway --setup"
+            );
+            std::process::exit(1);
+        }
+    }
+
     brain3_platform::config::log_config::log_startup_config(&config);
 
     let upstream_secret = brain3_platform::config::upstream_secret::read_or_create(
