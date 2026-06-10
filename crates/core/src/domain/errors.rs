@@ -77,8 +77,14 @@ pub enum ContainerError {
 pub enum TunnelError {
     #[error("cloudflared not found — see https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/ for install instructions")]
     CloudflaredNotFound,
+    #[error("cloudflared is not logged in — run `cloudflared tunnel login` first")]
+    CloudflaredNotLoggedIn,
     #[error("tunnel config not found at {0} — run the setup wizard first")]
     ConfigNotFound(String),
+    #[error("tunnel credentials file not found: {0}")]
+    CredentialsNotFound(String),
+    #[error("tunnel setup failed: {0}")]
+    SetupFailed(String),
     #[error("could not spawn cloudflared: {0}")]
     SpawnFailed(String),
     #[error("tunnel error: {0}")]
