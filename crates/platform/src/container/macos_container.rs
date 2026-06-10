@@ -12,6 +12,12 @@ impl ContainerPort for MacOsContainerAdapter {
         command_succeeds("container", &["image", "inspect", image]).await
     }
 
+    async fn pull_image(&self, image: &str) -> Result<(), ContainerError> {
+        run_command("container", &["image", "pull", image])
+            .await
+            .map(|_| ())
+    }
+
     async fn exists(&self, id: &ContainerId) -> Result<bool, ContainerError> {
         command_succeeds("container", &["inspect", &id.0]).await
     }
@@ -38,7 +44,10 @@ impl ContainerPort for MacOsContainerAdapter {
         }
         for pm in &config.port_mappings {
             args.push("--publish".into());
-            args.push(format!("{}:{}:{}", pm.host_address, pm.host_port, pm.container_port));
+            args.push(format!(
+                "{}:{}:{}",
+                pm.host_address, pm.host_port, pm.container_port
+            ));
         }
         for (k, v) in &config.env_vars {
             args.push("--env".into());
@@ -80,7 +89,10 @@ impl ContainerPort for MacOsContainerAdapter {
         match run_command("container", &["delete", &id.0]).await {
             Ok(_) => Ok(()),
             Err(ContainerError::CommandFailed { ref stderr, .. })
-                if stderr.contains("notFound") => Ok(()),
+                if stderr.contains("notFound") =>
+            {
+                Ok(())
+            }
             Err(e) => Err(e),
         }
     }
