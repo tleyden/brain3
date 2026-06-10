@@ -397,7 +397,9 @@ async fn run_setup(state: &mut SetupState) {
         None => {
             state.steps[3].status = StepStatus::Failed;
             state.log(format!(
-                "Credentials file not found for tunnel {tunnel_id}. Try `cloudflared tunnel login` again."
+                "Credentials file not found for tunnel {tunnel_id}. \
+                 Delete the tunnel and re-run setup: `cloudflared tunnel delete {}`",
+                state.tunnel_name
             ));
             return;
         }

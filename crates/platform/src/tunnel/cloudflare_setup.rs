@@ -67,9 +67,11 @@ pub async fn find_tunnel_id(name: &str) -> Result<Option<String>, TunnelError> {
 }
 
 fn parse_first_tunnel_id(json: &str) -> Option<String> {
-    // Look for `"id":"<value>"` — avoids pulling in serde_json for one field.
-    let key = "\"id\":\"";
-    let start = json.find(key)? + key.len();
+    // cloudflared outputs pretty-printed JSON so the value may be `"id": "` or `"id":"`.
+    let start = json
+        .find("\"id\": \"")
+        .map(|i| i + 7)
+        .or_else(|| json.find("\"id\":\"").map(|i| i + 6))?;
     let end = json[start..].find('"')? + start;
     Some(json[start..end].to_string())
 }
