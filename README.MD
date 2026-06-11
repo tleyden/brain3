@@ -92,17 +92,60 @@ On subsequent runs, Brain3 goes straight to the runtime status screen.
 
 ### 3. Connect your AI app
 
-In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), add a new MCP server connection with:
+In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
-| Field | Value |
-|---|---|
-| Server URL | The public URL printed by Brain3 on startup. If you configured a named tunnel or direct public origin, use that hostname instead. |
-| Client ID | `oauth2-gateway-client` (or whatever you set in `.env`) |
-| Client Secret | The value of `OAUTH2_GATEWAY_CLIENT_SECRET` from your `.env` |
+Brain3 displays all the connection information you need:
 
-When the AI app redirects you to sign in, enter the username and password you set during the setup wizard.
+- Server URL
+- Client ID
+- Client Secret
+- Username
+- Password
 
-Once connected, you can ask your AI to read, search, organize, and edit your notes.
+Follow the instructions below for your AI client.
+
+<details>
+<summary><strong>ChatGPT</strong></summary>
+
+1. Open **Settings → Connectors → Create Connector**.
+2. Select **Custom MCP Server**.
+3. Copy the **Server URL**, **Client ID**, and **Client Secret** from Brain3's MCP Config Settings screen.
+4. Complete the OAuth authorization flow when prompted.
+5. When shown a login screen, enter the **Username** and **Password** displayed in Brain3's MCP Config Settings screen.
+
+Once authorization succeeds, Brain3 will be available as a connector in ChatGPT.
+
+</details>
+
+<details>
+<summary><strong>Claude</strong></summary>
+
+1. Open **Settings → Connectors → Add Custom Connector**.
+2. Enter the **Server URL** shown in Brain3.
+3. If prompted, enter the **Client ID** and **Client Secret** from the MCP Config Settings screen.
+4. Complete the OAuth authorization flow.
+5. When shown a login screen, enter the **Username** and **Password** displayed in Brain3's MCP Config Settings screen.
+
+Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
+
+</details>
+
+<details>
+<summary><strong>Other MCP-Compatible AI Apps</strong></summary>
+
+Most MCP-compatible AI applications require the same information displayed in Brain3's MCP Config Settings screen:
+
+- Server URL
+- Client ID
+- Client Secret
+
+After connecting, complete the OAuth sign-in flow using the **Username** and **Password** shown on that screen.
+
+Refer to your AI application's documentation for client-specific setup instructions.
+
+</details>
+
+Once connected, you can ask your AI to search, organize, summarize, and edit your notes directly through Brain3.
 
 ### 4. Try it from your AI app
 
