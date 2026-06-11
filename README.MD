@@ -1,20 +1,6 @@
 
 <img width="800" alt="Image" src="https://github.com/user-attachments/assets/752e5eed-84c0-40cb-a3b3-104d79dd5210" />
 
-Brain3 lets you interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web.  You can read, summarize, and efficiently edit your notes and knowledge aka "second brain".
-
-It's optimized for Obsidian comaptible markdown vaults, but it also works with other plain text formats.   
-
-You can think of it as a limited version of OpenClaw or Hermes, but you use your existing AI app as the "agent" that you interact with, rather than a separate messaging app.  However it currently doesn't support any proactive messages, but it is possible to use the built-in scheduling tools to create a similar effect.  It uses the Model Context Protocol (MCP) standard to bridge your local data to the AI assistant.
-
-Your data stays 100% local and private, aside from the AI model getting access to a subset of the content based on your prompts.  See Privacy Details below for more information.
-
-In order to bridge your local data to the cloud based AI assistant, you need to set up a Cloudflare Tunnel.  This is free to use, and all data is securely encrypted.   
-
-While exposing your local data to the public internet is highly risky, Brain3 uses secure containers (Docker and MacOS Native Containers) to reduce the blast radius as much as possible in cases your credentials are compromised.  OAuth2.1 with PKCE is used to authenticate with the AI provider.  See Security Details below for more details 
-
-The core app is written in Rust and is cross-platform, and the code that runs in the docker container is written in Python based on the FastMCP framework.
-
 ## Why This Exists
 
 As a heavy Obsidian user, I found myself wanting to interact w/ my second brain via Claude and ChatGPT.  I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.
@@ -23,6 +9,19 @@ I then found https://github.com/jimprosser/obsidian-web-mcp on a Reddit post, an
 
 I decided to build Brain3 as a container-based solution with a heavy emphasis on defensible and robust security. 
 
+## Features
+
+✅ Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web.  (read, summarize, create, edit) 
+✅ Obsidian-compatible, but Obsidian not required
+✅ TUI app for setup
+
+## Privacy and Security
+
+✅ Your data stays 100% local and private - the AI assistant only sees a part of your vault based on your prompts
+✅ Designed with security and privacy in mind, using container-based isolation and a free Cloudflare tunnel
+✅ OAuth2.1 with PKCE is used to authenticate with the AI provider
+✅ Host process written in Rust to avoid several classes of vulnerabilities 
+✅ Container process uses the battle-tested FastMCP server framework 
 
 ## Requirements
 
@@ -47,7 +46,8 @@ TODO
 
 ## Security Details
 
-TODO
+Written in Rust to reduce attack surface area
+
 
 ## Quick Start
 
@@ -298,10 +298,10 @@ cargo test
 cargo build --release
 ```
 
-## Roadmap 
-
-TODO
-
 ## Credits
 
 - obsidian-web-mcp repo
+
+## License 
+
+Apache 2.0
