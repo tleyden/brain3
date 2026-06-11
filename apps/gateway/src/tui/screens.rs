@@ -50,7 +50,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::VaultPath => "Vault Path",
         SetupStep::Auth => "Auth Setup",
         SetupStep::Summary => "Summary",
-        SetupStep::ConnectionCard => "Connection Instructions",
+        SetupStep::ConnectionCard => "MCP Config Settings",
         SetupStep::RuntimeStatus => "Runtime Status",
     }
 }
@@ -283,7 +283,7 @@ fn help_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::ConnectionCard => vec![Line::from("[Enter] runtime status    [q] quit")],
         SetupStep::RuntimeStatus => match state.previous_step() {
             Some(SetupStep::ConnectionCard) => {
-                vec![Line::from("[q] quit    [Esc] connection card")]
+                vec![Line::from("[Esc] MCP Config Settings    [q] quit")]
             }
             _ => vec![Line::from("[q] quit")],
         },
