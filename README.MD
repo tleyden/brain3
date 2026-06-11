@@ -27,10 +27,10 @@ I decided to build Brain3 as a container-based solution with a heavy emphasis on
 
 ## Requirements
 
-* OS:MacOS, Windows (untested), Linux
-* Cloudflare Tunnel
-* AI Assistant (e.g. ChatGPT, Claude, etc)
-and if you want it accessible 24/7, you'll need a dedicated home computer or cloud server.
+* OS: MacOS, Linux - Windows would work in theory, but I don't have a testing machine.
+* Cloudflare Tunnel - but no account needed, and it's a one-liner install.
+* AI Assistant (e.g. ChatGPT, Claude, etc) 
+* If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to openclaw.
 
 ## Quick Start
 
