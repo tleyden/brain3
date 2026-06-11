@@ -6,6 +6,23 @@
 - You are on the `main` branch with a clean working tree
 - All milestone issues for the release are closed
 
+## One-time GitHub secrets setup
+
+These secrets must be set once per repo. The release and PR workflows both use them to authenticate with AWS.
+
+```bash
+gh secret set AWS_ACCESS_KEY_ID     --repo tleyden/brain3 --body "AKIA..."
+gh secret set AWS_SECRET_ACCESS_KEY --repo tleyden/brain3 --body "..."
+gh secret set BRAIN3_S3_BUCKET      --repo tleyden/brain3 --body "your-bucket-name"
+gh secret set AWS_REGION            --repo tleyden/brain3 --body "us-east-1"
+```
+
+Verify they are set:
+
+```bash
+gh secret list --repo tleyden/brain3
+```
+
 ## 1. Prepare release notes from a GitHub milestone
 
 Create a milestone in advance (e.g. `v0.2.0`) and assign issues and PRs to it as you work.
@@ -93,10 +110,53 @@ tar -xzf /tmp/brain3-test/brain3-gateway-x86_64-unknown-linux-gnu.tar.gz -C /tmp
 /tmp/brain3-test/brain3-gateway --help
 ```
 
-## Versioning
+## Manual S3 Upload (for testing without tagging)
 
-Follow [Semantic Versioning](https://semver.org):
+Use this when you want to push a binary and `install.sh` to S3 without creating a GitHub release or tag.
 
-- **Patch** (`v0.1.1`): bug fixes, no behaviour changes
-- **Minor** (`v0.2.0`): new features, backwards-compatible
-- **Major** (`v1.0.0`): breaking changes to config or API surface
+### Prerequisites
+
+- AWS CLI configured (`aws configure`) with credentials that have `s3:PutObject` on the bucket
+- `BRAIN3_S3_BUCKET` env var set, or pass the bucket name as an argument
+
+### Steps
+
+**1. Detect your target triple:**
+
+```bash
+rustc -vV | grep host | awk '{print $2}'
+# e.g. aarch64-apple-darwin
+```
+
+**2. Build and package for your local platform only:**
+
+```bash
+TARGET=$(rustc -vV | grep host | awk '{print $2}')
+cargo build --release
+tar -czf brain3-gateway-${TARGET}.tar.gz -C target/release brain3-gateway
+```
+
+Cross-compiling all four targets locally is complex — if you need all platforms, push a branch and let the PR workflow build them.
+
+**3. Upload to S3:**
+
+```bash
+# Uploads to releases/dev/ and releases/latest/ by default
+bash scripts/upload-to-s3.sh <bucket-name>
+
+# Or specify a custom version label
+bash scripts/upload-to-s3.sh <bucket-name> v0.2.0-rc1
+
+# Or point at a directory containing pre-built tarballs
+bash scripts/upload-to-s3.sh <bucket-name> dev /path/to/tarballs
+```
+
+The script uploads each tarball it finds to both `releases/<version>/` and `releases/latest/`,
+and also uploads `scripts/install.sh` to `releases/latest/install.sh`.
+
+**4. Test the install script against your uploaded artifacts:**
+
+```bash
+S3_BASE_URL="https://<bucket>.s3.amazonaws.com/releases/latest" \
+  bash scripts/install.sh
+```

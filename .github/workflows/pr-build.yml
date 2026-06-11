@@ -1,16 +1,18 @@
-name: Release
+name: PR Build
 
 on:
-  push:
-    tags:
-      - "v*"
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, closed]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     name: Build ${{ matrix.display }}
+    if: github.event.action != 'closed'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -38,7 +40,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: pr-${{ matrix.target }}
 
       - name: Install cross-compilation tools
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -59,24 +61,10 @@ jobs:
           name: brain3-gateway-${{ matrix.target }}
           path: brain3-gateway-${{ matrix.target }}.tar.gz
 
-  release:
-    name: Create GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-          merge-multiple: true
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/*.tar.gz
-          generate_release_notes: true
-
   publish-s3:
-    name: Publish to S3
+    name: Publish PR build to S3
     needs: build
+    if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -94,9 +82,31 @@ jobs:
 
       - name: Upload to S3
         env:
-          AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          BUCKET: ${{ secrets.BRAIN3_S3_BUCKET }}
+          PR: ${{ github.event.pull_request.number }}
         run: |
-          bash scripts/upload-to-s3.sh \
-            "${{ secrets.BRAIN3_S3_BUCKET }}" \
-            "${{ github.ref_name }}" \
-            artifacts
+          for tarball in artifacts/*.tar.gz; do
+            filename="$(basename "$tarball")"
+            aws s3 cp "$tarball" "s3://$BUCKET/pr/$PR/$filename"
+          done
+          STAMPED="$(mktemp)"
+          sed "s|__BUCKET__|$BUCKET|g; s|releases/latest|pr/$PR|g" scripts/install.sh > "$STAMPED"
+          aws s3 cp "$STAMPED" "s3://$BUCKET/pr/$PR/install.sh"
+          rm -f "$STAMPED"
+
+  cleanup-s3:
+    name: Remove PR build from S3
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+
+      - name: Delete PR artifacts from S3
+        env:
+          BUCKET: ${{ secrets.BRAIN3_S3_BUCKET }}
+          PR: ${{ github.event.pull_request.number }}
+        run: aws s3 rm "s3://$BUCKET/pr/$PR/" --recursive
