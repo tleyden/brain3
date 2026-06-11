@@ -400,6 +400,7 @@ mod tests {
                 client_id: "oauth2-gateway-client".into(),
                 client_secret: "chosen-secret".into(),
                 username: "admin".into(),
+                password: "chosen-password".into(),
                 log_file: PathBuf::from("/tmp/brain3.log"),
             }
         );
