@@ -104,27 +104,22 @@ Use this when you want to push a binary and `install.sh` to S3 without creating 
 
 ### Steps
 
-**1. Build the binary for your local platform:**
+**1. Detect your target triple:**
 
 ```bash
+rustc -vV | grep host | awk '{print $2}'
+# e.g. aarch64-apple-darwin
+```
+
+**2. Build and package for your local platform only:**
+
+```bash
+TARGET=$(rustc -vV | grep host | awk '{print $2}')
 cargo build --release
+tar -czf brain3-gateway-${TARGET}.tar.gz -C target/release brain3-gateway
 ```
 
-**2. Package it into a tarball** (the script looks for files named `brain3-gateway-<target>.tar.gz`):
-
-```bash
-# macOS ARM
-tar -czf brain3-gateway-aarch64-apple-darwin.tar.gz \
-  -C target/release brain3-gateway
-
-# macOS Intel
-tar -czf brain3-gateway-x86_64-apple-darwin.tar.gz \
-  -C target/release brain3-gateway
-
-# Linux x86_64
-tar -czf brain3-gateway-x86_64-unknown-linux-gnu.tar.gz \
-  -C target/release brain3-gateway
-```
+Cross-compiling all four targets locally is complex — if you need all platforms, push a branch and let the PR workflow build them.
 
 **3. Upload to S3:**
 
@@ -148,11 +143,3 @@ and also uploads `scripts/install.sh` to `releases/latest/install.sh`.
 S3_BASE_URL="https://<bucket>.s3.amazonaws.com/releases/latest" \
   bash scripts/install.sh
 ```
-
-## Versioning
-
-Follow [Semantic Versioning](https://semver.org):
-
-- **Patch** (`v0.1.1`): bug fixes, no behaviour changes
-- **Minor** (`v0.2.0`): new features, backwards-compatible
-- **Major** (`v1.0.0`): breaking changes to config or API surface
