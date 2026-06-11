@@ -12,10 +12,20 @@ use brain3_core::application::authorize::AuthorizeUseCase;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::token_exchange::TokenExchangeUseCase;
 use brain3_core::domain::model::GatewayConfig;
+use brain3_core::domain::setup::RuntimeLaunchPlan;
+use brain3_core::ports::config::ConfigPort;
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
+use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
+use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
+
+pub struct ConfiguredGatewaySession {
+    pub runtime: RuntimeBootstrap,
+    pub server: GatewayServerHandle,
+    pub display_url: String,
+}
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -135,6 +145,31 @@ pub async fn spawn_gateway_server(
         local_url,
         shutdown_tx: Some(shutdown_tx),
         join_handle,
+    })
+}
+
+pub async fn spawn_configured_gateway_session(
+    host: &str,
+    launch_plan: RuntimeLaunchPlan,
+) -> Result<ConfiguredGatewaySession> {
+    let config = Arc::new(
+        EnvFileConfigAdapter::new(Some(launch_plan.env_file.clone()))
+            .load()
+            .context("failed to load configuration")?,
+    );
+    let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
+    let server = spawn_gateway_server(
+        host,
+        Arc::clone(&runtime.config),
+        runtime.upstream_secret.clone(),
+    )
+    .await?;
+    let display_url = runtime.display_url(server.local_url());
+
+    Ok(ConfiguredGatewaySession {
+        runtime,
+        server,
+        display_url,
     })
 }
 

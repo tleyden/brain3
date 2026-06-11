@@ -25,6 +25,23 @@ pub struct RuntimeBootstrap {
     _tunnel_guard: Option<Box<dyn TunnelPort>>,
 }
 
+impl RuntimeBootstrap {
+    pub fn display_url(&self, local_url: &str) -> String {
+        self.public_url
+            .clone()
+            .unwrap_or_else(|| local_url.to_string())
+    }
+}
+
+pub fn named_tunnel_setup_config(config: &GatewayConfig) -> Option<&TunnelConfig> {
+    match &config.tunnel {
+        Some(tc @ TunnelConfig::CloudflareNamed { config_file, .. }) if !config_file.exists() => {
+            Some(tc)
+        }
+        _ => None,
+    }
+}
+
 pub async fn bootstrap_configured_runtime(
     config: Arc<GatewayConfig>,
     launch_plan: RuntimeLaunchPlan,
@@ -97,26 +114,22 @@ fn ensure_named_tunnel_config_exists(config: &GatewayConfig) -> Result<()> {
         config_file,
         tunnel_name,
         ..
-    }) = &config.tunnel
+    }) = named_tunnel_setup_config(config)
     else {
         return Ok(());
     };
 
-    if config_file.exists() {
-        return Ok(());
-    }
-
     eprintln!(
         "\nERROR: Cloudflare tunnel not yet provisioned.\n\
          \n  Config file not found: {}\
-         \n\n  Run the setup wizard:\n    brain3 --setup\
+         \n\n  Run this in an interactive terminal:\n    brain3 --tui\
          \n\n  Or use a quick tunnel instead (no setup needed):\n    Set CF_QUICK_TUNNEL=true in .env (and remove CF_TUNNEL_NAME/CF_DOMAIN)\n",
         config_file.display()
     );
     tracing::error!(
         config_file = %config_file.display(),
         tunnel_name = %tunnel_name,
-        "named tunnel config file not found — run: brain3 --setup"
+        "named tunnel config file not found — run: brain3 --tui"
     );
     bail!(
         "named tunnel config file not found: {}",

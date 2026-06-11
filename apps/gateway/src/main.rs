@@ -4,28 +4,31 @@ mod setup_tui;
 #[allow(dead_code)]
 mod tui;
 
+use std::io::{stderr, stdin, stdout, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 
-use brain3_core::domain::model::TunnelConfig;
+use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::domain::setup::{DependencyAvailability, DependencyStatus};
 use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
-use brain3_platform::runtime::bootstrap_configured_runtime;
+use brain3_platform::runtime::{bootstrap_configured_runtime, named_tunnel_setup_config};
 use brain3_platform::setup::app_home::Brain3AppHome;
 use brain3_platform::setup::PlatformSetupSystem;
 
 use crate::tui::GatewayTuiLaunch;
 
+const DEFAULT_HOST: &str = "127.0.0.1";
+
 #[derive(Parser)]
 #[command(name = "brain3", about = "OAuth2 gateway for MCP servers")]
 struct Args {
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long, default_value = DEFAULT_HOST)]
     host: String,
 
     #[arg(long)]
@@ -111,7 +114,8 @@ fn resolve_config_env_file(args: &Args) -> Result<ResolvedEnvFile> {
 
 fn setup_requires_named_tunnel() -> Result<()> {
     eprintln!(
-        "--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in the configured env file."
+        "\nBrain3 --setup only applies to Cloudflare named tunnel provisioning.\n\
+         \nRun this in an interactive terminal to use the normal setup/status flow:\n  brain3 --tui\n"
     );
     anyhow::bail!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set");
 }
@@ -167,6 +171,112 @@ fn missing_custom_env_file(env_file: &Path) -> Result<LaunchDispatch> {
     anyhow::bail!("custom env file not found: {}", env_file.display());
 }
 
+fn is_interactive_terminal() -> bool {
+    stdin().is_terminal() && stdout().is_terminal() && stderr().is_terminal()
+}
+
+fn brain3_command(args: &Args, mode: LaunchMode) -> String {
+    let mut parts = vec!["brain3".to_string()];
+
+    match mode {
+        LaunchMode::Tui => parts.push("--tui".into()),
+        LaunchMode::Cli => parts.push("--cli".into()),
+        LaunchMode::Setup => parts.push("--setup".into()),
+    }
+
+    if args.host != DEFAULT_HOST {
+        parts.push("--host".into());
+        parts.push(shell_quote(&args.host));
+    }
+
+    if let Some(env_file) = &args.env_file {
+        parts.push("--env-file".into());
+        parts.push(shell_quote(&env_file.display().to_string()));
+    }
+
+    parts.join(" ")
+}
+
+fn shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".into();
+    }
+
+    if value.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'-' | b':' | b'=')
+    }) {
+        return value.to_string();
+    }
+
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn noninteractive_first_run_requires_tui(
+    args: &Args,
+    resolved_env: &ResolvedEnvFile,
+) -> Result<()> {
+    let tui_command = brain3_command(args, LaunchMode::Tui);
+    eprintln!(
+        "\nBrain3 needs interactive first-run setup.\n\
+         \n  App home: {}\n\
+         \n  Expected config: {}\n\
+         \nRun this in an interactive terminal:\n  {}\n",
+        resolved_env.app_home.root_dir.display(),
+        resolved_env.env_file.display(),
+        tui_command
+    );
+    tracing::warn!(
+        app_home = %resolved_env.app_home.root_dir.display(),
+        env_file = %resolved_env.env_file.display(),
+        command = %tui_command,
+        "default TUI launch refused because the terminal is non-interactive during first-run"
+    );
+    anyhow::bail!("first-run setup requires an interactive terminal; run: {tui_command}");
+}
+
+fn noninteractive_configured_launch_guidance(
+    args: &Args,
+    resolved_env: &ResolvedEnvFile,
+) -> Result<()> {
+    let tui_command = brain3_command(args, LaunchMode::Tui);
+    let cli_command = brain3_command(args, LaunchMode::Cli);
+    eprintln!(
+        "\nBrain3 default launch uses the interactive status dashboard.\n\
+         \n  Env file: {}\n\
+         \nRun this in an interactive terminal for the dashboard:\n  {}\n\
+         \nOr use the foreground non-TUI startup path:\n  {}\n",
+        resolved_env.env_file.display(),
+        tui_command,
+        cli_command
+    );
+    tracing::warn!(
+        env_file = %resolved_env.env_file.display(),
+        tui_command = %tui_command,
+        cli_command = %cli_command,
+        "default TUI launch refused because the terminal is non-interactive for a configured install"
+    );
+    anyhow::bail!(
+        "default TUI launch requires an interactive terminal; run: {tui_command} or {cli_command}"
+    );
+}
+
+fn named_tunnel_setup_requires_tui(args: &Args, resolved_env: &ResolvedEnvFile) -> Result<()> {
+    let tui_command = brain3_command(args, LaunchMode::Tui);
+    eprintln!(
+        "\nBrain3 needs interactive Cloudflare named-tunnel setup before startup can continue.\n\
+         \n  Env file: {}\n\
+         \nRun this in an interactive terminal:\n  {}\n",
+        resolved_env.env_file.display(),
+        tui_command
+    );
+    tracing::warn!(
+        env_file = %resolved_env.env_file.display(),
+        command = %tui_command,
+        "configured startup requires interactive named-tunnel setup"
+    );
+    anyhow::bail!("named-tunnel setup requires an interactive terminal; run: {tui_command}");
+}
+
 fn cli_requires_interactive_setup(
     app_home: &Brain3AppHome,
     env_file: &Path,
@@ -192,10 +302,10 @@ fn setup_requires_existing_config(
     env_file: &Path,
 ) -> Result<LaunchDispatch> {
     eprintln!(
-        "\nBrain3 --setup requires an existing config file.\n\
+        "\nBrain3 --setup only provisions a Cloudflare named tunnel after Brain3 is configured.\n\
          \n  App home: {}\n\
          \n  Expected config: {}\n\
-         \nRun brain3 without flags to use the setup/status TUI first.\n",
+         \nRun this in an interactive terminal to create or manage configuration:\n  brain3 --tui\n",
         app_home.root_dir.display(),
         env_file.display()
     );
@@ -249,6 +359,7 @@ async fn run_setup_mode(env_file: PathBuf) -> Result<()> {
 
 async fn run_cli_mode(
     host: &str,
+    config: Arc<GatewayConfig>,
     launch_plan: RuntimeLaunchPlan,
     logging: &logging::GatewayLogging,
 ) -> Result<()> {
@@ -261,7 +372,6 @@ async fn run_cli_mode(
 
     logging.enable_terminal_mirror();
 
-    let config = load_config(launch_plan.env_file.clone())?;
     let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
 
     if let Some(public_url) = &runtime.public_url {
@@ -290,6 +400,7 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let resolved_env = resolve_config_env_file(&args)?;
+    let interactive_terminal = is_interactive_terminal();
     let mode = choose_launch_mode(&args);
     let dispatch = plan_launch(
         mode,
@@ -300,6 +411,9 @@ async fn main() -> Result<()> {
 
     match dispatch {
         LaunchDispatch::TuiFirstRun => {
+            if !interactive_terminal {
+                return noninteractive_first_run_requires_tui(&args, &resolved_env);
+            }
             tui::run_gateway_tui(
                 &args.host,
                 logging.log_file.clone(),
@@ -308,6 +422,16 @@ async fn main() -> Result<()> {
             .await
         }
         LaunchDispatch::TuiConfigured { launch_plan } => {
+            let config = load_config(launch_plan.env_file.clone())?;
+            if let Some(tunnel_config) = named_tunnel_setup_config(&config) {
+                if !interactive_terminal {
+                    return named_tunnel_setup_requires_tui(&args, &resolved_env);
+                }
+                return setup_tui::run(tunnel_config).await;
+            }
+            if !interactive_terminal {
+                return noninteractive_configured_launch_guidance(&args, &resolved_env);
+            }
             tui::run_gateway_tui(
                 &args.host,
                 logging.log_file.clone(),
@@ -316,7 +440,11 @@ async fn main() -> Result<()> {
             .await
         }
         LaunchDispatch::Cli { launch_plan } => {
-            run_cli_mode(&args.host, launch_plan, &logging).await
+            let config = load_config(launch_plan.env_file.clone())?;
+            if named_tunnel_setup_config(&config).is_some() {
+                return named_tunnel_setup_requires_tui(&args, &resolved_env);
+            }
+            run_cli_mode(&args.host, config, launch_plan, &logging).await
         }
         LaunchDispatch::Setup { env_file } => run_setup_mode(env_file).await,
     }
