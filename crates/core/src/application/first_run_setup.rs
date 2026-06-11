@@ -50,6 +50,25 @@ impl FirstRunSetupUseCase {
         })
     }
 
+    pub async fn validate_vault_path(
+        &self,
+        vault_path: &std::path::Path,
+    ) -> Result<(), SetupError> {
+        if !vault_path.is_absolute() {
+            return Err(SetupError::Invalid(
+                "vault path must be an absolute path".into(),
+            ));
+        }
+        if !self.port.path_exists(vault_path).await? {
+            return Err(SetupError::Invalid(format!(
+                "vault path does not exist: {}",
+                vault_path.display()
+            )));
+        }
+
+        Ok(())
+    }
+
     pub async fn finalize(
         &self,
         request: FinalizeSetupRequest,
@@ -60,18 +79,7 @@ impl FirstRunSetupUseCase {
 
         validate_nonempty("client ID", &draft.client_id)?;
         validate_nonempty("username", &draft.username)?;
-
-        if !draft.vault_path.is_absolute() {
-            return Err(SetupError::Invalid(
-                "vault path must be an absolute path".into(),
-            ));
-        }
-        if !self.port.path_exists(&draft.vault_path).await? {
-            return Err(SetupError::Invalid(format!(
-                "vault path does not exist: {}",
-                draft.vault_path.display()
-            )));
-        }
+        self.validate_vault_path(&draft.vault_path).await?;
 
         if draft.client_secret.trim().is_empty() {
             draft.client_secret = self
@@ -303,6 +311,34 @@ mod tests {
             SetupError::Invalid(message) => assert!(message.contains("absolute")),
             other => panic!("expected invalid setup error, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn validate_vault_path_rejects_missing_absolute_path() {
+        let port = Arc::new(MockSetupSystemPort::new(vec![]));
+        let use_case = FirstRunSetupUseCase::new(port);
+
+        let error = use_case
+            .validate_vault_path(Path::new("/Users/test/missing-vault"))
+            .await
+            .expect_err("expected missing path to be rejected");
+
+        match error {
+            SetupError::Invalid(message) => assert!(message.contains("does not exist")),
+            other => panic!("expected invalid setup error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_vault_path_accepts_existing_absolute_path() {
+        let vault_path = PathBuf::from("/Users/test/vault");
+        let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
+        let use_case = FirstRunSetupUseCase::new(port);
+
+        use_case
+            .validate_vault_path(&vault_path)
+            .await
+            .expect("existing absolute path should be accepted");
     }
 
     #[tokio::test]

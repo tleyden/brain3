@@ -3,7 +3,8 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use brain3_core::domain::setup::{DependencyAvailability, SetupStep};
+use brain3_core::domain::model::ContainerRuntime;
+use brain3_core::domain::setup::{DependencyAvailability, PackageManager, SetupStep};
 use brain3_platform::runtime::StartupStatus;
 
 use crate::server::GatewayServerStatus;
@@ -87,14 +88,13 @@ fn dependency_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     let deps = &state.preparation.dependencies;
     let mut lines = vec![
         Line::from(format!("Operating system: {:?}", deps.operating_system)),
-        Line::from(format!("Package manager: {:?}", deps.package_manager)),
+        Line::from(format!(
+            "Package manager: {}",
+            format_package_manager(deps.package_manager)
+        )),
         Line::from(format!(
             "cloudflared: {}",
             format_dependency(deps.cloudflared)
-        )),
-        Line::from(format!(
-            "preferred container runtime: {}",
-            format_dependency(deps.preferred_container_runtime)
         )),
         Line::from(format!("Docker installed: {}", deps.docker_installed)),
         Line::from(format!(
@@ -102,6 +102,10 @@ fn dependency_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             deps.macos_container_installed
                 .map(|value| value.to_string())
                 .unwrap_or_else(|| "n/a".into())
+        )),
+        Line::from(format!(
+            "Default runtime: {}",
+            format_container_runtime(state.draft.container_runtime)
         )),
     ];
 
@@ -296,6 +300,21 @@ fn format_dependency(availability: DependencyAvailability) -> &'static str {
         DependencyAvailability::Installed => "installed",
         DependencyAvailability::InstallAvailable(_) => "install available",
         DependencyAvailability::ManualInstallRequired => "manual install required",
+    }
+}
+
+fn format_package_manager(package_manager: Option<PackageManager>) -> &'static str {
+    match package_manager {
+        Some(PackageManager::Homebrew) => "Homebrew",
+        Some(PackageManager::Apt) => "Apt",
+        None => "n/a",
+    }
+}
+
+fn format_container_runtime(runtime: ContainerRuntime) -> &'static str {
+    match runtime {
+        ContainerRuntime::Docker => "Docker",
+        ContainerRuntime::MacOSContainer => "macOS container",
     }
 }
 

@@ -127,8 +127,7 @@ async fn event_loop(
                     state.step = SetupStep::DependencyDoctor;
                 }
                 KeyCode::Enter => {
-                    state.clear_messages();
-                    state.step = SetupStep::Auth;
+                    advance_from_vault_path(state, use_case).await;
                 }
                 KeyCode::Backspace => {
                     state.vault_path_input.pop();
@@ -201,6 +200,22 @@ async fn event_loop(
                     state.step = SetupStep::ConnectionCard;
                 }
             }
+        }
+    }
+}
+
+async fn advance_from_vault_path(state: &mut FirstRunTuiState, use_case: &FirstRunSetupUseCase) {
+    state.clear_messages();
+    let vault_path_input = state.vault_path_input.trim();
+    let vault_path = std::path::PathBuf::from(vault_path_input);
+
+    match use_case.validate_vault_path(&vault_path).await {
+        Ok(()) => {
+            state.vault_path_input = vault_path_input.to_string();
+            state.step = SetupStep::Auth;
+        }
+        Err(error) => {
+            state.error_message = Some(error.to_string());
         }
     }
 }
