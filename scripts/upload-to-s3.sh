@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Upload brain3-gateway release tarballs to S3.
+# Upload brain3 release tarballs to S3.
 #
 # Usage:
 #   ./scripts/upload-to-s3.sh <bucket> [version] [tarballs-dir]
@@ -14,7 +14,7 @@ set -euo pipefail
 # AWS credentials are read from the environment or the AWS CLI config:
 #   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION (optional, default: us-east-1)
 
-BINARY="brain3-gateway"
+BINARY="brain3"
 TARGETS=(
   "x86_64-apple-darwin"
   "aarch64-apple-darwin"

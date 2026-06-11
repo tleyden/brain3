@@ -52,12 +52,12 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
-        run: tar -czf brain3-gateway-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release brain3-gateway
+        run: tar -czf brain3-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release brain3
 
       - uses: actions/upload-artifact@v4
         with:
-          name: brain3-gateway-${{ matrix.target }}
-          path: brain3-gateway-${{ matrix.target }}.tar.gz
+          name: brain3-${{ matrix.target }}
+          path: brain3-${{ matrix.target }}.tar.gz
 
   release:
     name: Create GitHub Release

@@ -1,53 +1,53 @@
 
 <img width="800" alt="Image" src="https://github.com/user-attachments/assets/752e5eed-84c0-40cb-a3b3-104d79dd5210" />
 
-An easy-to-use, local-first knowledge management system. Brain3 turns a pile of your notes, web clippings, ideas, and plans into a living, interconnected encyclopedia that an AI continuously maintains and you can chat with.
+Brain3 lets you interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web.  You can read, summarize, and efficiently edit your notes and knowledge aka "second brain".
 
-You access Brain3 directly from your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile) — no separate app needed.
+It's optimized for Obsidian comaptible markdown vaults, but it also works with other plain text formats.   
 
-There is no cloud service required other than Cloudflare Tunnel, which is free to use.  Support for other cloud tunneling solutions like ngrok and tailscale funnels is planned. 
+You can think of it as a limited version of OpenClaw or Hermes, but you use your existing AI app as the "agent" that you interact with, rather than a separate messaging app.  However it currently doesn't support any proactive messages, but it is possible to use the built-in scheduling tools to create a similar effect.  It uses the Model Context Protocol (MCP) standard to bridge your local data to the AI assistant.
+
+Your data stays 100% local and private, aside from the AI model getting access to a subset of the content based on your prompts.  See Privacy Details below for more information.
+
+In order to bridge your local data to the cloud based AI assistant, you need to set up a Cloudflare Tunnel.  This is free to use, and all data is securely encrypted.   
+
+While exposing your local data to the public internet is highly risky, Brain3 uses secure containers (Docker and MacOS Native Containers) to reduce the blast radius as much as possible in cases your credentials are compromised.  OAuth2.1 with PKCE is used to authenticate with the AI provider.  See Security Details below for more details 
+
+The core app is written in Rust and is cross-platform, and the code that runs in the docker container is written in Python based on the FastMCP framework.
 
 ## Why This Exists
 
-Brain3 is a user-friendly, agent-native implementation of the LLMWiki idea. It stores everything locally in markdown files in a fully private manner and is fully compatible with [Obsidian](https://obsidian.md).
+As a heavy Obsidian user, I found myself wanting to interact w/ my second brain via Claude and ChatGPT.  I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.
 
-You can easily migrate your traditional "second brain" document repository into Brain3. Currently only markdown is supported, but you can request imports from other formats via GitHub.
+I then found https://github.com/jimprosser/obsidian-web-mcp on a Reddit post, and started to use it.  However, I found the overall security posture to be less than ideal, including some specific (now-fixed) security vulnerabilities like https://github.com/jimprosser/obsidian-web-mcp/issues/29.
 
-You can also view and update your Brain3 repository via Obsidian directly, however you need to use an AI app to harness the full LLMWiki capabilities.
+I decided to build Brain3 as a container-based solution with a heavy emphasis on defensible and robust security. 
 
-## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Your AI App                                                 │
-│  (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile)       │
-└──────────────────┬───────────────────────────────────────────┘
-                   │ HTTPS (MCP over OAuth2)
-                   ▼
-┌──────────────────────────────────────────────────────────────┐
-│  Cloudflare Proxy + Caddy/nginx                              │
-│  TLS termination; reverse-proxies to localhost:8421          │
-└──────────────────┬───────────────────────────────────────────┘
-                   │ HTTP localhost:8421
-                   ▼
-┌──────────────────────────────────────────────────────────────┐
-│  brain3-gateway  (Rust)                                      │
-│  OAuth2 authorization server + MCP reverse proxy             │
-│  Runs on host, handles auth, proxies MCP traffic             │
-└──────────────────┬───────────────────────────────────────────┘
-                   │ HTTP localhost:8420 + shared secret
-                   ▼
-┌──────────────────────────────────────────────────────────────┐
-│  MCP Server  (macOS / Docker Container)                      │
-│  Vault tools: read, write, search, list, move, delete        │
-│  Read/write access to your local markdown vault              │
-└──────────────────────────────────────────────────────────────┘
-```
+## Requirements
 
-Two components run on your machine:
+* OS:MacOS, Windows (untested), Linux
+* Cloudflare Tunnel - installed on demand
 
-- **brain3-gateway** — A Rust binary that handles OAuth2 authentication and reverse-proxies MCP traffic to the container. Your AI app talks to this.
-- **MCP server** — Runs inside a macOS Container or Docker container with access to your markdown vault. Provides the vault tools that let AI read, search, and edit your notes.
+and to make it accessible 24/7, you would need a dedicated home computer or cloud server.
+
+Cloudflare Tunnel, which is free to use.  Support for other cloud tunneling solutions like ngrok and tailscale funnels is planned. 
+
+## Compatibility 
+
+In theory, any AI provider that supports the MCP protocol should be compatible with Brain3.  The following providers are known to be compatible:
+
+* ChatGPT Web/Desktop/Mobile 
+* Claude Web/Desktop/Mobile
+* Jan.AI Desktop
+
+## Privacy Details
+
+TODO
+
+## Security Details
+
+TODO
 
 ## Quickstart
 
@@ -56,29 +56,29 @@ Two components run on your machine:
 | Requirement | Install |
 |---|---|
 | macOS (Apple Silicon) | — |
-| Rust toolchain | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | Container runtime | Apple `container`: `brew install container` or Docker Desktop |
 | `cloudflared` | `brew install cloudflared` *(optional — only needed for Cloudflare Tunnel approach)* |
 
-### 1. Clone and build the gateway
+### 1. Install the latest release
 
 ```bash
-git clone https://github.com/tleyden/brain3.git
-cd brain3
-cargo build --release
+curl -sSfL https://raw.githubusercontent.com/tleyden/brain3/main/scripts/install.sh \
+  | S3_BASE_URL="https://github.com/tleyden/brain3/releases/latest/download" sh
 ```
 
-The binary is at `./target/release/brain3-gateway`.
+This installs `brain3` from the latest GitHub release. At the time of writing, `latest` is `v0.1.1`.
+
+### 2. Create a working directory and download the config template
+
+```bash
+mkdir -p ~/brain3
+cd ~/brain3
+curl -sSfL https://raw.githubusercontent.com/tleyden/brain3/v0.1.1/.env.template -o .env
+```
 
 No local MCP container build is required. Set `BRAIN3_CONTAINER_IMAGE` in `.env` to a published image such as `ghcr.io/tleyden/brain3-mcp-vault-tools:latest`. When the gateway starts, it pulls that configured image into your selected container runtime if it is not already present.
 
-### 2. Configure
-
-Copy the environment template:
-
-```bash
-cp .env.template .env
-```
+### 3. Configure
 
 Generate the two secret values and set your login credentials:
 
@@ -109,15 +109,15 @@ Set `BRAIN3_CONTAINER_IMAGE` to the published image you want the gateway to run.
 
 Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` to the public hostname your Caddy or nginx instance is serving TLS on (e.g. `brain3.yourdomain.com`). The gateway uses this for hostname validation.
 
-### 3. Start the gateway
+### 4. Start the gateway
 
 ```bash
-./target/release/brain3-gateway
+brain3
 ```
 
 The gateway starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
 
-### 4. Verify locally
+### 5. Verify locally
 
 In another terminal:
 
@@ -129,7 +129,7 @@ curl -s http://127.0.0.1:8421/health
 curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server | python3 -m json.tool
 ```
 
-### 5. Expose via direct public origin
+### 6. Expose via direct public origin
 
 This setup uses a direct public origin: Caddy or nginx terminates TLS and reverse-proxies to `127.0.0.1:8421`, optionally sitting behind Cloudflare proxy for DDoS protection.
 
@@ -145,7 +145,7 @@ Make sure `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` matches the hostname Ca
 
 If you'd rather use a Cloudflare Tunnel instead, see [Exposing to the Public Internet](#exposing-to-the-public-internet) below.
 
-### 6. Connect your AI app
+### 7. Connect your AI app
 
 In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), add a new MCP server connection with:
 
@@ -158,6 +158,35 @@ In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), 
 When the AI app redirects you to sign in, enter the `USERNAME` and `PASSWORD` you configured in step 3.
 
 Once connected, you can ask your AI to read, search, organize, and edit your notes.
+
+## Build from Source (Developers)
+
+### Prerequisites
+
+| Requirement | Install |
+|---|---|
+| macOS (Apple Silicon) | — |
+| Rust toolchain | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| Container runtime | Apple `container`: `brew install container` or Docker Desktop |
+| `cloudflared` | `brew install cloudflared` *(optional — only needed for Cloudflare Tunnel approach)* |
+
+### Clone and build from source
+
+```bash
+git clone https://github.com/tleyden/brain3.git
+cd brain3
+cargo build --release
+```
+
+The binary is at `./target/release/brain3`.
+
+### Start the gateway
+
+```bash
+./target/release/brain3
+```
+
+The gateway starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
 
 ## Stopping
 
@@ -179,7 +208,7 @@ docker stop brain3-mcp-vault-tools
 
 All configuration is via environment variables, loaded from a `.env` file.
 
-### Gateway (brain3-gateway)
+### Gateway (brain3)
 
 | Variable | Default | Description |
 |---|---|---|
@@ -277,7 +306,7 @@ INFO tunnel started url=https://brain3.yourdomain.com
 
 ```
 brain3/
-├── apps/gateway/          # brain3-gateway binary (composition root)
+├── apps/gateway/          # brain3 binary (composition root)
 ├── crates/
 │   ├── core/              # Domain model, business logic, port traits
 │   └── platform/          # Adapters: Axum HTTP, reqwest proxy, config, auth store

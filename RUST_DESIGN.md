@@ -85,7 +85,7 @@ brain3/
 │
 ├── apps/
 │   └── gateway/
-│       ├── Cargo.toml                  # Binary crate: brain3-gateway
+│       ├── Cargo.toml                  # Binary crate: brain3
 │       └── src/
 │           └── main.rs                 # Composition root
 │

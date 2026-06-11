@@ -63,7 +63,7 @@ git push origin "$VERSION"
 
 Pushing the tag triggers `.github/workflows/release.yml`, which:
 
-1. Builds `brain3-gateway` for all four targets in parallel:
+1. Builds `brain3` for all four targets in parallel:
    - `x86_64-unknown-linux-gnu`
    - `aarch64-unknown-linux-gnu`
    - `x86_64-apple-darwin`
@@ -103,11 +103,11 @@ gh release view "$VERSION"
 
 # Download and smoke-test the Linux binary
 gh release download "$VERSION" \
-  --pattern "brain3-gateway-x86_64-unknown-linux-gnu.tar.gz" \
+  --pattern "brain3-x86_64-unknown-linux-gnu.tar.gz" \
   --dir /tmp/brain3-test
 
-tar -xzf /tmp/brain3-test/brain3-gateway-x86_64-unknown-linux-gnu.tar.gz -C /tmp/brain3-test
-/tmp/brain3-test/brain3-gateway --help
+tar -xzf /tmp/brain3-test/brain3-x86_64-unknown-linux-gnu.tar.gz -C /tmp/brain3-test
+/tmp/brain3-test/brain3 --help
 ```
 
 ## Manual S3 Upload (for testing without tagging)
@@ -133,7 +133,7 @@ rustc -vV | grep host | awk '{print $2}'
 ```bash
 TARGET=$(rustc -vV | grep host | awk '{print $2}')
 cargo build --release
-tar -czf brain3-gateway-${TARGET}.tar.gz -C target/release brain3-gateway
+tar -czf brain3-${TARGET}.tar.gz -C target/release brain3
 ```
 
 Cross-compiling all four targets locally is complex — if you need all platforms, push a branch and let the PR workflow build them.
