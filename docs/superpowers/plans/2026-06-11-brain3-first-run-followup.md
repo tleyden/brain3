@@ -153,7 +153,7 @@
   initialize logging
   parse args and resolve env path
   load config
-  dispatch `--setup` or first-run
+  dispatch first-run, configured startup, or automatic named-tunnel remediation when the loaded config requires it
   call runtime bootstrap for configured startup
   build `AppState`, router, listener, and server
 
@@ -169,6 +169,7 @@
 
 - [ ] Leave named-tunnel provisioning logic untouched.
   The new runtime bootstrap should still be able to run a named tunnel if the config already says so, but this task must not merge that path into the first-run wizard.
+  Keep `apps/gateway/src/cloudflare_named_tunnel_setup_tui.rs` as the separate named-tunnel provisioning flow; it can later be auto-dispatched when configured startup detects that named-tunnel assets are missing.
 
 - [ ] Verify this task with:
   `cargo build -p brain3`
@@ -184,7 +185,8 @@
 - Modify: `apps/gateway/src/main.rs`
 
 - [ ] Build a new ratatui app shell for the first-run path only.
-  Do not replace or fold in `apps/gateway/src/setup_tui.rs`; that named-tunnel checklist remains a separate flow.
+  Do not replace or fold in `apps/gateway/src/cloudflare_named_tunnel_setup_tui.rs`; that named-tunnel checklist remains a separate flow.
+  It may later be entered automatically for configured named-tunnel remediation, but it is not part of the first-run wizard itself.
   Keep the new TUI split into focused files:
   `state.rs` for screen state and user-editable fields
   `screens.rs` for rendering
@@ -250,8 +252,9 @@
   log-file path from `RuntimeLaunchPlan`
   No log tailing or in-TUI log streaming in this slice.
 
-- [ ] Leave `apps/gateway/src/setup_tui.rs` alone for now.
+- [ ] Leave `apps/gateway/src/cloudflare_named_tunnel_setup_tui.rs` alone for now.
   Do not fold its named-tunnel checklist into the new wizard yet; keep the new first-run TUI separate so this slice stays focused.
+  The desired UX is still one-command startup, but that should be achieved by auto-dispatching into this existing flow when needed, not by merging named-tunnel provisioning into the first-run wizard.
 
 - [ ] Do not add TUI snapshot tests.
   Prefer one manual smoke test:
@@ -263,14 +266,29 @@
 
 **Files:**
 - Modify: `apps/gateway/src/main.rs`
+- Rename: `apps/gateway/src/setup_tui.rs` -> `apps/gateway/src/cloudflare_named_tunnel_setup_tui.rs`
 
 - [ ] Add explicit launch-mode flags:
   `--tui`
   `--cli`
   Default to `--tui` behavior when neither flag is passed.
 
-- [ ] Keep `--setup` mapped to the existing named-tunnel provisioning flow.
-  It should stay separate from ordinary startup and should conflict with `--tui` / `--cli` so the dispatch matrix stays simple.
+- [ ] Remove the public `--setup` flag.
+  The existing named-tunnel setup flow is not a general configuration wizard; it is a remediation/provisioning path for installs that already selected Cloudflare named tunnel mode.
+  If Brain3 can auto-detect when that path is required, it should not expose a separate operator-facing launch mode for it.
+
+- [ ] Auto-dispatch the existing named-tunnel provisioning flow when configured startup needs it.
+  If the loaded config selects Cloudflare named tunnel mode and the required tunnel config/credential assets are missing, an interactive default launch should enter the existing `apps/gateway/src/cloudflare_named_tunnel_setup_tui.rs` flow automatically.
+  `--cli` should not try to provision a named tunnel; it should refuse and tell the operator exactly to rerun:
+  `brain3 --tui`
+  from an interactive terminal.
+
+- [ ] Rename the tunnel-specific TUI module to match its real purpose.
+  Because this flow is only for Cloudflare named tunnel provisioning, rename:
+  `apps/gateway/src/setup_tui.rs`
+  to:
+  `apps/gateway/src/cloudflare_named_tunnel_setup_tui.rs`
+  and update module references accordingly.
 
 - [ ] Treat `--env-file` as an advanced/manual path in both modes.
   If `--env-file` is provided, do not auto-create it and do not silently fall back to the first-run wizard.
@@ -285,7 +303,7 @@
   dispatch into:
   default/runtime TUI
   explicit CLI mode
-  existing named-tunnel `--setup` flow
+  automatic named-tunnel remediation flow when startup detects it is required
 
 ### Task 10B: Broaden The TUI Entry Point Beyond First Run
 
@@ -347,6 +365,12 @@
 - Modify: `apps/gateway/src/server.rs`
 - Modify: `crates/platform/src/runtime/bootstrap.rs`
 
+- [ ] Keep named-tunnel remediation as shared startup policy, not a user-managed flag path.
+  If configured startup selects Cloudflare named tunnel mode but the required local tunnel assets are missing, the default interactive launch path should enter the existing named-tunnel provisioning flow automatically.
+  `--cli` and non-interactive launches should not dead-end with “existing config required” or “run --setup” copy; they should tell the operator exactly to run:
+  `brain3 --tui`
+  in an interactive terminal.
+
 - [ ] Keep server-URL selection and runtime/server handoff glue out of the TUI screen layer.
   Use one shared policy for the display-ready server URL:
   public tunnel URL when present
@@ -357,6 +381,16 @@
 
 - [ ] Add a non-interactive fallback for the default `--tui` path.
   If Brain3 would launch the TUI by default but stdout/stderr are not interactive, print clear setup/runtime guidance instead of trying to enter ratatui.
+  Do not print vague “wizard not implemented” or “create the config manually” copy.
+  The message must tell the operator exactly what command to run next.
+  For first-run / missing default config, tell them to run:
+  `brain3 --tui`
+  from an interactive terminal to launch the setup wizard.
+  For configured installs, tell them to run:
+  `brain3 --tui`
+  for the interactive status dashboard, or:
+  `brain3 --cli`
+  for the foreground non-TUI startup path.
 
 - [ ] Re-run the narrow verification set after the dispatch refactor:
   `cargo fmt --all --check`
@@ -366,9 +400,13 @@
 
 - [ ] Do one manual smoke pass for each launch mode:
   empty `BRAIN3_HOME`, run without flags, confirm the wizard appears
+  empty `BRAIN3_HOME`, run without flags in a non-interactive context, confirm the fallback message includes the exact `brain3 --tui` command
   empty `BRAIN3_HOME`, run with `--cli`, confirm it refuses and tells you to rerun without `--cli`
   configured install, run with `--cli`, confirm the current lightweight foreground startup still works, logs remain visible, and `Ctrl-C` stops it cleanly
   configured install, run without flags, confirm the TUI runtime screen appears and Brain3 starts
+  configured install, run without flags in a non-interactive context, confirm the fallback message includes exact commands for both `brain3 --tui` and `brain3 --cli`
+  configured install with Cloudflare named tunnel mode but missing local tunnel assets, run without flags, confirm Brain3 enters the named-tunnel provisioning flow automatically
+  configured install with Cloudflare named tunnel mode but missing local tunnel assets, run with `--cli`, confirm it refuses and tells the operator exactly to run `brain3 --tui`
 
 ---
 
