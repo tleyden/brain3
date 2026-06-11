@@ -1,5 +1,5 @@
 
-<img width="800" alt="Image" src="https://github.com/user-attachments/assets/752e5eed-84c0-40cb-a3b3-104d79dd5210" />
+<img width="800" alt="Image" src="docs/screenshots/hero.png" />
 
 ## Why This Exists
 
@@ -15,6 +15,13 @@ I decided to build Brain3 as a container-based solution with a heavy emphasis on
 - Obsidian-compatible, but Obsidian not required
 - TUI app for setup
 - Not AI Slop - while I'm using coding agents, I'm committed to creating a high-quality product, including a healthy amount of dogfooding.
+
+## Screenshots (w/ Claude Mobile)
+
+<table><tr>
+<td><img width="280" alt="Image" src="docs/screenshots/screenshot-2.png" /></td>
+<td><img width="280" alt="Image" src="docs/screenshots/screenshot-1.png" /></td>
+</tr></table>
 
 ## Privacy and Security
 
