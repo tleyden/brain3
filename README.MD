@@ -22,50 +22,14 @@ I decided to build Brain3 as a container-based solution with a heavy emphasis on
 - OAuth2.1 with PKCE is used to authenticate with the AI provider
 - Host process written in Rust to avoid several classes of vulnerabilities
 - Container process uses the battle-tested FastMCP server framework
+- More details below in [Privacy & Security Details](#privacy--security-details)
 
 ## Requirements
 
 * OS:MacOS, Windows (untested), Linux
-* Cloudflare Tunnel - installed on demand
-
-and to make it accessible 24/7, you would need a dedicated home computer or cloud server.
-
-Cloudflare Tunnel, which is free to use.  Support for other cloud tunneling solutions like ngrok and tailscale funnels is planned. 
-
-## Compatibility 
-
-In theory, any AI provider that supports the MCP protocol should be compatible with Brain3.  The following providers are known to be compatible:
-
-* ChatGPT Web/Desktop/Mobile 
-* Claude Web/Desktop/Mobile
-* Jan.AI Desktop
-
-## Privacy & Security
-
-Brain3 keeps your data on the local machine where it runs; your vault is never uploaded to any Brain3-managed cloud service. The AI assistant (Claude, ChatGPT, etc) sees only the parts of your vault exposed through your prompts and tool calls, leaving you in control of what is shared. You retain full control at all times and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose.
-
-### Architecture
-
-- Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities.
-- If you use Cloudflare Tunnel (default and recommended), `cloudflared` creates outbound-only connections to Cloudflare's network, so Brain3 does not need a publicly routable IP.
-- Cloudflare documents that Gateway can decrypt, inspect, and re-encrypt HTTPS traffic if you explicitly turn TLS decryption on in your Cloudflare environment.
-- ⚠ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
-- macOS or Docker container isolation. By default, the MCP server runs in a container with your vault mounted and a read-only upstream secret directory. No other host directories are mounted unless you enable dev mode.
-
-### Authentication & Authorization
-
-- Preregistered clients only. Solely the client configured via `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic client registration is disabled.
-- Client secret required at token exchange (`client_secret_post`).
-- PKCE (`S256`) enforced by default to prevent authorization-code interception.
-- Auth codes are single-use and expire after 5 minutes.
-
-### Request Integrity
-
-- Bearer-token validation on all `/mcp` routes.
-- Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured.
-- Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
-- Constant-time comparison for all secret and token checks.
-
+* Cloudflare Tunnel
+* AI Assistant (e.g. ChatGPT, Claude, etc)
+and if you want it accessible 24/7, you'll need a dedicated home computer or cloud server.
 
 ## Quick Start
 
@@ -206,6 +170,34 @@ The binary is at `./target/release/brain3`.
 
 Brain3 starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
 
+## Privacy & Security Details
+
+Brain3 keeps your data on the local machine where it runs; your vault is never uploaded to any Brain3-managed cloud service. The AI assistant (Claude, ChatGPT, etc) sees only the parts of your vault exposed through your prompts and tool calls, leaving you in control of what is shared. You retain full control at all times and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose.
+
+### Architecture
+
+- Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities.
+- If you use Cloudflare Tunnel (default and recommended), `cloudflared` creates outbound-only connections to Cloudflare's network, so Brain3 does not need a publicly routable IP.
+- Cloudflare documents that Gateway can decrypt, inspect, and re-encrypt HTTPS traffic if you explicitly turn TLS decryption on in your Cloudflare environment.
+- ⚠ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
+- macOS or Docker container isolation. By default, the MCP server runs in a container with your vault mounted and a read-only upstream secret directory. No other host directories are mounted unless you enable dev mode.
+
+### Authentication & Authorization
+
+- Preregistered clients only. Solely the client configured via `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic client registration is disabled.
+- Client secret required at token exchange (`client_secret_post`).
+- PKCE (`S256`) enforced by default to prevent authorization-code interception.
+- Auth codes are single-use and expire after 5 minutes.
+
+### Request Integrity
+
+- Bearer-token validation on all `/mcp` routes.
+- Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured.
+- Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
+- Constant-time comparison for all secret and token checks.
+
+
+
 ## Configuration Reference
 
 All configuration is via environment variables, loaded from a `.env` file.
@@ -252,33 +244,9 @@ Once connected, your AI app has access to these vault tools:
 
 ## Advanced Configuration
 
-### Direct public origin
-
-If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
-
-Example minimal Caddyfile:
-
-```
-brain3.yourdomain.com {
-    reverse_proxy 127.0.0.1:8421
-}
-```
-
-### Quick temporary Cloudflare Tunnel
-
-Set `CF_QUICK_TUNNEL=true` in your `.env`. Brain3 will start `cloudflared` automatically on startup and log the assigned public URL:
-
-```
-INFO tunnel started url=https://some-random-name.trycloudflare.com
-```
-
-No DNS or config needed. The URL changes each time you restart Brain3.
-
-Requires `cloudflared` to be installed — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
-
 ### Named Cloudflare Tunnel on your domain
 
-For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel, provision the tunnel once, then let Brain3 run it:
+Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control. Provision the tunnel once, then let Brain3 run it:
 
 1. Install `cloudflared` — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
 2. Log in: `cloudflared tunnel login`
@@ -288,6 +256,20 @@ For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel, provis
 
 ```
 INFO tunnel started url=https://brain3.yourdomain.com
+```
+
+### Direct public origin
+
+This is an alternative to a Cloudflare Tunnel if tunnels are not practical in your environment. It is less preferred because it involves exposing ports more directly, so only use it when a Cloudflare Tunnel is not a workable option.
+
+If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
+
+Example minimal Caddyfile:
+
+```
+brain3.yourdomain.com {
+    reverse_proxy 127.0.0.1:8421
+}
 ```
 
 ## Development
