@@ -229,6 +229,7 @@ async fn event_loop(
                     KeyCode::Enter => {
                         if state.focused_run && !state.running && !state.done {
                             state.running = true;
+                            terminal.draw(|f| draw(f, state))?;
                             run_setup(state).await;
                             state.running = false;
                             state.done = true;
@@ -290,14 +291,14 @@ fn draw(f: &mut ratatui::Frame, state: &SetupState) {
 
     let button_line = if state.done {
         Line::from(Span::styled(
-            "Setup complete!",
+            "Running…",
             Style::default()
                 .fg(Color::Green)
                 .add_modifier(Modifier::BOLD),
         ))
     } else if state.running {
         Line::from(Span::styled(
-            " Running… ",
+            " Writing config and starting… ",
             Style::default().fg(Color::Yellow),
         ))
     } else {

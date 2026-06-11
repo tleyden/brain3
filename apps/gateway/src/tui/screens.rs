@@ -50,7 +50,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::VaultPath => "Vault Path",
         SetupStep::Auth => "Auth Setup",
         SetupStep::Summary => "Summary",
-        SetupStep::ConnectionCard => "Connection Card",
+        SetupStep::ConnectionCard => "Connection Instructions",
         SetupStep::RuntimeStatus => "Runtime Status",
     }
 }
@@ -201,7 +201,7 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     vec![
         Line::from("Brain3 is configured and the gateway has started."),
         Line::from(""),
-        Line::from(format!("Server URL: {}", card.server_url)),
+        Line::from(format!("Server URL: {}/mcp", card.server_url)),
         Line::from(format!("Client ID: {}", card.client_id)),
         Line::from(format!("Client Secret: {}", card.client_secret)),
         Line::from(format!("Username: {}", card.username)),
