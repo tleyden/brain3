@@ -1,28 +1,27 @@
 
 <img width="800" alt="Image" src="https://github.com/user-attachments/assets/752e5eed-84c0-40cb-a3b3-104d79dd5210" />
 
-Brain3 lets you interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web.  You can read, summarize, and efficiently edit your notes and knowledge aka "second brain".
-
-It's optimized for Obsidian comaptible markdown vaults, but it also works with other plain text formats.   
-
-You can think of it as a limited version of OpenClaw or Hermes, but you use your existing AI app as the "agent" that you interact with, rather than a separate messaging app.  However it currently doesn't support any proactive messages, but it is possible to use the built-in scheduling tools to create a similar effect.  It uses the Model Context Protocol (MCP) standard to bridge your local data to the AI assistant.
-
-Your data stays 100% local and private, aside from the AI model getting access to a subset of the content based on your prompts.  See Privacy Details below for more information.
-
-In order to bridge your local data to the cloud based AI assistant, you need to set up a Cloudflare Tunnel.  This is free to use, and all data is securely encrypted.   
-
-While exposing your local data to the public internet is highly risky, Brain3 uses secure containers (Docker and MacOS Native Containers) to reduce the blast radius as much as possible in cases your credentials are compromised.  OAuth2.1 with PKCE is used to authenticate with the AI provider.  See Security Details below for more details 
-
-The core app is written in Rust and is cross-platform, and the code that runs in the docker container is written in Python based on the FastMCP framework.
-
 ## Why This Exists
 
 As a heavy Obsidian user, I found myself wanting to interact w/ my second brain via Claude and ChatGPT.  I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.
 
-I then found https://github.com/jimprosser/obsidian-web-mcp on a Reddit post, and started to use it.  However, I found the overall security posture to be less than ideal, including some specific (now-fixed) security vulnerabilities like https://github.com/jimprosser/obsidian-web-mcp/issues/29.
+I then found [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) on a Reddit post, and started to use it. However, I found the overall security posture to be less than ideal, including some specific (now-fixed) security vulnerabilities like [obsidian-web-mcp#29](https://github.com/jimprosser/obsidian-web-mcp/issues/29).
 
 I decided to build Brain3 as a container-based solution with a heavy emphasis on defensible and robust security. 
 
+## Features
+
+- Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
+- Obsidian-compatible, but Obsidian not required
+- TUI app for setup
+
+## Privacy and Security
+
+- Your data stays 100% local and private - the AI assistant only sees a part of your vault based on your prompts
+- Designed with security and privacy in mind, using container-based isolation and a free Cloudflare tunnel
+- OAuth2.1 with PKCE is used to authenticate with the AI provider
+- Host process written in Rust to avoid several classes of vulnerabilities
+- Container process uses the battle-tested FastMCP server framework
 
 ## Requirements
 
@@ -41,32 +40,80 @@ In theory, any AI provider that supports the MCP protocol should be compatible w
 * Claude Web/Desktop/Mobile
 * Jan.AI Desktop
 
-## Privacy Details
+## Privacy & Security
 
-TODO
+Brain3 keeps your data on the local machine where it runs; your vault is never uploaded to any Brain3-managed cloud service. The AI assistant (Claude, ChatGPT, etc) sees only the parts of your vault exposed through your prompts and tool calls, leaving you in control of what is shared. You retain full control at all times and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose.
 
-## Security Details
+### Architecture
 
-TODO
+- Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities.
+- If you use Cloudflare Tunnel (default and recommended), `cloudflared` creates outbound-only connections to Cloudflare's network, so Brain3 does not need a publicly routable IP.
+- Cloudflare documents that Gateway can decrypt, inspect, and re-encrypt HTTPS traffic if you explicitly turn TLS decryption on in your Cloudflare environment.
+- ⚠ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
+- macOS or Docker container isolation. By default, the MCP server runs in a container with your vault mounted and a read-only upstream secret directory. No other host directories are mounted unless you enable dev mode.
 
-## Quickstart
+### Authentication & Authorization
 
-### Prerequisites
+- Preregistered clients only. Solely the client configured via `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic client registration is disabled.
+- Client secret required at token exchange (`client_secret_post`).
+- PKCE (`S256`) enforced by default to prevent authorization-code interception.
+- Auth codes are single-use and expire after 5 minutes.
 
-| Requirement | Install |
-|---|---|
-| macOS (Apple Silicon) | — |
-| Container runtime | Apple `container`: `brew install container` or Docker Desktop |
-| `cloudflared` | `brew install cloudflared` *(optional — only needed for Cloudflare Tunnel approach)* |
+### Request Integrity
+
+- Bearer-token validation on all `/mcp` routes.
+- Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured.
+- Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
+- Constant-time comparison for all secret and token checks.
+
+
+## Quick Start
+
+### macOS Prerequisites
+
+- Container runtime: `brew install container && brew services start container` ([you can also use Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/))
+- Cloudflare Tunnel: `brew install cloudflared`
+
+### Linux Prerequisites
+
+<details>
+<summary>Ubuntu/Debian install commands</summary>
+
+```bash
+# Docker
+sudo apt update
+sudo apt install ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+sudo tee /etc/apt/sources.list.d/docker.sources <<'EOF'
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Architectures: $(dpkg --print-architecture)
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+sudo apt update
+sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# cloudflared
+sudo mkdir -p --mode=0755 /usr/share/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+sudo apt-get update
+sudo apt-get install cloudflared
+```
+
+</details>
 
 ### 1. Install the latest release
 
 ```bash
-curl -sSfL https://raw.githubusercontent.com/tleyden/brain3/main/scripts/install.sh \
-  | S3_BASE_URL="https://github.com/tleyden/brain3/releases/latest/download" sh
+curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.1/install.sh | sh
 ```
 
-This installs `brain3` from the latest GitHub release. At the time of writing, `latest` is `v0.1.1`.
+This installs `brain3` from the `v0.1.1` release.
 
 ### 2. Create a working directory and download the config template
 
@@ -76,7 +123,7 @@ cd ~/brain3
 curl -sSfL https://raw.githubusercontent.com/tleyden/brain3/v0.1.1/.env.template -o .env
 ```
 
-No local MCP container build is required. Set `BRAIN3_CONTAINER_IMAGE` in `.env` to a published image such as `ghcr.io/tleyden/brain3-mcp-vault-tools:latest`. When the gateway starts, it pulls that configured image into your selected container runtime if it is not already present.
+The default `.env.template` already points `BRAIN3_CONTAINER_IMAGE` at the published Brain3 MCP image.
 
 ### 3. Configure
 
@@ -97,61 +144,29 @@ USERNAME=your_username
 PASSWORD=your_password
 BRAIN3_CONTAINER_RUNTIME=macos-container
 BRAIN3_VAULT_PATH=/absolute/path/to/your/vault
-BRAIN3_CONTAINER_IMAGE=ghcr.io/tleyden/brain3-mcp-vault-tools:latest
-DIRECT_PUBLIC_ORIGIN_HOSTNAME=brain3.yourdomain.com
 ```
 
 The username and password are the credentials you will enter when your AI app prompts you to sign in.
 
 Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian vault or markdown folder. Use `docker` instead of `macos-container` for `BRAIN3_CONTAINER_RUNTIME` if you prefer Docker.
 
-Set `BRAIN3_CONTAINER_IMAGE` to the published image you want the gateway to run. If you want to pin the container version instead of following `latest`, use a published tag such as `ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.0`.
+By default, `.env.template` enables a temporary Cloudflare Tunnel and uses the published Brain3 MCP image. If you want to use a named tunnel or direct public origin instead, see [Advanced Configuration](#advanced-configuration).
 
-Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` to the public hostname your Caddy or nginx instance is serving TLS on (e.g. `brain3.yourdomain.com`). The gateway uses this for hostname validation.
-
-### 4. Start the gateway
+### 4. Start Brain3
 
 ```bash
 brain3
 ```
 
-The gateway starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
+Brain3 starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. If you are using the default quick tunnel, Brain3 will also log the public URL you should use in your AI app.
 
-### 5. Verify locally
-
-In another terminal:
-
-```bash
-# Health check
-curl -s http://127.0.0.1:8421/health
-
-# OAuth metadata (should show no registration_endpoint)
-curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server | python3 -m json.tool
-```
-
-### 6. Expose via direct public origin
-
-This setup uses a direct public origin: Caddy or nginx terminates TLS and reverse-proxies to `127.0.0.1:8421`, optionally sitting behind Cloudflare proxy for DDoS protection.
-
-Example minimal Caddyfile:
-
-```
-brain3.yourdomain.com {
-    reverse_proxy 127.0.0.1:8421
-}
-```
-
-Make sure `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` matches the hostname Caddy is serving (e.g. `brain3.yourdomain.com`). The gateway enforces this to reject misdirected requests.
-
-If you'd rather use a Cloudflare Tunnel instead, see [Exposing to the Public Internet](#exposing-to-the-public-internet) below.
-
-### 7. Connect your AI app
+### 5. Connect your AI app
 
 In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), add a new MCP server connection with:
 
 | Field | Value |
 |---|---|
-| Server URL | `https://brain3.yourdomain.com` (your public hostname from step 5) |
+| Server URL | The public URL printed by Brain3 on startup. If you configured a named tunnel or direct public origin, use that hostname instead. |
 | Client ID | `oauth2-gateway-client` (or whatever you set in `.env`) |
 | Client Secret | The value of `OAUTH2_GATEWAY_CLIENT_SECRET` from your `.env` |
 
@@ -159,16 +174,19 @@ When the AI app redirects you to sign in, enter the `USERNAME` and `PASSWORD` yo
 
 Once connected, you can ask your AI to read, search, organize, and edit your notes.
 
+### 6. Try it from your AI app
+
+Example prompt:
+`List all the files in my Brain3 vault.`
+
+Expected result:
+Brain3 should list the files in your vault.
+
 ## Build from Source (Developers)
 
 ### Prerequisites
 
-| Requirement | Install |
-|---|---|
-| macOS (Apple Silicon) | — |
-| Rust toolchain | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| Container runtime | Apple `container`: `brew install container` or Docker Desktop |
-| `cloudflared` | `brew install cloudflared` *(optional — only needed for Cloudflare Tunnel approach)* |
+Refer to the [Quick Start](#quick-start) prerequisites above.
 
 ### Clone and build from source
 
@@ -180,54 +198,38 @@ cargo build --release
 
 The binary is at `./target/release/brain3`.
 
-### Start the gateway
+### Start Brain3
 
 ```bash
 ./target/release/brain3
 ```
 
-The gateway starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
-
-## Stopping
-
-Stop the gateway with `Ctrl+C` in its terminal.
-
-The MCP container keeps running after the gateway exits (it was started detached). Its name is derived from `BRAIN3_CONTAINER_IMAGE` by taking the final repository segment and dropping any tag or digest. For example, `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` becomes `brain3-mcp-vault-tools`.
-
-Stop it directly:
-
-```bash
-# macOS Container
-container stop brain3-mcp-vault-tools
-
-# Docker
-docker stop brain3-mcp-vault-tools
-```
+Brain3 starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
 
 ## Configuration Reference
 
 All configuration is via environment variables, loaded from a `.env` file.
 
-### Gateway (brain3)
+### Brain3 App
 
 | Variable | Default | Description |
 |---|---|---|
-| `OAUTH2_GATEWAY_PORT` | `8421` | Port the gateway listens on |
-| `OAUTH2_GATEWAY_CLIENT_ID` | `oauth2-gateway-client` | OAuth client ID accepted by the gateway |
+| `OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
+| `OAUTH2_GATEWAY_CLIENT_ID` | `oauth2-gateway-client` | OAuth client ID accepted by Brain3 |
 | `OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
 | `OAUTH2_GATEWAY_ACCESS_TOKEN` | *(required)* | Bearer token returned after successful auth |
 | `OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `http://127.0.0.1:8420` | URL of the MCP server |
 | `OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `/tmp/brain3-mcp-upstream-secret` | Path to the shared secret file |
 | `OAUTH2_PKCE_REQUIRED` | `true` | Require PKCE for OAuth flow |
-| `USERNAME` | *(required)* | Login username for the sign-in page |
-| `PASSWORD` | *(required)* | Login password for the sign-in page |
+| `USERNAME` | *(required)* | Login username for the Brain3 sign-in page |
+| `PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
 | `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
-| `CF_QUICK_TUNNEL` | `false` | Set to `true` to have the gateway start a quick Cloudflare Tunnel on startup |
-| `CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; gateway starts `cloudflared` automatically when set with `CF_DOMAIN` |
+| `CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
+| `CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; Brain3 starts `cloudflared` automatically when set with `CF_DOMAIN` |
 | `CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `CF_TUNNEL_NAME`) |
 | `CF_TUNNEL_CONFIG_FILE` | *(required if `CF_TUNNEL_NAME` set)* | Path to the `cloudflared` config file written during tunnel provisioning |
 | `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
-| `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, gateway starts the container on startup |
+| `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
 | `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
 | `BRAIN3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` |
 | `BRAIN3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
@@ -248,23 +250,11 @@ Once connected, your AI app has access to these vault tools:
 | `vault_move` | Move or rename a file. |
 | `vault_delete` | Delete a file. |
 
-## Security Model
+## Advanced Configuration
 
-- **Preregistered clients only.** Only the single client configured by `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic client registration is disabled.
-- **Client secret required** at token exchange. The token endpoint requires `client_secret_post`.
-- **PKCE S256 required** by default. Protects against authorization code interception.
-- **Host validation** rejects requests for unexpected hostnames (HTTP 421) when a public hostname is configured.
-- **Bearer token validation** on all `/mcp` routes.
-- **Upstream shared secret** injected by the gateway so the MCP container can reject direct calls that bypass the gateway.
-- **Constant-time comparison** for all secret and token checks.
-- **Auth codes** are single-use and expire after 5 minutes.
-- **macOS Container isolation** — the MCP server runs in a container with only your vault directory mounted. All other access to your Mac is disabled by default.
+### Direct public origin
 
-## Exposing to the Public Internet
-
-### Direct public origin (recommended)
-
-If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; the gateway uses it for hostname validation.
+If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
 
 Example minimal Caddyfile:
 
@@ -274,47 +264,33 @@ brain3.yourdomain.com {
 }
 ```
 
-### Quick temporary Cloudflare Tunnel (for testing)
+### Quick temporary Cloudflare Tunnel
 
-Set `CF_QUICK_TUNNEL=true` in your `.env`. The gateway will start `cloudflared` automatically on startup and log the assigned public URL:
+Set `CF_QUICK_TUNNEL=true` in your `.env`. Brain3 will start `cloudflared` automatically on startup and log the assigned public URL:
 
 ```
 INFO tunnel started url=https://some-random-name.trycloudflare.com
 ```
 
-No DNS or config needed. The URL changes each time you restart the gateway.
+No DNS or config needed. The URL changes each time you restart Brain3.
 
 Requires `cloudflared` to be installed — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
 
 ### Named Cloudflare Tunnel on your domain
 
-For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel, provision the tunnel once (outside the gateway), then let the gateway run it:
+For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel, provision the tunnel once, then let Brain3 run it:
 
 1. Install `cloudflared` — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
 2. Log in: `cloudflared tunnel login`
 3. Create the tunnel and DNS route (one-time setup — see Cloudflare docs)
 4. In your `.env`, set `CF_TUNNEL_NAME`, `CF_DOMAIN`, and `CF_TUNNEL_CONFIG_FILE` (path to the `.yml` config file written during setup)
-5. Start the gateway — it will start `cloudflared` automatically and log:
+5. Start Brain3. It will start `cloudflared` automatically and log:
 
 ```
 INFO tunnel started url=https://brain3.yourdomain.com
 ```
 
 ## Development
-
-### Project structure
-
-```
-brain3/
-├── apps/gateway/          # brain3 binary (composition root)
-├── crates/
-│   ├── core/              # Domain model, business logic, port traits
-│   └── platform/          # Adapters: Axum HTTP, reqwest proxy, config, auth store
-├── scripts/               # Build, run, and stop scripts
-└── RUST_DESIGN.md         # Detailed architecture documentation
-```
-
-The codebase uses hexagonal architecture. `core` contains pure business logic with no framework dependencies. `platform` implements the port traits using Axum, reqwest, and other infrastructure crates.
 
 ### Running tests
 
@@ -328,10 +304,6 @@ cargo test
 cargo build --release
 ```
 
-## Roadmap 
+## License 
 
-TODO
-
-## Credits
-
-- obsidian-web-mcp repo
+Apache 2.0. See [LICENSE.MD](LICENSE.MD).
