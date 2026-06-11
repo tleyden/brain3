@@ -98,26 +98,38 @@
 
 **Files:**
 - Create: `apps/gateway/src/logging.rs`
+- Modify: `apps/gateway/Cargo.toml`
 - Modify: `apps/gateway/src/main.rs`
 - Modify: `crates/core/src/domain/setup.rs`
-- Modify: `crates/platform/src/setup/system.rs`
+- Modify: `crates/core/src/application/first_run_setup.rs`
 
-- [ ] Move log-file allocation into a small reusable gateway-side logging helper.
-  `PlatformSetupSystem::create_temp_log_file()` already exists; use it rather than duplicating temp-file logic elsewhere.
+- [ ] Add a small reusable gateway-side logging helper that owns temp-file allocation and tracing setup.
+  Reuse `PlatformSetupSystem::create_temp_log_file()` from `crates/platform/src/setup/system.rs` rather than duplicating temp-file logic.
+  If needed, add `tracing-appender` in `apps/gateway/Cargo.toml` so the helper can return a guard that keeps file logging alive for the process lifetime.
 
-- [ ] Initialize tracing against that temp file before either first-run setup or normal runtime start.
-  The log file should exist for both setup failures and post-setup runtime.
+- [ ] Initialize tracing against that temp file before argument dispatch, first-run checks, config loading, setup mode, or normal runtime bootstrap.
+  The log file must exist for:
+  first-run failures
+  named-tunnel preflight failures
+  post-setup runtime
+  Refactor the current early `std::process::exit(...)` branches in `apps/gateway/src/main.rs` into `Result`-based returns so the logging guard is not dropped prematurely.
 
-- [ ] Add the log-file path to the shared runtime/setup presentation model.
-  The TUI runtime screen should display the path plainly, for example:
+- [ ] Add the log-file path to the presentation models the future TUI already depends on.
+  Extend `ConnectionCard` in `crates/core/src/domain/setup.rs` with `log_file: PathBuf`.
+  Update `FirstRunSetupUseCase::build_connection_card(...)` in `crates/core/src/application/first_run_setup.rs` so the gateway passes the runtime log path in when building the card.
+  Keep `RuntimeLaunchPlan.log_file` as the runtime-side carrier for the later status screen.
+  The TUI should eventually display the path plainly, for example:
   `Logs: /tmp/brain3-...log`
 
-- [ ] Do not implement live tailing or in-TUI log streaming.
-  This task ends at “logs go to a file and the user can see the path”.
+- [ ] Do not implement live tailing, in-TUI tracing sinks, or scrollback buffering in this task.
+  This task ends at:
+  logs go to a file
+  the runtime/setup handoff includes the path
+  later TUI work can render that path
 
 - [ ] Verify this task with:
   `cargo build -p brain3`
-  plus a manual smoke run confirming the file is created and mentioned in the UI
+  plus a manual smoke run confirming the file is created before first-run failure paths and is available to display in the later UI work
 
 ### Task 8: Create A Reusable Runtime Bootstrap API
 
@@ -127,23 +139,33 @@
 - Modify: `crates/platform/src/lib.rs`
 - Modify: `apps/gateway/src/main.rs`
 
-- [ ] Extract the configured-startup path out of `main.rs` into a reusable runtime bootstrap entry point.
-  This API should own:
+- [ ] Extract the configured-startup path out of `apps/gateway/src/main.rs` into a reusable platform bootstrap entry point.
+  This API should own the sequence currently in `main.rs`:
+  named-tunnel config-file preflight
+  startup config logging
   upstream secret creation
   managed container startup
   tunnel startup
   collection of the public URL
-  return of the runtime metadata the TUI needs
 
-- [ ] Keep HTTP/router creation where it already naturally belongs, but hide the startup sequence behind one clean call.
-  `main.rs` should stop manually stepping through container, tunnel, and server setup line by line.
+- [ ] Keep HTTP/router creation and `axum::serve(...)` in `apps/gateway/src/main.rs`, but hide the startup sequence behind one clean call.
+  After this task, `main.rs` should:
+  initialize logging
+  parse args and resolve env path
+  load config
+  dispatch `--setup` or first-run
+  call runtime bootstrap for configured startup
+  build `AppState`, router, listener, and server
 
-- [ ] Return a structured runtime state object.
+- [ ] Return a structured runtime bootstrap state object from `crates/platform/src/runtime/bootstrap.rs`.
   It should include:
   loaded config
+  upstream secret
   public URL if present
   log-file path
   enough startup status for the runtime screen
+  a held tunnel adapter/guard so quick and named tunnels stay alive after bootstrap returns
+  Prefer using the existing `RuntimeLaunchPlan` as the bootstrap input so `main.rs` passes the resolved env path and log-file path explicitly instead of rebuilding that state ad hoc.
 
 - [ ] Leave named-tunnel provisioning logic untouched.
   The new runtime bootstrap should still be able to run a named tunnel if the config already says so, but this task must not merge that path into the first-run wizard.
@@ -158,9 +180,16 @@
 - Create: `apps/gateway/src/tui/app.rs`
 - Create: `apps/gateway/src/tui/state.rs`
 - Create: `apps/gateway/src/tui/screens.rs`
+- Create: `apps/gateway/src/server.rs`
 - Modify: `apps/gateway/src/main.rs`
 
-- [ ] Build a new ratatui app shell for first-run setup.
+- [ ] Build a new ratatui app shell for the first-run path only.
+  Do not replace or fold in `apps/gateway/src/setup_tui.rs`; that named-tunnel checklist remains a separate flow.
+  Keep the new TUI split into focused files:
+  `state.rs` for screen state and user-editable fields
+  `screens.rs` for rendering
+  `app.rs` for the event loop and screen transitions
+  `mod.rs` for the public entry point that `main.rs` can dispatch to
   Screens for this slice:
   welcome
   dependency doctor
@@ -170,9 +199,39 @@
   connection card
   runtime status
 
-- [ ] Keep the TUI as an inbound adapter only.
-  It gathers input, calls the setup use case or runtime bootstrap, and renders results.
-  It must not know how to generate secrets, choose default runtime values, write env files, or install dependencies.
+- [ ] Keep the TUI state rooted in the shared models that already exist instead of inventing a second config model.
+  The TUI should carry:
+  `SetupPreparation` from `FirstRunSetupUseCase::prepare()`
+  a mutable `SetupDraftConfig` copy for form edits
+  the current `SetupStep`
+  transient validation/install error text
+  optional `SetupSummary`
+  optional `ConnectionCard`
+  optional `RuntimeBootstrap`
+  gateway server status for the runtime screen
+  This keeps the TUI as an inbound adapter over existing core/platform APIs rather than embedding business rules.
+
+- [ ] Wire each TUI transition to the existing application/runtime APIs instead of adding setup logic in the UI layer.
+  The flow should be:
+  call `FirstRunSetupUseCase::prepare()` once at startup
+  use `SetupPreparation.dependencies` to drive the dependency doctor
+  call `SetupSystemPort::run_install_action(...)` when the user chooses an installable dependency action
+  call `FirstRunSetupUseCase::finalize(...)` from the summary screen
+  reload the written env file through `EnvFileConfigAdapter`
+  build a `RuntimeLaunchPlan` with the resolved app-home/env path/log-file path
+  call `bootstrap_configured_runtime(...)`
+  then start the actual gateway server through a shared gateway-side helper in `apps/gateway/src/server.rs`
+
+- [ ] Add a small reusable gateway-server helper so the first-run TUI and the normal runtime path do not duplicate `main.rs` server composition.
+  Move the current gateway-specific composition steps out of `main.rs` into `apps/gateway/src/server.rs`:
+  auth-code store setup
+  MCP proxy setup
+  use-case wiring
+  `AppState` construction
+  router construction
+  listener bind
+  server spawn/run entry point
+  This keeps `apps/gateway/src/main.rs` lean, which matches the project guidance for the gateway binary.
 
 - [ ] Show the connection card before the runtime status screen.
   Required fields:
@@ -181,14 +240,15 @@
   client secret
   username
   log-file path
+  Build it through `FirstRunSetupUseCase::build_connection_card(...)`, passing the display-ready server URL chosen by the runtime/bootstrap path and the existing temp log-file path.
 
 - [ ] Show runtime status after setup completes and Brain3 is running.
-  Display:
-  container status
-  tunnel/public URL status
-  gateway bind/startup status
-  log-file path
-  No log tailing in this slice.
+  The runtime screen should display:
+  container status from `RuntimeBootstrap`
+  tunnel/public URL status from `RuntimeBootstrap`
+  gateway bind/startup status from the new gateway-server helper
+  log-file path from `RuntimeLaunchPlan`
+  No log tailing or in-TUI log streaming in this slice.
 
 - [ ] Leave `apps/gateway/src/setup_tui.rs` alone for now.
   Do not fold its named-tunnel checklist into the new wizard yet; keep the new first-run TUI separate so this slice stays focused.
@@ -204,22 +264,37 @@
 **Files:**
 - Modify: `apps/gateway/src/main.rs`
 - Modify: `apps/gateway/src/tui/mod.rs`
+- Modify: `apps/gateway/src/server.rs`
 - Modify: `crates/platform/src/runtime/bootstrap.rs`
 
-- [ ] Replace the current first-run stub with the new TUI entry point.
+- [ ] Replace the current first-run stub in `apps/gateway/src/main.rs` with the new TUI entry point.
   Behavior should be:
   if `--env-file` is provided, treat it as an advanced/manual path and do not auto-create it
   if no `--env-file` is provided and `~/.brain3/.env` is missing, launch the first-run TUI
-  otherwise, run the configured runtime bootstrap path
+  otherwise, run the configured runtime/bootstrap path through the shared gateway-server helper
+  keep `--setup` mapped to the existing named-tunnel flow
 
 - [ ] Keep `main.rs` as a composition root.
-  It should initialize logging, parse args, resolve the env path, and dispatch into either:
+  After this task it should:
+  initialize logging
+  parse args
+  resolve the env path
+  detect first-run vs manual env-file usage
+  dispatch into either:
   first-run TUI
   configured runtime bootstrap
   existing named-tunnel `--setup` flow
 
+- [ ] Extend `RuntimeBootstrap` just enough to keep server-URL selection logic out of the TUI.
+  Right now the bootstrap result exposes `public_url`, but the connection card needs one display-ready `server_url`.
+  Update `crates/platform/src/runtime/bootstrap.rs` so the runtime path can provide a single URL choice for the card:
+  public tunnel URL when present
+  otherwise a local fallback derived from the gateway host/port
+  This keeps the TUI from re-implementing connection URL policy.
+
 - [ ] Add a non-TTY fallback for first-run mode.
   If the default env file is missing and stdout/stderr are not interactive, print a clear setup-required message instead of trying to enter ratatui.
+  Use a simple terminal-capability check in `main.rs` and preserve the current explicit error output for headless runs.
 
 - [ ] Re-run the narrow verification set after the dispatch refactor:
   `cargo fmt --all --check`
@@ -230,13 +305,5 @@
 ---
 
 **Recommended execution order**
-1. Task 6 first, because the TUI and the dependency doctor both need a stable setup API.
-2. Task 5 next, so the TUI can call real install actions.
-3. Task 7 next, because the runtime and the TUI both need the log-file path.
-4. Task 8 after that, to pull the existing configured startup out of `main.rs`.
-5. Task 9 once the shared services exist.
-6. Task 10 last, as the final dispatch and integration pass.
-
-**Primary review questions**
-- Keep `apps/gateway/src/setup_tui.rs` intact for now, or fold it into the new TUI immediately?
-- For Linux guided install in this slice, should `apt` actually run after confirmation, or should the doctor stop at showing the exact commands?
+1. Task 9 first, because the shared setup API, log-file handoff, and runtime bootstrap now exist and the first-run TUI can build directly on them.
+2. Task 10 last, as the dispatch/integration pass that swaps out the current first-run stub and adds the non-TTY fallback.

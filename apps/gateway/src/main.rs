@@ -1,3 +1,4 @@
+mod logging;
 mod setup_tui;
 
 use std::path::{Path, PathBuf};
@@ -5,16 +6,16 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use tracing_subscriber::EnvFilter;
 
 use brain3_core::domain::model::TunnelConfig;
+use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::config::ConfigPort;
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
-use brain3_platform::container::startup::ensure_mcp_container;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
+use brain3_platform::runtime::bootstrap_configured_runtime;
 use brain3_platform::setup::app_home::Brain3AppHome;
 
 #[derive(Parser)]
@@ -51,7 +52,7 @@ fn resolve_config_env_file(args: &Args) -> Result<(Brain3AppHome, PathBuf, bool)
     Ok((app_home, env_file, using_default_env_file))
 }
 
-fn exit_if_first_run(app_home: &Brain3AppHome, env_file: &Path) -> ! {
+fn exit_if_first_run(app_home: &Brain3AppHome, env_file: &Path) -> Result<()> {
     eprintln!(
         "\nBrain3 is not configured yet.\n\
          \n  App home: {}\n\
@@ -66,26 +67,26 @@ fn exit_if_first_run(app_home: &Brain3AppHome, env_file: &Path) -> ! {
         env_file = %env_file.display(),
         "first-run setup required"
     );
-    std::process::exit(1);
+    anyhow::bail!("first-run setup required");
+}
+
+fn setup_requires_named_tunnel() -> Result<()> {
+    eprintln!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in your .env file.");
+    anyhow::bail!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set");
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-        )
-        .with_target(true)
-        .init();
+    let _logging = logging::init_logging().await?;
 
     let args = Args::parse();
 
     let (app_home, env_file, using_default_env_file) = resolve_config_env_file(&args)?;
     if using_default_env_file && !env_file.exists() {
-        exit_if_first_run(&app_home, &env_file);
+        return exit_if_first_run(&app_home, &env_file);
     }
 
-    let config_adapter = EnvFileConfigAdapter::new(Some(env_file));
+    let config_adapter = EnvFileConfigAdapter::new(Some(env_file.clone()));
     let config = Arc::new(
         config_adapter
             .load()
@@ -98,77 +99,35 @@ async fn main() -> Result<()> {
                 return setup_tui::run(tc).await;
             }
             _ => {
-                eprintln!(
-                    "--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in your .env file."
-                );
-                std::process::exit(1);
+                return setup_requires_named_tunnel();
             }
         }
     }
 
-    // Pre-flight: named tunnel config file must exist before startup.
-    match &config.tunnel {
-        Some(TunnelConfig::CloudflareQuick { local_port }) => {
-            tracing::info!(local_port = %local_port, "tunnel mode: Cloudflare quick tunnel");
-        }
-        Some(TunnelConfig::CloudflareNamed {
-            tunnel_name,
-            domain,
-            config_file,
-            ..
-        }) => {
-            tracing::info!(tunnel_name = %tunnel_name, domain = %domain, config_file = %config_file.display(), "tunnel mode: Cloudflare named tunnel");
-        }
-        None => {
-            tracing::info!("tunnel mode: none (no public ingress configured)");
-        }
+    let runtime = bootstrap_configured_runtime(
+        Arc::clone(&config),
+        RuntimeLaunchPlan {
+            paths: app_home.as_setup_paths(),
+            env_file: env_file.clone(),
+            log_file: _logging.log_file.clone(),
+        },
+    )
+    .await?;
+
+    let config = Arc::clone(&runtime.config);
+    let upstream_secret = runtime.upstream_secret.clone();
+
+    if let Some(public_url) = &runtime.public_url {
+        tracing::info!(url = %public_url, "runtime public URL ready");
     }
-    if let Some(TunnelConfig::CloudflareNamed {
-        config_file,
-        tunnel_name,
-        ..
-    }) = &config.tunnel
-    {
-        if !config_file.exists() {
-            eprintln!(
-                "\nERROR: Cloudflare tunnel not yet provisioned.\n\
-                 \n  Config file not found: {}\
-                 \n\n  Run the setup wizard:\n    brain3 --setup\
-                 \n\n  Or use a quick tunnel instead (no setup needed):\n    Set CF_QUICK_TUNNEL=true in .env (and remove CF_TUNNEL_NAME/CF_DOMAIN)\n",
-                config_file.display()
-            );
-            tracing::error!(
-                config_file = %config_file.display(),
-                tunnel_name = %tunnel_name,
-                "named tunnel config file not found — run: brain3 --setup"
-            );
-            std::process::exit(1);
-        }
-    }
+    tracing::info!(
+        container_status = ?runtime.container_status,
+        tunnel_status = ?runtime.tunnel_status,
+        log_file = %runtime.launch_plan.log_file.display(),
+        "runtime bootstrap complete"
+    );
 
-    brain3_platform::config::log_config::log_startup_config(&config);
-
-    let upstream_secret = brain3_platform::config::upstream_secret::read_or_create(
-        &config.mcp_reverse_proxy.upstream_secret_file,
-    )?;
-
-    if let Some(ref startup) = config.container {
-        ensure_mcp_container(startup)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .context("failed to start MCP container")?;
-    }
-
-    let _tunnel = if let Some(ref tunnel_config) = config.tunnel {
-        let (adapter, info) = brain3_platform::tunnel::start_tunnel(tunnel_config)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .context("failed to start tunnel")?;
-        tracing::info!(url = %info.public_url, "tunnel started");
-        Some(adapter)
-    } else {
-        None
-    };
+    let _runtime = runtime;
 
     let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());

@@ -108,6 +108,7 @@ impl FirstRunSetupUseCase {
     pub fn build_connection_card(
         &self,
         server_url: impl Into<String>,
+        log_file: std::path::PathBuf,
         summary: &SetupSummary,
     ) -> ConnectionCard {
         ConnectionCard {
@@ -115,6 +116,7 @@ impl FirstRunSetupUseCase {
             client_id: summary.draft.client_id.clone(),
             client_secret: summary.draft.client_secret.clone(),
             username: summary.draft.username.clone(),
+            log_file,
         }
     }
 }
@@ -343,7 +345,11 @@ mod tests {
             .await
             .expect("finalize should succeed");
 
-        let card = use_case.build_connection_card("https://example.trycloudflare.com", &summary);
+        let card = use_case.build_connection_card(
+            "https://example.trycloudflare.com",
+            PathBuf::from("/tmp/brain3.log"),
+            &summary,
+        );
         let snapshot = port.snapshot();
 
         assert!(snapshot
@@ -357,6 +363,7 @@ mod tests {
                 client_id: "oauth2-gateway-client".into(),
                 client_secret: "chosen-secret".into(),
                 username: "admin".into(),
+                log_file: PathBuf::from("/tmp/brain3.log"),
             }
         );
     }
