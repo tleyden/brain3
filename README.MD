@@ -56,29 +56,29 @@ TODO
 | Requirement | Install |
 |---|---|
 | macOS (Apple Silicon) | — |
-| Rust toolchain | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
 | Container runtime | Apple `container`: `brew install container` or Docker Desktop |
 | `cloudflared` | `brew install cloudflared` *(optional — only needed for Cloudflare Tunnel approach)* |
 
-### 1. Clone and build the gateway
+### 1. Install the latest release
 
 ```bash
-git clone https://github.com/tleyden/brain3.git
-cd brain3
-cargo build --release
+curl -sSfL https://raw.githubusercontent.com/tleyden/brain3/main/scripts/install.sh \
+  | S3_BASE_URL="https://github.com/tleyden/brain3/releases/latest/download" sh
 ```
 
-The binary is at `./target/release/brain3`.
+This installs `brain3` from the latest GitHub release. At the time of writing, `latest` is `v0.1.1`.
+
+### 2. Create a working directory and download the config template
+
+```bash
+mkdir -p ~/brain3
+cd ~/brain3
+curl -sSfL https://raw.githubusercontent.com/tleyden/brain3/v0.1.1/.env.template -o .env
+```
 
 No local MCP container build is required. Set `BRAIN3_CONTAINER_IMAGE` in `.env` to a published image such as `ghcr.io/tleyden/brain3-mcp-vault-tools:latest`. When the gateway starts, it pulls that configured image into your selected container runtime if it is not already present.
 
-### 2. Configure
-
-Copy the environment template:
-
-```bash
-cp .env.template .env
-```
+### 3. Configure
 
 Generate the two secret values and set your login credentials:
 
@@ -109,15 +109,15 @@ Set `BRAIN3_CONTAINER_IMAGE` to the published image you want the gateway to run.
 
 Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` to the public hostname your Caddy or nginx instance is serving TLS on (e.g. `brain3.yourdomain.com`). The gateway uses this for hostname validation.
 
-### 3. Start the gateway
+### 4. Start the gateway
 
 ```bash
-./target/release/brain3
+brain3
 ```
 
 The gateway starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
 
-### 4. Verify locally
+### 5. Verify locally
 
 In another terminal:
 
@@ -129,7 +129,7 @@ curl -s http://127.0.0.1:8421/health
 curl -s http://127.0.0.1:8421/.well-known/oauth-authorization-server | python3 -m json.tool
 ```
 
-### 5. Expose via direct public origin
+### 6. Expose via direct public origin
 
 This setup uses a direct public origin: Caddy or nginx terminates TLS and reverse-proxies to `127.0.0.1:8421`, optionally sitting behind Cloudflare proxy for DDoS protection.
 
@@ -145,7 +145,7 @@ Make sure `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` matches the hostname Ca
 
 If you'd rather use a Cloudflare Tunnel instead, see [Exposing to the Public Internet](#exposing-to-the-public-internet) below.
 
-### 6. Connect your AI app
+### 7. Connect your AI app
 
 In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), add a new MCP server connection with:
 
@@ -158,6 +158,28 @@ In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), 
 When the AI app redirects you to sign in, enter the `USERNAME` and `PASSWORD` you configured in step 3.
 
 Once connected, you can ask your AI to read, search, organize, and edit your notes.
+
+## Build from Source (Developers)
+
+### Prerequisites
+
+| Requirement | Install |
+|---|---|
+| macOS (Apple Silicon) | — |
+| Rust toolchain | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| Container runtime | Apple `container`: `brew install container` or Docker Desktop |
+| `cloudflared` | `brew install cloudflared` *(optional — only needed for Cloudflare Tunnel approach)* |
+
+### Clone and build from source
+
+```bash
+git clone https://github.com/tleyden/brain3.git
+cd brain3
+cargo build --release
+```
+
+The binary is at `./target/release/brain3`.
+From there, follow the same quickstart flow above, but start the gateway with `./target/release/brain3` instead of `brain3`.
 
 ## Stopping
 
