@@ -252,33 +252,9 @@ Once connected, your AI app has access to these vault tools:
 
 ## Advanced Configuration
 
-### Direct public origin
-
-If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
-
-Example minimal Caddyfile:
-
-```
-brain3.yourdomain.com {
-    reverse_proxy 127.0.0.1:8421
-}
-```
-
-### Quick temporary Cloudflare Tunnel
-
-Set `CF_QUICK_TUNNEL=true` in your `.env`. Brain3 will start `cloudflared` automatically on startup and log the assigned public URL:
-
-```
-INFO tunnel started url=https://some-random-name.trycloudflare.com
-```
-
-No DNS or config needed. The URL changes each time you restart Brain3.
-
-Requires `cloudflared` to be installed — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
-
 ### Named Cloudflare Tunnel on your domain
 
-For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel, provision the tunnel once, then let Brain3 run it:
+Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control. Provision the tunnel once, then let Brain3 run it:
 
 1. Install `cloudflared` — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
 2. Log in: `cloudflared tunnel login`
@@ -288,6 +264,20 @@ For a stable hostname like `brain3.yourdomain.com` via Cloudflare Tunnel, provis
 
 ```
 INFO tunnel started url=https://brain3.yourdomain.com
+```
+
+### Direct public origin
+
+This is an alternative to a Cloudflare Tunnel if tunnels are not practical in your environment. It is less preferred because it involves exposing ports more directly, so only use it when a Cloudflare Tunnel is not a workable option.
+
+If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
+
+Example minimal Caddyfile:
+
+```
+brain3.yourdomain.com {
+    reverse_proxy 127.0.0.1:8421
+}
 ```
 
 ## Development
