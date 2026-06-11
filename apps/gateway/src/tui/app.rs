@@ -48,6 +48,7 @@ pub async fn run_gateway_tui(
                 host.to_string(),
                 log_file.clone(),
                 preparation,
+                session.display_url,
                 session.runtime,
                 session.server,
             )
@@ -195,7 +196,7 @@ async fn event_loop(
                 _ => {}
             },
             SetupStep::RuntimeStatus => {
-                if key.code == KeyCode::Esc && state.connection_card.is_some() {
+                if key.code == KeyCode::Char('c') && state.connection_card.is_some() {
                     state.clear_messages();
                     state.step = SetupStep::ConnectionCard;
                 }

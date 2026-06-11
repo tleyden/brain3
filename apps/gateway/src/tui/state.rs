@@ -63,10 +63,20 @@ impl FirstRunTuiState {
         host: String,
         log_file: PathBuf,
         preparation: SetupPreparation,
+        display_url: String,
         runtime: RuntimeBootstrap,
         server: GatewayServerHandle,
     ) -> Self {
+        let connection_card = ConnectionCard {
+            server_url: display_url,
+            client_id: preparation.draft.client_id.clone(),
+            client_secret: preparation.draft.client_secret.clone(),
+            username: preparation.draft.username.clone(),
+            password: preparation.draft.password.clone(),
+            log_file: log_file.clone(),
+        };
         let mut state = Self::new(host, log_file, preparation);
+        state.connection_card = Some(connection_card);
         state.runtime = Some(runtime);
         state.server = Some(server);
         state.step = SetupStep::RuntimeStatus;

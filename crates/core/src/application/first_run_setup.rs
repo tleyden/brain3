@@ -124,6 +124,7 @@ impl FirstRunSetupUseCase {
             client_id: summary.draft.client_id.clone(),
             client_secret: summary.draft.client_secret.clone(),
             username: summary.draft.username.clone(),
+            password: summary.draft.password.clone(),
             log_file,
         }
     }

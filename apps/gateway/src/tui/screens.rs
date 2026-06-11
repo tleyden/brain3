@@ -205,6 +205,7 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         Line::from(format!("Client ID: {}", card.client_id)),
         Line::from(format!("Client Secret: {}", card.client_secret)),
         Line::from(format!("Username: {}", card.username)),
+        Line::from(format!("Password: {}", card.password)),
         Line::from(format!("Logs: {}", card.log_file.display())),
     ]
 }
@@ -283,7 +284,7 @@ fn help_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::ConnectionCard => vec![Line::from("[Enter] runtime status    [q] quit")],
         SetupStep::RuntimeStatus => match state.previous_step() {
             Some(SetupStep::ConnectionCard) => {
-                vec![Line::from("[Esc] MCP Config Settings    [q] quit")]
+                vec![Line::from("[c] MCP Config Settings    [q] quit")]
             }
             _ => vec![Line::from("[q] quit")],
         },
