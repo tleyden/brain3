@@ -95,8 +95,8 @@ jobs:
         run: |
           for tarball in artifacts/*.tar.gz; do
             filename="$(basename "$tarball")"
-            aws s3 cp "$tarball" "s3://$BUCKET/releases/$VERSION/$filename" --acl public-read
-            aws s3 cp "$tarball" "s3://$BUCKET/releases/latest/$filename"  --acl public-read
+            aws s3 cp "$tarball" "s3://$BUCKET/releases/$VERSION/$filename"
+            aws s3 cp "$tarball" "s3://$BUCKET/releases/latest/$filename"
           done
 
       - name: Upload install script to S3
@@ -104,5 +104,5 @@ jobs:
           BUCKET: ${{ secrets.AWS_S3_BUCKET }}
           VERSION: ${{ github.ref_name }}
         run: |
-          aws s3 cp scripts/install.sh "s3://$BUCKET/releases/$VERSION/install.sh" --acl public-read
-          aws s3 cp scripts/install.sh "s3://$BUCKET/releases/latest/install.sh"   --acl public-read
+          aws s3 cp scripts/install.sh "s3://$BUCKET/releases/$VERSION/install.sh"
+          aws s3 cp scripts/install.sh "s3://$BUCKET/releases/latest/install.sh"
