@@ -229,6 +229,10 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Logs: {}",
             runtime.launch_plan.log_file.display()
         )));
+        lines.push(Line::from(format!(
+            "Config: {}",
+            runtime.launch_plan.env_file.display()
+        )));
     }
 
     lines.push(Line::from(format!(

@@ -69,10 +69,10 @@ impl FirstRunTuiState {
     ) -> Self {
         let connection_card = ConnectionCard {
             server_url: display_url,
-            client_id: preparation.draft.client_id.clone(),
-            client_secret: preparation.draft.client_secret.clone(),
-            username: preparation.draft.username.clone(),
-            password: std::env::var("PASSWORD").unwrap_or_default(),
+            client_id: runtime.config.oauth.client_id.clone(),
+            client_secret: runtime.config.oauth.client_secret.clone(),
+            username: runtime.config.oauth.username.clone(),
+            password: runtime.config.oauth.password.clone(),
             log_file: log_file.clone(),
         };
         let mut state = Self::new(host, log_file, preparation);
