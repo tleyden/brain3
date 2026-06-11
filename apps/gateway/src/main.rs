@@ -12,10 +12,15 @@ use clap::Parser;
 
 use brain3_core::domain::model::TunnelConfig;
 use brain3_core::domain::setup::RuntimeLaunchPlan;
+use brain3_core::domain::setup::{DependencyAvailability, DependencyStatus};
 use brain3_core::ports::config::ConfigPort;
+use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::runtime::bootstrap_configured_runtime;
 use brain3_platform::setup::app_home::Brain3AppHome;
+use brain3_platform::setup::PlatformSetupSystem;
+
+use crate::tui::GatewayTuiLaunch;
 
 #[derive(Parser)]
 #[command(name = "brain3", about = "OAuth2 gateway for MCP servers")]
@@ -26,11 +31,46 @@ struct Args {
     #[arg(long)]
     env_file: Option<PathBuf>,
 
+    #[arg(long, conflicts_with_all = ["cli", "setup"])]
+    tui: bool,
+
+    #[arg(long, conflicts_with_all = ["tui", "setup"])]
+    cli: bool,
+
     #[arg(
         long,
+        conflicts_with_all = ["tui", "cli"],
         help = "Run the interactive setup wizard for Cloudflare named tunnel provisioning"
     )]
     setup: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchMode {
+    Tui,
+    Cli,
+    Setup,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvFileSource {
+    Default,
+    Custom,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedEnvFile {
+    app_home: Brain3AppHome,
+    env_file: PathBuf,
+    source: EnvFileSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum LaunchDispatch {
+    TuiFirstRun,
+    TuiConfigured { launch_plan: RuntimeLaunchPlan },
+    Cli { launch_plan: RuntimeLaunchPlan },
+    Setup { env_file: PathBuf },
 }
 
 async fn shutdown_signal() {
@@ -40,81 +80,189 @@ async fn shutdown_signal() {
     tracing::info!("Received shutdown signal, draining connections...");
 }
 
-fn resolve_config_env_file(args: &Args) -> Result<(Brain3AppHome, PathBuf, bool)> {
+fn choose_launch_mode(args: &Args) -> LaunchMode {
+    if args.setup {
+        LaunchMode::Setup
+    } else if args.cli {
+        LaunchMode::Cli
+    } else {
+        LaunchMode::Tui
+    }
+}
+
+fn resolve_config_env_file(args: &Args) -> Result<ResolvedEnvFile> {
     let app_home =
         Brain3AppHome::resolve_from_env().context("failed to resolve Brain3 app home")?;
-    let using_default_env_file = args.env_file.is_none();
+    let source = if args.env_file.is_some() {
+        EnvFileSource::Custom
+    } else {
+        EnvFileSource::Default
+    };
     let env_file = args
         .env_file
         .clone()
         .unwrap_or_else(|| app_home.env_file.clone());
-    Ok((app_home, env_file, using_default_env_file))
+    Ok(ResolvedEnvFile {
+        app_home,
+        env_file,
+        source,
+    })
 }
 
-fn exit_if_first_run(app_home: &Brain3AppHome, env_file: &Path) -> Result<()> {
+fn setup_requires_named_tunnel() -> Result<()> {
     eprintln!(
-        "\nBrain3 is not configured yet.\n\
+        "--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in the configured env file."
+    );
+    anyhow::bail!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set");
+}
+
+fn runtime_launch_plan(resolved_env: &ResolvedEnvFile, log_file: PathBuf) -> RuntimeLaunchPlan {
+    RuntimeLaunchPlan {
+        paths: resolved_env.app_home.as_setup_paths(),
+        env_file: resolved_env.env_file.clone(),
+        log_file,
+    }
+}
+
+fn plan_launch(
+    mode: LaunchMode,
+    resolved_env: &ResolvedEnvFile,
+    env_exists: bool,
+    log_file: PathBuf,
+) -> Result<LaunchDispatch> {
+    if !env_exists {
+        return match resolved_env.source {
+            EnvFileSource::Custom => missing_custom_env_file(&resolved_env.env_file),
+            EnvFileSource::Default => match mode {
+                LaunchMode::Tui => Ok(LaunchDispatch::TuiFirstRun),
+                LaunchMode::Cli => {
+                    cli_requires_interactive_setup(&resolved_env.app_home, &resolved_env.env_file)
+                }
+                LaunchMode::Setup => {
+                    setup_requires_existing_config(&resolved_env.app_home, &resolved_env.env_file)
+                }
+            },
+        };
+    }
+
+    let launch_plan = runtime_launch_plan(resolved_env, log_file);
+
+    Ok(match mode {
+        LaunchMode::Tui => LaunchDispatch::TuiConfigured { launch_plan },
+        LaunchMode::Cli => LaunchDispatch::Cli { launch_plan },
+        LaunchMode::Setup => LaunchDispatch::Setup {
+            env_file: resolved_env.env_file.clone(),
+        },
+    })
+}
+
+fn missing_custom_env_file(env_file: &Path) -> Result<LaunchDispatch> {
+    eprintln!(
+        "\nCustom Brain3 config file not found.\n\
+         \n  Env file: {}\n\
+         \nCreate that file or point --env-file at an existing config.\n",
+        env_file.display()
+    );
+    tracing::warn!(env_file = %env_file.display(), "custom env file missing");
+    anyhow::bail!("custom env file not found: {}", env_file.display());
+}
+
+fn cli_requires_interactive_setup(
+    app_home: &Brain3AppHome,
+    env_file: &Path,
+) -> Result<LaunchDispatch> {
+    eprintln!(
+        "\nBrain3 --cli only works after interactive setup is complete.\n\
          \n  App home: {}\n\
          \n  Expected config: {}\n\
-         \nThe first-run setup wizard is not implemented in this slice yet.\n\
-         Create the config file at that location before starting Brain3 again.\n",
+         \nRerun without --cli to use the setup/status TUI.\n",
         app_home.root_dir.display(),
         env_file.display()
     );
     tracing::warn!(
         app_home = %app_home.root_dir.display(),
         env_file = %env_file.display(),
-        "first-run setup required"
+        "cli mode refused because interactive setup is incomplete"
     );
-    anyhow::bail!("first-run setup required");
+    anyhow::bail!("--cli requires completed interactive setup; rerun without --cli");
 }
 
-fn setup_requires_named_tunnel() -> Result<()> {
-    eprintln!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set in your .env file.");
-    anyhow::bail!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set");
+fn setup_requires_existing_config(
+    app_home: &Brain3AppHome,
+    env_file: &Path,
+) -> Result<LaunchDispatch> {
+    eprintln!(
+        "\nBrain3 --setup requires an existing config file.\n\
+         \n  App home: {}\n\
+         \n  Expected config: {}\n\
+         \nRun brain3 without flags to use the setup/status TUI first.\n",
+        app_home.root_dir.display(),
+        env_file.display()
+    );
+    tracing::warn!(
+        app_home = %app_home.root_dir.display(),
+        env_file = %env_file.display(),
+        "setup mode refused because config is missing"
+    );
+    anyhow::bail!("--setup requires existing configuration");
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let _logging = logging::init_logging().await?;
+fn ensure_cli_ready(dependencies: &DependencyStatus) -> Result<()> {
+    let runtime_ready = matches!(
+        dependencies.preferred_container_runtime,
+        DependencyAvailability::Installed
+    );
+    let tunnel_ready = matches!(dependencies.cloudflared, DependencyAvailability::Installed);
 
-    let args = Args::parse();
-
-    let (app_home, env_file, using_default_env_file) = resolve_config_env_file(&args)?;
-    if using_default_env_file && !env_file.exists() {
-        return exit_if_first_run(&app_home, &env_file);
+    if runtime_ready && tunnel_ready {
+        return Ok(());
     }
 
-    let config_adapter = EnvFileConfigAdapter::new(Some(env_file.clone()));
-    let config = Arc::new(
+    eprintln!(
+        "\nBrain3 --cli only works after interactive setup is complete.\n\
+         \nDependency doctor still reports setup work for the default runtime.\n\
+         Rerun without --cli to use the setup/status TUI.\n"
+    );
+    tracing::warn!(dependencies = ?dependencies, "cli mode refused because dependency doctor is not green");
+    anyhow::bail!(
+        "--cli requires interactive setup to finish dependency installation; rerun without --cli"
+    );
+}
+
+fn load_config(env_file: PathBuf) -> Result<Arc<brain3_core::domain::model::GatewayConfig>> {
+    let config_adapter = EnvFileConfigAdapter::new(Some(env_file));
+    Ok(Arc::new(
         config_adapter
             .load()
             .context("failed to load configuration")?,
-    );
+    ))
+}
 
-    if args.setup {
-        match &config.tunnel {
-            Some(tc @ TunnelConfig::CloudflareNamed { .. }) => {
-                return setup_tui::run(tc).await;
-            }
-            _ => {
-                return setup_requires_named_tunnel();
-            }
-        }
+async fn run_setup_mode(env_file: PathBuf) -> Result<()> {
+    let config = load_config(env_file)?;
+
+    match &config.tunnel {
+        Some(tc @ TunnelConfig::CloudflareNamed { .. }) => setup_tui::run(tc).await,
+        _ => setup_requires_named_tunnel(),
     }
+}
 
-    let runtime = bootstrap_configured_runtime(
-        Arc::clone(&config),
-        RuntimeLaunchPlan {
-            paths: app_home.as_setup_paths(),
-            env_file: env_file.clone(),
-            log_file: _logging.log_file.clone(),
-        },
-    )
-    .await?;
+async fn run_cli_mode(
+    host: &str,
+    launch_plan: RuntimeLaunchPlan,
+    logging: &logging::GatewayLogging,
+) -> Result<()> {
+    let setup_system = PlatformSetupSystem::new();
+    let dependencies = setup_system
+        .collect_dependency_status()
+        .await
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+    ensure_cli_ready(&dependencies)?;
 
-    let config = Arc::clone(&runtime.config);
-    let upstream_secret = runtime.upstream_secret.clone();
+    logging.enable_terminal_mirror();
+
+    let config = load_config(launch_plan.env_file.clone())?;
+    let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
 
     if let Some(public_url) = &runtime.public_url {
         tracing::info!(url = %public_url, "runtime public URL ready");
@@ -127,9 +275,171 @@ async fn main() -> Result<()> {
     );
 
     let _runtime = runtime;
+    server::run_gateway_server_until(
+        host,
+        config,
+        _runtime.upstream_secret.clone(),
+        shutdown_signal(),
+    )
+    .await
+}
 
-    server::run_gateway_server_until(&args.host, config, upstream_secret, shutdown_signal())
-        .await?;
+#[tokio::main]
+async fn main() -> Result<()> {
+    let logging = logging::init_logging().await?;
 
-    Ok(())
+    let args = Args::parse();
+    let resolved_env = resolve_config_env_file(&args)?;
+    let mode = choose_launch_mode(&args);
+    let dispatch = plan_launch(
+        mode,
+        &resolved_env,
+        resolved_env.env_file.exists(),
+        logging.log_file.clone(),
+    )?;
+
+    match dispatch {
+        LaunchDispatch::TuiFirstRun => {
+            tui::run_gateway_tui(
+                &args.host,
+                logging.log_file.clone(),
+                GatewayTuiLaunch::FirstRun,
+            )
+            .await
+        }
+        LaunchDispatch::TuiConfigured { launch_plan } => {
+            tui::run_gateway_tui(
+                &args.host,
+                logging.log_file.clone(),
+                GatewayTuiLaunch::Configured { launch_plan },
+            )
+            .await
+        }
+        LaunchDispatch::Cli { launch_plan } => {
+            run_cli_mode(&args.host, launch_plan, &logging).await
+        }
+        LaunchDispatch::Setup { env_file } => run_setup_mode(env_file).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use brain3_core::domain::setup::{
+        DependencyAvailability, DependencyStatus, InstallAction, PackageManager,
+        SetupOperatingSystem,
+    };
+
+    use super::*;
+
+    #[test]
+    fn args_default_to_tui_mode() {
+        let args = Args::try_parse_from(["brain3"]).expect("args should parse");
+        assert_eq!(choose_launch_mode(&args), LaunchMode::Tui);
+    }
+
+    #[test]
+    fn args_accept_explicit_tui_and_cli_modes() {
+        let tui_args = Args::try_parse_from(["brain3", "--tui"]).expect("tui args should parse");
+        assert_eq!(choose_launch_mode(&tui_args), LaunchMode::Tui);
+
+        let cli_args = Args::try_parse_from(["brain3", "--cli"]).expect("cli args should parse");
+        assert_eq!(choose_launch_mode(&cli_args), LaunchMode::Cli);
+    }
+
+    #[test]
+    fn setup_conflicts_with_launch_modes() {
+        assert!(Args::try_parse_from(["brain3", "--setup", "--tui"]).is_err());
+        assert!(Args::try_parse_from(["brain3", "--setup", "--cli"]).is_err());
+    }
+
+    #[test]
+    fn launch_dispatch_uses_wizard_only_for_missing_default_env_in_tui_mode() {
+        let app_home = Brain3AppHome::from_root(PathBuf::from("/tmp/brain3-home"));
+        let default_env = ResolvedEnvFile {
+            app_home: app_home.clone(),
+            env_file: app_home.env_file.clone(),
+            source: EnvFileSource::Default,
+        };
+
+        assert_eq!(
+            plan_launch(
+                LaunchMode::Tui,
+                &default_env,
+                false,
+                PathBuf::from("/tmp/brain3.log"),
+            )
+            .expect("tui dispatch should succeed"),
+            LaunchDispatch::TuiFirstRun
+        );
+
+        let err = plan_launch(
+            LaunchMode::Cli,
+            &default_env,
+            false,
+            PathBuf::from("/tmp/brain3.log"),
+        )
+        .expect_err("cli dispatch should refuse missing default env");
+        assert!(
+            err.to_string().contains("rerun without --cli"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn launch_dispatch_fails_for_missing_custom_env_file() {
+        let resolved = ResolvedEnvFile {
+            app_home: Brain3AppHome::from_root(PathBuf::from("/tmp/brain3-home")),
+            env_file: PathBuf::from("/tmp/custom.env"),
+            source: EnvFileSource::Custom,
+        };
+
+        let err = plan_launch(
+            LaunchMode::Tui,
+            &resolved,
+            false,
+            PathBuf::from("/tmp/brain3.log"),
+        )
+        .expect_err("missing custom env should fail");
+
+        assert!(
+            err.to_string().contains("/tmp/custom.env"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn cli_readiness_requires_installed_runtime_dependencies() {
+        let ready = dependency_status(
+            DependencyAvailability::Installed,
+            DependencyAvailability::Installed,
+        );
+        assert!(ensure_cli_ready(&ready).is_ok());
+
+        let err = ensure_cli_ready(&dependency_status(
+            DependencyAvailability::InstallAvailable(InstallAction::InstallCloudflared),
+            DependencyAvailability::Installed,
+        ))
+        .expect_err("installable dependency should require interactive setup");
+        assert!(
+            err.to_string().contains("rerun without --cli"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    fn dependency_status(
+        cloudflared: DependencyAvailability,
+        preferred_container_runtime: DependencyAvailability,
+    ) -> DependencyStatus {
+        DependencyStatus {
+            operating_system: SetupOperatingSystem::MacOS,
+            package_manager: Some(PackageManager::Homebrew),
+            cloudflared,
+            preferred_container_runtime,
+            docker_installed: true,
+            macos_container_installed: Some(true),
+            homebrew_installed: Some(true),
+        }
+    }
 }

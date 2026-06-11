@@ -59,6 +59,21 @@ impl FirstRunTuiState {
         }
     }
 
+    pub fn new_runtime(
+        host: String,
+        log_file: PathBuf,
+        preparation: SetupPreparation,
+        runtime: RuntimeBootstrap,
+        server: GatewayServerHandle,
+    ) -> Self {
+        let mut state = Self::new(host, log_file, preparation);
+        state.runtime = Some(runtime);
+        state.server = Some(server);
+        state.step = SetupStep::RuntimeStatus;
+        state.info_message = Some("Brain3 is running.".into());
+        state
+    }
+
     pub fn clear_messages(&mut self) {
         self.error_message = None;
         self.info_message = None;
@@ -126,7 +141,10 @@ impl FirstRunTuiState {
             SetupStep::Auth => Some(SetupStep::VaultPath),
             SetupStep::Summary => Some(SetupStep::Auth),
             SetupStep::ConnectionCard => None,
-            SetupStep::RuntimeStatus => Some(SetupStep::ConnectionCard),
+            SetupStep::RuntimeStatus => self
+                .connection_card
+                .as_ref()
+                .map(|_| SetupStep::ConnectionCard),
         }
     }
 

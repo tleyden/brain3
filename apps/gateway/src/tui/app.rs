@@ -11,19 +11,35 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
-use brain3_core::domain::setup::{FinalizeSetupRequest, SetupStep};
+use brain3_core::domain::setup::{FinalizeSetupRequest, RuntimeLaunchPlan, SetupStep};
 use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
-use brain3_platform::runtime::bootstrap_configured_runtime;
+use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
 use brain3_platform::setup::PlatformSetupSystem;
 
 use crate::server;
+use crate::server::GatewayServerHandle;
 
 use super::screens;
 use super::state::{AuthField, FirstRunTuiState};
 
-pub async fn run_first_run_tui(host: &str, log_file: std::path::PathBuf) -> Result<()> {
+pub enum GatewayTuiLaunch {
+    FirstRun,
+    Configured { launch_plan: RuntimeLaunchPlan },
+}
+
+struct StartedGatewaySession {
+    runtime: RuntimeBootstrap,
+    server_handle: GatewayServerHandle,
+    server_url: String,
+}
+
+pub async fn run_gateway_tui(
+    host: &str,
+    log_file: std::path::PathBuf,
+    launch: GatewayTuiLaunch,
+) -> Result<()> {
     let setup_system: Arc<dyn SetupSystemPort> = Arc::new(PlatformSetupSystem::new());
     let use_case = FirstRunSetupUseCase::new(Arc::clone(&setup_system));
     let preparation = use_case
@@ -31,13 +47,28 @@ pub async fn run_first_run_tui(host: &str, log_file: std::path::PathBuf) -> Resu
         .await
         .map_err(|error| anyhow::anyhow!("{error}"))?;
 
+    let mut state = match launch {
+        GatewayTuiLaunch::FirstRun => {
+            FirstRunTuiState::new(host.to_string(), log_file.clone(), preparation)
+        }
+        GatewayTuiLaunch::Configured { launch_plan } => {
+            let session = start_configured_runtime_session(host, launch_plan).await?;
+            FirstRunTuiState::new_runtime(
+                host.to_string(),
+                log_file.clone(),
+                preparation,
+                session.runtime,
+                session.server_handle,
+            )
+        }
+    };
+
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut state = FirstRunTuiState::new(host.to_string(), log_file, preparation);
     let result = event_loop(&mut terminal, &mut state, &use_case, setup_system).await;
 
     disable_raw_mode()?;
@@ -174,7 +205,7 @@ async fn event_loop(
                 _ => {}
             },
             SetupStep::RuntimeStatus => {
-                if key.code == KeyCode::Esc {
+                if key.code == KeyCode::Esc && state.connection_card.is_some() {
                     state.clear_messages();
                     state.step = SetupStep::ConnectionCard;
                 }
@@ -249,30 +280,17 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
         }
     };
 
-    let env_path = summary.paths.env_file.clone();
-    let config = match EnvFileConfigAdapter::new(Some(env_path.clone()))
-        .load()
-        .map_err(|error| anyhow::anyhow!("{error}"))
-    {
-        Ok(config) => Arc::new(config),
-        Err(error) => {
-            state.error_message = Some(error.to_string());
-            state.info_message = None;
-            return;
-        }
-    };
-
-    let runtime = match bootstrap_configured_runtime(
-        Arc::clone(&config),
-        brain3_core::domain::setup::RuntimeLaunchPlan {
+    let session = match start_configured_runtime_session(
+        &state.host,
+        RuntimeLaunchPlan {
             paths: summary.paths.clone(),
-            env_file: env_path,
+            env_file: summary.paths.env_file.clone(),
             log_file: state.log_file.clone(),
         },
     )
     .await
     {
-        Ok(runtime) => runtime,
+        Ok(session) => session,
         Err(error) => {
             state.error_message = Some(error.to_string());
             state.info_message = None;
@@ -280,34 +298,44 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
         }
     };
 
-    let server_handle = match server::spawn_gateway_server(
-        &state.host,
+    let connection_card =
+        use_case.build_connection_card(session.server_url, state.log_file.clone(), &summary);
+
+    state.summary = Some(summary);
+    state.connection_card = Some(connection_card);
+    state.runtime = Some(session.runtime);
+    state.server = Some(session.server_handle);
+    state.info_message = Some("Brain3 is running.".into());
+    state.step = SetupStep::ConnectionCard;
+}
+
+async fn start_configured_runtime_session(
+    host: &str,
+    launch_plan: RuntimeLaunchPlan,
+) -> Result<StartedGatewaySession> {
+    let config = Arc::new(
+        EnvFileConfigAdapter::new(Some(launch_plan.env_file.clone()))
+            .load()
+            .map_err(|error| anyhow::anyhow!("{error}"))?,
+    );
+
+    let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
+    let server_handle = server::spawn_gateway_server(
+        host,
         Arc::clone(&runtime.config),
         runtime.upstream_secret.clone(),
     )
-    .await
-    {
-        Ok(server) => server,
-        Err(error) => {
-            state.error_message = Some(error.to_string());
-            state.info_message = None;
-            return;
-        }
-    };
-
+    .await?;
     let server_url = runtime
         .public_url
         .clone()
         .unwrap_or_else(|| server_handle.local_url().to_string());
-    let connection_card =
-        use_case.build_connection_card(server_url, state.log_file.clone(), &summary);
 
-    state.summary = Some(summary);
-    state.connection_card = Some(connection_card);
-    state.runtime = Some(runtime);
-    state.server = Some(server_handle);
-    state.info_message = Some("Brain3 is running.".into());
-    state.step = SetupStep::ConnectionCard;
+    Ok(StartedGatewaySession {
+        runtime,
+        server_handle,
+        server_url,
+    })
 }
 
 async fn cleanup(state: &mut FirstRunTuiState) -> Result<()> {

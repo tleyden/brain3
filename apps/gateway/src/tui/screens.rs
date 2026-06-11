@@ -22,12 +22,8 @@ pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
         ])
         .split(area);
 
-    let header = Paragraph::new(format!("Brain3 First Run  ·  {}", screen_title(state.step)))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" brain3 Setup "),
-        )
+    let header = Paragraph::new(format!("Brain3 Gateway  ·  {}", screen_title(state.step)))
+        .block(Block::default().borders(Borders::ALL).title(" brain3 "))
         .style(Style::default().add_modifier(Modifier::BOLD));
     f.render_widget(header, chunks[0]);
 
@@ -72,7 +68,8 @@ fn body_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
 fn welcome_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     vec![
-        Line::from("This wizard writes the default Brain3 config and then starts the gateway."),
+        Line::from("This guided setup writes the default Brain3 config and starts the gateway."),
+        Line::from("The same shell is also used later for everyday runtime status."),
         Line::from(""),
         Line::from(format!(
             "App home: {}",
@@ -280,7 +277,12 @@ fn help_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "[Enter] write config and start    [Esc] back    [q] quit",
         )],
         SetupStep::ConnectionCard => vec![Line::from("[Enter] runtime status    [q] quit")],
-        SetupStep::RuntimeStatus => vec![Line::from("[q] quit    [Esc] connection card")],
+        SetupStep::RuntimeStatus => match state.previous_step() {
+            Some(SetupStep::ConnectionCard) => {
+                vec![Line::from("[q] quit    [Esc] connection card")]
+            }
+            _ => vec![Line::from("[q] quit")],
+        },
     }
 }
 

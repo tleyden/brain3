@@ -3,4 +3,4 @@ mod screens;
 mod state;
 
 #[allow(unused_imports)]
-pub use app::run_first_run_tui;
+pub use app::{run_gateway_tui, GatewayTuiLaunch};
