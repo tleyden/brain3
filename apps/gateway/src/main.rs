@@ -1,5 +1,8 @@
 mod logging;
+mod server;
 mod setup_tui;
+#[allow(dead_code)]
+mod tui;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,11 +13,7 @@ use clap::Parser;
 use brain3_core::domain::model::TunnelConfig;
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::config::ConfigPort;
-use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
-use brain3_platform::http::router::build_router;
-use brain3_platform::http::state::AppState;
-use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 use brain3_platform::runtime::bootstrap_configured_runtime;
 use brain3_platform::setup::app_home::Brain3AppHome;
 
@@ -129,53 +128,8 @@ async fn main() -> Result<()> {
 
     let _runtime = runtime;
 
-    let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
-    let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
-
-    let oauth_config = Arc::new(config.oauth.clone());
-
-    let authorize = Arc::new(brain3_core::application::authorize::AuthorizeUseCase::new(
-        Arc::clone(&oauth_config),
-        Arc::clone(&auth_code_store),
-    ));
-    let token_exchange = Arc::new(
-        brain3_core::application::token_exchange::TokenExchangeUseCase::new(
-            Arc::clone(&oauth_config),
-            Arc::clone(&auth_code_store),
-        ),
-    );
-    let proxy_mcp = Arc::new(brain3_core::application::proxy_mcp::ProxyMcpUseCase::new(
-        mcp_proxy,
-        config.mcp_reverse_proxy.mcp_upstream_url.clone(),
-        upstream_secret,
-        config.oauth.access_token.clone(),
-        config.hostname_validation.clone(),
-    ));
-
-    let app_state = AppState {
-        authorize,
-        token_exchange,
-        proxy_mcp,
-        config: Arc::clone(&config),
-    };
-
-    let router = build_router(app_state);
-
-    let addr = format!("{}:{}", args.host, config.port);
-    let listener = tokio::net::TcpListener::bind(&addr)
-        .await
-        .with_context(|| format!("failed to bind to {addr}"))?;
-
-    tracing::info!("Starting OAuth2 gateway on {}", addr);
-    tracing::info!(
-        "Proxying MCP traffic to {}",
-        config.mcp_reverse_proxy.mcp_upstream_url
-    );
-
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("server error")?;
+    server::run_gateway_server_until(&args.host, config, upstream_secret, shutdown_signal())
+        .await?;
 
     Ok(())
 }
