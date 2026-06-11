@@ -34,18 +34,18 @@ struct Args {
     #[arg(long)]
     env_file: Option<PathBuf>,
 
-    #[arg(long, conflicts_with_all = ["cli", "setup"])]
+    #[arg(long, conflicts_with_all = ["cli", "cf_setup"])]
     tui: bool,
 
-    #[arg(long, conflicts_with_all = ["tui", "setup"])]
+    #[arg(long, conflicts_with_all = ["tui", "cf_setup"])]
     cli: bool,
 
     #[arg(
-        long,
+        long = "cf-setup",
         conflicts_with_all = ["tui", "cli"],
         help = "Run the interactive setup wizard for Cloudflare named tunnel provisioning"
     )]
-    setup: bool,
+    cf_setup: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,7 +84,7 @@ async fn shutdown_signal() {
 }
 
 fn choose_launch_mode(args: &Args) -> LaunchMode {
-    if args.setup {
+    if args.cf_setup {
         LaunchMode::Setup
     } else if args.cli {
         LaunchMode::Cli
@@ -114,10 +114,10 @@ fn resolve_config_env_file(args: &Args) -> Result<ResolvedEnvFile> {
 
 fn setup_requires_named_tunnel() -> Result<()> {
     eprintln!(
-        "\nBrain3 --setup only applies to Cloudflare named tunnel provisioning.\n\
+        "\nBrain3 --cf-setup only applies to Cloudflare named tunnel provisioning.\n\
          \nRun this in an interactive terminal to use the normal setup/status flow:\n  brain3 --tui\n"
     );
-    anyhow::bail!("--setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set");
+    anyhow::bail!("--cf-setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set");
 }
 
 fn runtime_launch_plan(resolved_env: &ResolvedEnvFile, log_file: PathBuf) -> RuntimeLaunchPlan {
@@ -181,7 +181,7 @@ fn brain3_command(args: &Args, mode: LaunchMode) -> String {
     match mode {
         LaunchMode::Tui => parts.push("--tui".into()),
         LaunchMode::Cli => parts.push("--cli".into()),
-        LaunchMode::Setup => parts.push("--setup".into()),
+        LaunchMode::Setup => parts.push("--cf-setup".into()),
     }
 
     if args.host != DEFAULT_HOST {
@@ -302,7 +302,7 @@ fn setup_requires_existing_config(
     env_file: &Path,
 ) -> Result<LaunchDispatch> {
     eprintln!(
-        "\nBrain3 --setup only provisions a Cloudflare named tunnel after Brain3 is configured.\n\
+        "\nBrain3 --cf-setup only provisions a Cloudflare named tunnel after Brain3 is configured.\n\
          \n  App home: {}\n\
          \n  Expected config: {}\n\
          \nRun this in an interactive terminal to create or manage configuration:\n  brain3 --tui\n",
@@ -314,7 +314,7 @@ fn setup_requires_existing_config(
         env_file = %env_file.display(),
         "setup mode refused because config is missing"
     );
-    anyhow::bail!("--setup requires existing configuration");
+    anyhow::bail!("--cf-setup requires existing configuration");
 }
 
 fn ensure_cli_ready(dependencies: &DependencyStatus) -> Result<()> {
@@ -478,8 +478,13 @@ mod tests {
 
     #[test]
     fn setup_conflicts_with_launch_modes() {
-        assert!(Args::try_parse_from(["brain3", "--setup", "--tui"]).is_err());
-        assert!(Args::try_parse_from(["brain3", "--setup", "--cli"]).is_err());
+        assert!(Args::try_parse_from(["brain3", "--cf-setup", "--tui"]).is_err());
+        assert!(Args::try_parse_from(["brain3", "--cf-setup", "--cli"]).is_err());
+    }
+
+    #[test]
+    fn old_setup_flag_is_rejected() {
+        assert!(Args::try_parse_from(["brain3", "--setup"]).is_err());
     }
 
     #[test]
