@@ -42,11 +42,24 @@ In theory, any AI provider that supports the MCP protocol should be compatible w
 
 ## Privacy Details
 
-TODO
+- Your data stays on the local machine where you run Brain3. Brain3 does not upload your vault to any Brain3-managed cloud service.
+- The AI assistant only gets access to the parts of your vault that are revealed through your prompts and tool calls, so you control what the AI sees.
+- If you use Cloudflare Tunnel, your traffic passes through Cloudflare's tunnel infrastructure and is encrypted in transit.
+- You remain in full control of the service. You can stop Brain3, disable the tunnel, or disconnect your AI app at any time.
+- Most of Brain3's privacy guarantees depend on the security controls described below.
 
 ## Security Details
 
-Written in Rust to reduce attack surface area
+- Host process written in Rust to reduce several classes of vulnerabilities and reduce attack surface area.
+- Preregistered clients only. Only the single client configured by `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic client registration is disabled.
+- Client secret required at token exchange. The token endpoint requires `client_secret_post`.
+- PKCE S256 required by default. Protects against authorization code interception.
+- Host validation rejects requests for unexpected hostnames (HTTP 421) when a public hostname is configured.
+- Bearer token validation on all `/mcp` routes.
+- Upstream shared secret injected by Brain3 so the MCP container can reject direct calls that bypass Brain3.
+- Constant-time comparison for all secret and token checks.
+- Auth codes are single-use and expire after 5 minutes.
+- macOS or Docker container isolation. By default, the MCP server runs in a container with your vault mounted and a read-only upstream secret directory. No other host directories are mounted unless you enable dev mode.
 
 
 ## Quick Start
@@ -232,18 +245,6 @@ Once connected, your AI app has access to these vault tools:
 | `vault_move` | Move or rename a file. |
 | `vault_delete` | Delete a file. |
 
-## Security Model
-
-- **Preregistered clients only.** Only the single client configured by `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic client registration is disabled.
-- **Client secret required** at token exchange. The token endpoint requires `client_secret_post`.
-- **PKCE S256 required** by default. Protects against authorization code interception.
-- **Host validation** rejects requests for unexpected hostnames (HTTP 421) when a public hostname is configured.
-- **Bearer token validation** on all `/mcp` routes.
-- **Upstream shared secret** injected by Brain3 so the MCP container can reject direct calls that bypass Brain3.
-- **Constant-time comparison** for all secret and token checks.
-- **Auth codes** are single-use and expire after 5 minutes.
-- **macOS Container isolation** — the MCP server runs in a container with only your vault directory mounted. All other access to your Mac is disabled by default.
-
 ## Advanced Configuration
 
 ### Direct public origin
@@ -297,10 +298,6 @@ cargo test
 ```bash
 cargo build --release
 ```
-
-## Credits
-
-- obsidian-web-mcp repo
 
 ## License 
 
