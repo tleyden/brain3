@@ -15,7 +15,7 @@ pub async fn run_command(bin: &str, args: &[&str]) -> Result<String, ContainerEr
     } else {
         let code = output.status.code().unwrap_or(-1);
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-        tracing::debug!(cmd = bin, code, stderr, "container command failed");
+        tracing::error!(cmd = bin, code, stderr, "container command failed");
         Err(ContainerError::CommandFailed { code, stderr })
     }
 }
