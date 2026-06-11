@@ -259,42 +259,104 @@
   confirm the wizard appears
   walk through setup to the runtime status screen
 
-### Task 10: Finish Main Dispatch Cleanup
+### Task 10A: Add Launch-Mode Flags And Dispatch Policy
 
 **Files:**
 - Modify: `apps/gateway/src/main.rs`
-- Modify: `apps/gateway/src/tui/mod.rs`
-- Modify: `apps/gateway/src/server.rs`
-- Modify: `crates/platform/src/runtime/bootstrap.rs`
 
-- [ ] Replace the current first-run stub in `apps/gateway/src/main.rs` with the new TUI entry point.
-  Behavior should be:
-  if `--env-file` is provided, treat it as an advanced/manual path and do not auto-create it
-  if no `--env-file` is provided and `~/.brain3/.env` is missing, launch the first-run TUI
-  otherwise, run the configured runtime/bootstrap path through the shared gateway-server helper
-  keep `--setup` mapped to the existing named-tunnel flow
+- [ ] Add explicit launch-mode flags:
+  `--tui`
+  `--cli`
+  Default to `--tui` behavior when neither flag is passed.
 
-- [ ] Keep `main.rs` as a composition root.
-  After this task it should:
+- [ ] Keep `--setup` mapped to the existing named-tunnel provisioning flow.
+  It should stay separate from ordinary startup and should conflict with `--tui` / `--cli` so the dispatch matrix stays simple.
+
+- [ ] Treat `--env-file` as an advanced/manual path in both modes.
+  If `--env-file` is provided, do not auto-create it and do not silently fall back to the first-run wizard.
+  A missing custom env file should fail explicitly.
+
+- [ ] Keep `apps/gateway/src/main.rs` as a composition root.
+  After this chunk it should only:
   initialize logging
   parse args
   resolve the env path
-  detect first-run vs manual env-file usage
-  dispatch into either:
-  first-run TUI
-  configured runtime bootstrap
+  choose launch mode
+  dispatch into:
+  default/runtime TUI
+  explicit CLI mode
   existing named-tunnel `--setup` flow
 
-- [ ] Extend `RuntimeBootstrap` just enough to keep server-URL selection logic out of the TUI.
-  Right now the bootstrap result exposes `public_url`, but the connection card needs one display-ready `server_url`.
-  Update `crates/platform/src/runtime/bootstrap.rs` so the runtime path can provide a single URL choice for the card:
-  public tunnel URL when present
-  otherwise a local fallback derived from the gateway host/port
-  This keeps the TUI from re-implementing connection URL policy.
+### Task 10B: Broaden The TUI Entry Point Beyond First Run
 
-- [ ] Add a non-TTY fallback for first-run mode.
-  If the default env file is missing and stdout/stderr are not interactive, print a clear setup-required message instead of trying to enter ratatui.
-  Use a simple terminal-capability check in `main.rs` and preserve the current explicit error output for headless runs.
+**Files:**
+- Modify: `apps/gateway/src/tui/mod.rs`
+- Modify: `apps/gateway/src/tui/app.rs`
+- Modify: `apps/gateway/src/tui/state.rs`
+- Modify: `apps/gateway/src/tui/screens.rs`
+- Modify: `apps/gateway/src/server.rs`
+
+- [ ] Rename or widen `run_first_run_tui(...)` into a general gateway TUI entry point.
+  The TUI should be able to start in one of two modes:
+  first-run wizard mode when the default config is missing
+  configured-runtime mode when setup already exists
+
+- [ ] In default `--tui` mode with no default `.env`, start at the welcome screen and keep the Task 9 wizard flow as-is.
+
+- [ ] In default `--tui` mode with an existing config, load the config, bootstrap the runtime, start the shared gateway server, and enter directly on the runtime-status screen.
+  Do not force already-configured users back through the setup wizard.
+
+- [ ] Keep the connection-card screen tied to the “wizard just completed” path.
+  Ordinary configured launches can skip straight to runtime status so the default interactive mode stays lightweight.
+
+- [ ] Update the TUI copy/chrome so it no longer reads as first-run-only.
+  The same app shell now serves both initial setup and everyday runtime status.
+
+### Task 10C: Gate `--cli` Behind Completed Setup
+
+**Files:**
+- Modify: `apps/gateway/src/main.rs`
+- Modify: `apps/gateway/src/logging.rs`
+
+- [ ] Keep the current lightweight stdout/stderr startup path behind explicit `--cli`.
+  This mode should behave like the current gateway launch once it is allowed to run:
+  run in the foreground
+  keep startup/server logs visible in the terminal
+  exit on `Ctrl-C` through the existing shutdown path
+
+- [ ] Add a CLI-ready preflight before entering that path.
+  Refuse `--cli` when:
+  the env/config file is missing
+  the dependency doctor still reports installable or manual-install requirements for the needed runtime pieces
+  the installation is otherwise not ready for ordinary startup
+
+- [ ] Reuse the existing doctor path rather than inventing parallel shell checks.
+  Use the same dependency status collection that powers the setup wizard so “interactive setup needed” is decided consistently.
+
+- [ ] Preserve operator-visible logging in `--cli` mode.
+  If the process still writes to the temp log file for postmortem/debugging, mirror tracing output to the terminal too.
+  Do not make `--cli` a silent file-only mode.
+
+- [ ] On refusal, print a clear message telling the operator that `--cli` only works after interactive setup is complete and to rerun without `--cli`.
+  Keep this message short and operational.
+
+### Task 10D: Keep Shared Startup Policy Out Of The TUI And Verify
+
+**Files:**
+- Modify: `apps/gateway/src/main.rs`
+- Modify: `apps/gateway/src/server.rs`
+- Modify: `crates/platform/src/runtime/bootstrap.rs`
+
+- [ ] Keep server-URL selection and runtime/server handoff glue out of the TUI screen layer.
+  Use one shared policy for the display-ready server URL:
+  public tunnel URL when present
+  otherwise the bound local gateway URL
+
+- [ ] If `RuntimeBootstrap` needs a small addition to support that shared policy, keep it narrow and reusable.
+  Do not make the TUI re-derive connection URL policy from raw config.
+
+- [ ] Add a non-interactive fallback for the default `--tui` path.
+  If Brain3 would launch the TUI by default but stdout/stderr are not interactive, print clear setup/runtime guidance instead of trying to enter ratatui.
 
 - [ ] Re-run the narrow verification set after the dispatch refactor:
   `cargo fmt --all --check`
@@ -302,8 +364,17 @@
   `cargo test -p brain3-platform --test setup_bootstrap`
   `cargo build -p brain3`
 
+- [ ] Do one manual smoke pass for each launch mode:
+  empty `BRAIN3_HOME`, run without flags, confirm the wizard appears
+  empty `BRAIN3_HOME`, run with `--cli`, confirm it refuses and tells you to rerun without `--cli`
+  configured install, run with `--cli`, confirm the current lightweight foreground startup still works, logs remain visible, and `Ctrl-C` stops it cleanly
+  configured install, run without flags, confirm the TUI runtime screen appears and Brain3 starts
+
 ---
 
 **Recommended execution order**
 1. Task 9 first, because the shared setup API, log-file handoff, and runtime bootstrap now exist and the first-run TUI can build directly on them.
-2. Task 10 last, as the dispatch/integration pass that swaps out the current first-run stub and adds the non-TTY fallback.
+2. Task 10A next, to lock in the `--tui` / `--cli` dispatch contract in `main.rs`.
+3. Task 10B after that, to widen the new TUI from first-run-only into the default interactive shell.
+4. Task 10C next, to keep the old lightweight path available only for fully prepared installs.
+5. Task 10D last, as the shared startup-policy cleanup and verification pass.
