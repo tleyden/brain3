@@ -80,66 +80,74 @@ curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.1/install.sh | sh
 
 This installs `brain3` from the `v0.1.1` release.
 
-### 2. Create a working directory and download the config template
-
-```bash
-mkdir -p ~/brain3
-cd ~/brain3
-curl -sSfL https://raw.githubusercontent.com/tleyden/brain3/v0.1.1/.env.template -o .env
-```
-
-The default `.env.template` already points `BRAIN3_CONTAINER_IMAGE` at the published Brain3 MCP image.
-
-### 3. Configure
-
-Generate the two secret values and set your login credentials:
-
-```bash
-# Generate secrets (run each command, paste the output into .env)
-openssl rand -hex 32   # → paste as OAUTH2_GATEWAY_CLIENT_SECRET
-openssl rand -hex 32   # → paste as OAUTH2_GATEWAY_ACCESS_TOKEN
-```
-
-Edit `.env` and fill in:
-
-```
-OAUTH2_GATEWAY_CLIENT_SECRET=<paste first secret>
-OAUTH2_GATEWAY_ACCESS_TOKEN=<paste second secret>
-USERNAME=your_username
-PASSWORD=your_password
-BRAIN3_CONTAINER_RUNTIME=macos-container
-BRAIN3_VAULT_PATH=/absolute/path/to/your/vault
-```
-
-The username and password are the credentials you will enter when your AI app prompts you to sign in.
-
-Replace `/absolute/path/to/your/vault` with the absolute path to your Obsidian vault or markdown folder. Use `docker` instead of `macos-container` for `BRAIN3_CONTAINER_RUNTIME` if you prefer Docker.
-
-By default, `.env.template` enables a temporary Cloudflare Tunnel and uses the published Brain3 MCP image. If you want to use a named tunnel or direct public origin instead, see [Advanced Configuration](#advanced-configuration).
-
-### 4. Start Brain3
+### 2. Start Brain3
 
 ```bash
 brain3
 ```
 
-Brain3 starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. If you are using the default quick tunnel, Brain3 will also log the public URL you should use in your AI app.
+On first run, Brain3 launches an interactive setup wizard that walks you through vault selection, credential creation, and dependency checks. It generates secrets automatically and writes the config to `~/.brain3/.env`. Once setup completes, Brain3 starts the MCP container and Cloudflare Tunnel and displays the public URL and connection details you will need in step 3.
 
-### 5. Connect your AI app
+On subsequent runs, Brain3 goes straight to the runtime status screen.
 
-In your preferred AI app (ChatGPT, Claude, Jan AI, etc. on desktop/web/mobile), add a new MCP server connection with:
+### 3. Connect your AI app
 
-| Field | Value |
-|---|---|
-| Server URL | The public URL printed by Brain3 on startup. If you configured a named tunnel or direct public origin, use that hostname instead. |
-| Client ID | `oauth2-gateway-client` (or whatever you set in `.env`) |
-| Client Secret | The value of `OAUTH2_GATEWAY_CLIENT_SECRET` from your `.env` |
+In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
-When the AI app redirects you to sign in, enter the `USERNAME` and `PASSWORD` you configured in step 3.
+Brain3 displays all the connection information you need:
 
-Once connected, you can ask your AI to read, search, organize, and edit your notes.
+- Server URL
+- Client ID
+- Client Secret
+- Username
+- Password
 
-### 6. Try it from your AI app
+Follow the instructions below for your AI client.
+
+<details>
+<summary><strong>ChatGPT</strong></summary>
+
+1. Open **Settings → Connectors → Create Connector**.
+2. Select **Custom MCP Server**.
+3. Copy the **Server URL**, **Client ID**, and **Client Secret** from Brain3's MCP Config Settings screen.
+4. Complete the OAuth authorization flow when prompted.
+5. When shown a login screen, enter the **Username** and **Password** displayed in Brain3's MCP Config Settings screen.
+
+Once authorization succeeds, Brain3 will be available as a connector in ChatGPT.
+
+</details>
+
+<details>
+<summary><strong>Claude</strong></summary>
+
+1. Open **Settings → Connectors → Add Custom Connector**.
+2. Enter the **Server URL** shown in Brain3.
+3. If prompted, enter the **Client ID** and **Client Secret** from the MCP Config Settings screen.
+4. Complete the OAuth authorization flow.
+5. When shown a login screen, enter the **Username** and **Password** displayed in Brain3's MCP Config Settings screen.
+
+Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
+
+</details>
+
+<details>
+<summary><strong>Other MCP-Compatible AI Apps</strong></summary>
+
+Most MCP-compatible AI applications require the same information displayed in Brain3's MCP Config Settings screen:
+
+- Server URL
+- Client ID
+- Client Secret
+
+After connecting, complete the OAuth sign-in flow using the **Username** and **Password** shown on that screen.
+
+Refer to your AI application's documentation for client-specific setup instructions.
+
+</details>
+
+Once connected, you can ask your AI to search, organize, summarize, and edit your notes directly through Brain3.
+
+### 4. Try it from your AI app
 
 Example prompt:
 `List all the files in my Brain3 vault.`
@@ -169,7 +177,7 @@ The binary is at `./target/release/brain3`.
 ./target/release/brain3
 ```
 
-Brain3 starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
+Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) for the full flow.
 
 ## Privacy & Security Details
 
