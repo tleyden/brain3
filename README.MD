@@ -3,7 +3,7 @@
 
 ## Why This Exists
 
-As a heavy Obsidian user, I found myself wanting to interact w/ my second brain via Claude and ChatGPT, specifically from the mobile and desktop apps via remote MCP servers.  I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  
+I want to be able to interact w/ my Obsidan second brain via Claude and ChatGPT, specifically from the mobile and desktop apps via remote MCP servers.  I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  
 
 I then found [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) on a Reddit post, and started to use it.  I really like the fact that it is based on the MCP and OAuth2 open standards for maximum portability to any AI Assistant (including local open weights models), however, I wasn't satisfied w/ the overall security posture.  I even encountered some specific (now-fixed) security vulnerabilities like [obsidian-web-mcp#29](https://github.com/jimprosser/obsidian-web-mcp/issues/29).
 
@@ -14,6 +14,7 @@ I decided to build Brain3 as a container-based solution with a heavy emphasis on
 - Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
 - Obsidian-compatible, but Obsidian not required
 - TUI app for setup
+- Not AI Slop - while I'm using coding agents, I'm committed to creating a high-quality product, including a healthy amount of dogfooding.
 
 ## Privacy and Security
 
