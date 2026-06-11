@@ -42,11 +42,14 @@ In theory, any AI provider that supports the MCP protocol should be compatible w
 
 ## Privacy & Security
 
-Brain3 keeps your data on the local machine where it runs; your vault is never uploaded to any Brain3-managed cloud service. The AI assistant sees only the parts of your vault exposed through your prompts and tool calls, leaving you in control of what is shared. When Cloudflare Tunnel is enabled, traffic is encrypted in transit through Cloudflare's infrastructure. You retain full control at all times and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose. These privacy guarantees rest on the security controls below.
+Brain3 keeps your data on the local machine where it runs; your vault is never uploaded to any Brain3-managed cloud service. The AI assistant (Claude, ChatGPT, etc) sees only the parts of your vault exposed through your prompts and tool calls, leaving you in control of what is shared. You retain full control at all times and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose.
 
 ### Architecture
 
 - Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities.
+- If you use Cloudflare Tunnel (default and recommended), `cloudflared` creates outbound-only connections to Cloudflare's network, so Brain3 does not need a publicly routable IP.
+- Cloudflare documents that Gateway can decrypt, inspect, and re-encrypt HTTPS traffic if you explicitly turn TLS decryption on in your Cloudflare environment.
+- ⚠ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
 - macOS or Docker container isolation. By default, the MCP server runs in a container with your vault mounted and a read-only upstream secret directory. No other host directories are mounted unless you enable dev mode.
 
 ### Authentication & Authorization
