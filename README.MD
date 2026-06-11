@@ -179,7 +179,14 @@ cargo build --release
 ```
 
 The binary is at `./target/release/brain3`.
-From there, follow the same quickstart flow above, but start the gateway with `./target/release/brain3` instead of `brain3`.
+
+### Start the gateway
+
+```bash
+./target/release/brain3
+```
+
+The gateway starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
 
 ## Stopping
 
