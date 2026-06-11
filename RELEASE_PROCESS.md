@@ -93,6 +93,62 @@ tar -xzf /tmp/brain3-test/brain3-gateway-x86_64-unknown-linux-gnu.tar.gz -C /tmp
 /tmp/brain3-test/brain3-gateway --help
 ```
 
+## Manual S3 Upload (for testing without tagging)
+
+Use this when you want to push a binary and `install.sh` to S3 without creating a GitHub release or tag.
+
+### Prerequisites
+
+- AWS CLI configured (`aws configure`) with credentials that have `s3:PutObject` on the bucket
+- `BRAIN3_S3_BUCKET` env var set, or pass the bucket name as an argument
+
+### Steps
+
+**1. Build the binary for your local platform:**
+
+```bash
+cargo build --release
+```
+
+**2. Package it into a tarball** (the script looks for files named `brain3-gateway-<target>.tar.gz`):
+
+```bash
+# macOS ARM
+tar -czf brain3-gateway-aarch64-apple-darwin.tar.gz \
+  -C target/release brain3-gateway
+
+# macOS Intel
+tar -czf brain3-gateway-x86_64-apple-darwin.tar.gz \
+  -C target/release brain3-gateway
+
+# Linux x86_64
+tar -czf brain3-gateway-x86_64-unknown-linux-gnu.tar.gz \
+  -C target/release brain3-gateway
+```
+
+**3. Upload to S3:**
+
+```bash
+# Uploads to releases/dev/ and releases/latest/ by default
+bash scripts/upload-to-s3.sh <bucket-name>
+
+# Or specify a custom version label
+bash scripts/upload-to-s3.sh <bucket-name> v0.2.0-rc1
+
+# Or point at a directory containing pre-built tarballs
+bash scripts/upload-to-s3.sh <bucket-name> dev /path/to/tarballs
+```
+
+The script uploads each tarball it finds to both `releases/<version>/` and `releases/latest/`,
+and also uploads `scripts/install.sh` to `releases/latest/install.sh`.
+
+**4. Test the install script against your uploaded artifacts:**
+
+```bash
+S3_BASE_URL="https://<bucket>.s3.amazonaws.com/releases/latest" \
+  bash scripts/install.sh
+```
+
 ## Versioning
 
 Follow [Semantic Versioning](https://semver.org):

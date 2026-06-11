@@ -28,11 +28,7 @@ if [ -z "$BUCKET" ]; then
   exit 1
 fi
 
-VERSION="${2:-$(git describe --tags --exact-match 2>/dev/null || echo "")}"
-if [ -z "$VERSION" ]; then
-  echo "Error: could not determine version. Pass it as the second argument or run from a tagged commit." >&2
-  exit 1
-fi
+VERSION="${2:-$(git describe --tags --exact-match 2>/dev/null || echo "dev")}"
 
 TARBALLS_DIR="${3:-.}"
 
@@ -48,8 +44,7 @@ upload_file() {
   local s3_key="$2"
   echo "  s3://$BUCKET/$s3_key"
   aws s3 cp "$src" "s3://$BUCKET/$s3_key" \
-    --region "$AWS_REGION" \
-    --acl public-read
+    --region "$AWS_REGION"
 }
 
 echo "Uploading $BINARY $VERSION to s3://$BUCKET"
