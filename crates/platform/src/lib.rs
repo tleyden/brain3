@@ -3,4 +3,5 @@ pub mod config;
 pub mod container;
 pub mod http;
 pub mod mcp_proxy;
+pub mod setup;
 pub mod tunnel;

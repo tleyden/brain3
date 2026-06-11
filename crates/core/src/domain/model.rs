@@ -33,7 +33,7 @@ pub struct HostnameValidationConfig {
     pub enforce: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContainerRuntime {
     Docker,
     MacOSContainer,

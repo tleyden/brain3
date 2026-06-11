@@ -1,6 +1,6 @@
 mod setup_tui;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
@@ -15,6 +15,7 @@ use brain3_platform::container::startup::ensure_mcp_container;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
+use brain3_platform::setup::app_home::Brain3AppHome;
 
 #[derive(Parser)]
 #[command(name = "brain3", about = "OAuth2 gateway for MCP servers")]
@@ -39,6 +40,35 @@ async fn shutdown_signal() {
     tracing::info!("Received shutdown signal, draining connections...");
 }
 
+fn resolve_config_env_file(args: &Args) -> Result<(Brain3AppHome, PathBuf, bool)> {
+    let app_home =
+        Brain3AppHome::resolve_from_env().context("failed to resolve Brain3 app home")?;
+    let using_default_env_file = args.env_file.is_none();
+    let env_file = args
+        .env_file
+        .clone()
+        .unwrap_or_else(|| app_home.env_file.clone());
+    Ok((app_home, env_file, using_default_env_file))
+}
+
+fn exit_if_first_run(app_home: &Brain3AppHome, env_file: &Path) -> ! {
+    eprintln!(
+        "\nBrain3 is not configured yet.\n\
+         \n  App home: {}\n\
+         \n  Expected config: {}\n\
+         \nThe first-run setup wizard is not implemented in this slice yet.\n\
+         Create the config file at that location before starting Brain3 again.\n",
+        app_home.root_dir.display(),
+        env_file.display()
+    );
+    tracing::warn!(
+        app_home = %app_home.root_dir.display(),
+        env_file = %env_file.display(),
+        "first-run setup required"
+    );
+    std::process::exit(1);
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -50,7 +80,12 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
 
-    let config_adapter = EnvFileConfigAdapter::new(args.env_file);
+    let (app_home, env_file, using_default_env_file) = resolve_config_env_file(&args)?;
+    if using_default_env_file && !env_file.exists() {
+        exit_if_first_run(&app_home, &env_file);
+    }
+
+    let config_adapter = EnvFileConfigAdapter::new(Some(env_file));
     let config = Arc::new(
         config_adapter
             .load()

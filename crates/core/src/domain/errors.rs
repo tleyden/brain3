@@ -100,3 +100,21 @@ pub enum ConfigError {
     #[error("config conflict: {0}")]
     Conflict(String),
 }
+
+#[derive(Debug, Error)]
+pub enum SetupError {
+    #[error("invalid setup: {0}")]
+    Invalid(String),
+    #[error("setup I/O error: {0}")]
+    Io(String),
+    #[error("setup command could not be spawned: {0}")]
+    SpawnFailed(String),
+    #[error("setup command failed: {command} (exit {code:?}): {stderr}")]
+    CommandFailed {
+        command: String,
+        code: Option<i32>,
+        stderr: String,
+    },
+    #[error("unsupported setup operation: {0}")]
+    Unsupported(String),
+}
