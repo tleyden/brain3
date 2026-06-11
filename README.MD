@@ -163,13 +163,12 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 
 - Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities.
 - If you use Cloudflare Tunnel (default and recommended), `cloudflared` creates outbound-only connections to Cloudflare's network, so Brain3 does not need a publicly routable IP.
-- Cloudflare documents that Gateway can decrypt, inspect, and re-encrypt HTTPS traffic if you explicitly turn TLS decryption on in your Cloudflare environment.
 - ⚠ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
 - macOS or Docker container isolation. By default, the MCP server runs in a container with your vault mounted and a read-only upstream secret directory. No other host directories are mounted unless you enable dev mode.
 
 ### Authentication & Authorization
 
-- Preregistered clients only. Solely the client configured via `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic client registration is disabled.
+- Preregistered clients only. Solely the client configured via `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic Client Registration (DCR) and Client ID Metadata Document (CIMD) are disabled.
 - Client secret required at token exchange (`client_secret_post`).
 - PKCE (`S256`) enforced by default to prevent authorization-code interception.
 - Auth codes are single-use and expire after 5 minutes.
