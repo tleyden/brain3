@@ -8,7 +8,7 @@ set -eu
 #   S3_BASE_URL   override the base URL (e.g. for a custom bucket or CloudFront domain)
 
 BINARY="brain3-gateway"
-S3_BASE_URL="${S3_BASE_URL:-https://YOUR_BUCKET_NAME.s3.amazonaws.com/releases/latest}"
+S3_BASE_URL="${S3_BASE_URL:-https://__BUCKET__.s3.amazonaws.com/releases/latest}"
 
 # Detect OS
 OS="$(uname -s)"

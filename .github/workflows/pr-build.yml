@@ -67,6 +67,8 @@ jobs:
     if: github.event.action != 'closed'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -87,6 +89,10 @@ jobs:
             filename="$(basename "$tarball")"
             aws s3 cp "$tarball" "s3://$BUCKET/pr/$PR/$filename"
           done
+          STAMPED="$(mktemp)"
+          sed "s|__BUCKET__|$BUCKET|g; s|releases/latest|pr/$PR|g" scripts/install.sh > "$STAMPED"
+          aws s3 cp "$STAMPED" "s3://$BUCKET/pr/$PR/install.sh"
+          rm -f "$STAMPED"
 
   cleanup-s3:
     name: Remove PR build from S3

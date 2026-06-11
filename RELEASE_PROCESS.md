@@ -6,6 +6,23 @@
 - You are on the `main` branch with a clean working tree
 - All milestone issues for the release are closed
 
+## One-time GitHub secrets setup
+
+These secrets must be set once per repo. The release and PR workflows both use them to authenticate with AWS.
+
+```bash
+gh secret set AWS_ACCESS_KEY_ID     --repo tleyden/brain3 --body "AKIA..."
+gh secret set AWS_SECRET_ACCESS_KEY --repo tleyden/brain3 --body "..."
+gh secret set BRAIN3_S3_BUCKET      --repo tleyden/brain3 --body "your-bucket-name"
+gh secret set AWS_REGION            --repo tleyden/brain3 --body "us-east-1"
+```
+
+Verify they are set:
+
+```bash
+gh secret list --repo tleyden/brain3
+```
+
 ## 1. Prepare release notes from a GitHub milestone
 
 Create a milestone in advance (e.g. `v0.2.0`) and assign issues and PRs to it as you work.

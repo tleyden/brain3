@@ -69,8 +69,11 @@ done
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/install.sh" ]; then
   echo "[install.sh]"
-  upload_file "$SCRIPT_DIR/install.sh" "releases/latest/install.sh"
-  upload_file "$SCRIPT_DIR/install.sh" "releases/$VERSION/install.sh"
+  STAMPED="$(mktemp)"
+  sed "s|__BUCKET__|$BUCKET|g" "$SCRIPT_DIR/install.sh" > "$STAMPED"
+  aws s3 cp "$STAMPED" "s3://$BUCKET/releases/latest/install.sh" --region "$AWS_REGION"
+  aws s3 cp "$STAMPED" "s3://$BUCKET/releases/$VERSION/install.sh" --region "$AWS_REGION"
+  rm -f "$STAMPED"
 fi
 
 echo ""
