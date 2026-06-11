@@ -72,7 +72,7 @@ impl FirstRunTuiState {
             client_id: preparation.draft.client_id.clone(),
             client_secret: preparation.draft.client_secret.clone(),
             username: preparation.draft.username.clone(),
-            password: preparation.draft.password.clone(),
+            password: std::env::var("PASSWORD").unwrap_or_default(),
             log_file: log_file.clone(),
         };
         let mut state = Self::new(host, log_file, preparation);
