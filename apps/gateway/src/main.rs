@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 
 use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
 use brain3_core::domain::setup::RuntimeLaunchPlan;
@@ -24,6 +24,27 @@ use brain3_platform::setup::PlatformSetupSystem;
 use crate::tui::GatewayTuiLaunch;
 
 const DEFAULT_HOST: &str = "127.0.0.1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum LogLevel {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+impl LogLevel {
+    fn as_str(self) -> &'static str {
+        match self {
+            LogLevel::Trace => "trace",
+            LogLevel::Debug => "debug",
+            LogLevel::Info => "info",
+            LogLevel::Warn => "warn",
+            LogLevel::Error => "error",
+        }
+    }
+}
 
 #[derive(Parser)]
 #[command(name = "brain3", about = "OAuth2 gateway for MCP servers")]
@@ -46,6 +67,9 @@ struct Args {
         help = "Run the interactive setup wizard for Cloudflare named tunnel provisioning"
     )]
     cf_setup: bool,
+
+    #[arg(long, value_enum, default_value = "info")]
+    log_level: LogLevel,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -396,9 +420,8 @@ async fn run_cli_mode(
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let logging = logging::init_logging().await?;
-
     let args = Args::parse();
+    let logging = logging::init_logging(args.log_level.as_str()).await?;
     let resolved_env = resolve_config_env_file(&args)?;
     let interactive_terminal = is_interactive_terminal();
     let mode = choose_launch_mode(&args);

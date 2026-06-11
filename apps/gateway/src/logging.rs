@@ -67,7 +67,7 @@ impl Write for GatewayWriter {
     }
 }
 
-pub async fn init_logging() -> Result<GatewayLogging> {
+pub async fn init_logging(default_level: &str) -> Result<GatewayLogging> {
     let setup_system = PlatformSetupSystem::new();
     let log_file = setup_system
         .create_temp_log_file()
@@ -84,7 +84,8 @@ pub async fn init_logging() -> Result<GatewayLogging> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new(default_level)),
         )
         .with_target(true)
         .with_writer(GatewayMakeWriter {
