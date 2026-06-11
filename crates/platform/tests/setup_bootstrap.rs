@@ -1,9 +1,14 @@
 use std::path::PathBuf;
 
+use brain3_core::domain::errors::SetupError;
 use brain3_core::domain::model::ContainerRuntime;
-use brain3_core::domain::setup::{SetupDraftConfig, SetupPaths, TunnelModeDraft};
+use brain3_core::domain::setup::{
+    SetupDraftConfig, SetupOperatingSystem, SetupPaths, TunnelModeDraft,
+};
+use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::setup::app_home::Brain3AppHome;
 use brain3_platform::setup::env_writer::render_env_file;
+use brain3_platform::setup::PlatformSetupSystem;
 
 #[test]
 fn app_home_uses_brain3_home_override() {
@@ -53,4 +58,22 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("BRAIN3_VAULT_PATH=\"/Users/test/My Vault\""));
     assert!(rendered
         .contains("BRAIN3_CONTAINER_IMAGE=\"ghcr.io/tleyden/brain3-mcp-vault-tools:latest\""));
+}
+
+#[tokio::test]
+async fn run_install_action_returns_structured_error_when_platform_is_unsupported() {
+    let system = PlatformSetupSystem::with_environment(SetupOperatingSystem::Linux, None);
+
+    let error = system
+        .run_install_action(brain3_core::domain::setup::InstallAction::InstallCloudflared)
+        .await
+        .expect_err("expected unsupported install action");
+
+    match error {
+        SetupError::Unsupported(message) => {
+            assert!(message.contains("linux"));
+            assert!(message.contains("cloudflared"));
+        }
+        other => panic!("expected unsupported setup error, got {other:?}"),
+    }
 }

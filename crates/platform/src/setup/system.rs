@@ -5,29 +5,73 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use brain3_core::domain::errors::SetupError;
 use brain3_core::domain::setup::{
-    DependencyStatus, InstallAction, PackageManager, SetupDraftConfig, SetupOperatingSystem,
-    SetupPaths,
+    DependencyAvailability, DependencyStatus, InstallAction, PackageManager, SetupDraftConfig,
+    SetupOperatingSystem, SetupPaths,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
 use rand::Rng;
 use tokio::fs;
+use tokio::process::Command;
 
 use super::app_home::Brain3AppHome;
 use super::env_writer::render_env_file;
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct PlatformSetupSystem;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlatformEnvironment {
+    pub operating_system: SetupOperatingSystem,
+    pub package_manager: Option<PackageManager>,
+}
+
+impl PlatformEnvironment {
+    fn detect() -> Self {
+        let operating_system = detect_operating_system();
+        let package_manager = match operating_system {
+            SetupOperatingSystem::MacOS if binary_on_path("brew") => Some(PackageManager::Homebrew),
+            SetupOperatingSystem::Linux if binary_on_path("apt-get") => Some(PackageManager::Apt),
+            _ => None,
+        };
+        Self {
+            operating_system,
+            package_manager,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PlatformSetupSystem {
+    environment: PlatformEnvironment,
+}
 
 impl PlatformSetupSystem {
     pub fn new() -> Self {
-        Self
+        Self {
+            environment: PlatformEnvironment::detect(),
+        }
+    }
+
+    pub fn with_environment(
+        operating_system: SetupOperatingSystem,
+        package_manager: Option<PackageManager>,
+    ) -> Self {
+        Self {
+            environment: PlatformEnvironment {
+                operating_system,
+                package_manager,
+            },
+        }
+    }
+}
+
+impl Default for PlatformSetupSystem {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
 #[async_trait]
 impl SetupSystemPort for PlatformSetupSystem {
     fn operating_system(&self) -> SetupOperatingSystem {
-        operating_system()
+        self.environment.operating_system
     }
 
     fn resolve_paths(&self) -> Result<SetupPaths, SetupError> {
@@ -35,28 +79,54 @@ impl SetupSystemPort for PlatformSetupSystem {
     }
 
     async fn collect_dependency_status(&self) -> Result<DependencyStatus, SetupError> {
-        let operating_system = operating_system();
+        let operating_system = self.environment.operating_system;
         let homebrew_installed = match operating_system {
             SetupOperatingSystem::MacOS => Some(binary_on_path("brew")),
             SetupOperatingSystem::Linux => None,
         };
-        let package_manager = match operating_system {
-            SetupOperatingSystem::MacOS if homebrew_installed == Some(true) => {
-                Some(PackageManager::Homebrew)
-            }
-            SetupOperatingSystem::Linux if binary_on_path("apt-get") => Some(PackageManager::Apt),
-            _ => None,
-        };
+        let package_manager = self.environment.package_manager;
+        let cloudflared_installed = binary_on_path("cloudflared");
+        let docker_installed = binary_on_path("docker");
         let macos_container_installed = match operating_system {
             SetupOperatingSystem::MacOS => Some(binary_on_path("container")),
             SetupOperatingSystem::Linux => None,
+        };
+        let preferred_container_runtime = match operating_system {
+            SetupOperatingSystem::MacOS => match macos_container_installed {
+                Some(true) => DependencyAvailability::Installed,
+                Some(false) if package_manager == Some(PackageManager::Homebrew) => {
+                    DependencyAvailability::InstallAvailable(InstallAction::InstallMacOSContainer)
+                }
+                _ => DependencyAvailability::ManualInstallRequired,
+            },
+            SetupOperatingSystem::Linux => {
+                if docker_installed {
+                    DependencyAvailability::Installed
+                } else if package_manager == Some(PackageManager::Apt) {
+                    DependencyAvailability::InstallAvailable(InstallAction::InstallDocker)
+                } else {
+                    DependencyAvailability::ManualInstallRequired
+                }
+            }
+        };
+        let cloudflared = if cloudflared_installed {
+            DependencyAvailability::Installed
+        } else if matches!(
+            (operating_system, package_manager),
+            (SetupOperatingSystem::MacOS, Some(PackageManager::Homebrew))
+                | (SetupOperatingSystem::Linux, Some(PackageManager::Apt))
+        ) {
+            DependencyAvailability::InstallAvailable(InstallAction::InstallCloudflared)
+        } else {
+            DependencyAvailability::ManualInstallRequired
         };
 
         Ok(DependencyStatus {
             operating_system,
             package_manager,
-            cloudflared_installed: binary_on_path("cloudflared"),
-            docker_installed: binary_on_path("docker"),
+            cloudflared,
+            preferred_container_runtime,
+            docker_installed,
             macos_container_installed,
             homebrew_installed,
         })
@@ -134,6 +204,14 @@ impl SetupSystemPort for PlatformSetupSystem {
         Ok(())
     }
 
+    async fn path_exists(&self, path: &Path) -> Result<bool, SetupError> {
+        match fs::metadata(path).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(SetupError::Io(format!("stat {}: {error}", path.display()))),
+        }
+    }
+
     async fn create_temp_log_file(&self) -> Result<PathBuf, SetupError> {
         let temp_dir = env::temp_dir();
         let timestamp = SystemTime::now()
@@ -171,13 +249,60 @@ impl SetupSystemPort for PlatformSetupSystem {
     }
 
     async fn run_install_action(&self, action: InstallAction) -> Result<(), SetupError> {
-        Err(SetupError::Unsupported(format!(
-            "install action {action:?} is not implemented yet"
-        )))
+        match (self.environment.operating_system, self.environment.package_manager, action) {
+            (SetupOperatingSystem::MacOS, Some(PackageManager::Homebrew), InstallAction::InstallCloudflared) => {
+                run_command("brew", &["install", "cloudflared"]).await
+            }
+            (SetupOperatingSystem::MacOS, Some(PackageManager::Homebrew), InstallAction::InstallMacOSContainer) => {
+                run_command("brew", &["install", "container"]).await
+            }
+            (SetupOperatingSystem::MacOS, _, InstallAction::InstallDocker) => Err(
+                SetupError::Unsupported(
+                    "guided docker install is not supported on macos; use Docker Desktop or macos-container"
+                        .into(),
+                ),
+            ),
+            (SetupOperatingSystem::MacOS, None, InstallAction::InstallCloudflared) => Err(
+                SetupError::Unsupported(
+                    "cloudflared install on macos requires Homebrew; install brew first and restart Brain3"
+                        .into(),
+                ),
+            ),
+            (SetupOperatingSystem::MacOS, None, InstallAction::InstallMacOSContainer) => Err(
+                SetupError::Unsupported(
+                    "macos container install requires Homebrew; install brew first and restart Brain3"
+                        .into(),
+                ),
+            ),
+            (SetupOperatingSystem::Linux, Some(PackageManager::Apt), InstallAction::InstallCloudflared) => {
+                install_cloudflared_with_apt().await
+            }
+            (SetupOperatingSystem::Linux, Some(PackageManager::Apt), InstallAction::InstallDocker) => {
+                install_docker_with_apt().await
+            }
+            (SetupOperatingSystem::Linux, _, InstallAction::InstallMacOSContainer) => Err(
+                SetupError::Unsupported("macos-container is not available on linux".into()),
+            ),
+            (SetupOperatingSystem::Linux, None, InstallAction::InstallCloudflared) => Err(
+                SetupError::Unsupported(
+                    "linux cloudflared install is only guided on apt-based systems; check the README for manual install steps"
+                        .into(),
+                ),
+            ),
+            (SetupOperatingSystem::Linux, None, InstallAction::InstallDocker) => Err(
+                SetupError::Unsupported(
+                    "linux docker install is only guided on apt-based systems; check the README for manual install steps"
+                        .into(),
+                ),
+            ),
+            (_, _, action) => Err(SetupError::Unsupported(format!(
+                "install action {action:?} is not supported on this platform"
+            ))),
+        }
     }
 }
 
-fn operating_system() -> SetupOperatingSystem {
+fn detect_operating_system() -> SetupOperatingSystem {
     match env::consts::OS {
         "macos" => SetupOperatingSystem::MacOS,
         "linux" => SetupOperatingSystem::Linux,
@@ -189,6 +314,61 @@ fn operating_system() -> SetupOperatingSystem {
             SetupOperatingSystem::Linux
         }
     }
+}
+
+async fn install_cloudflared_with_apt() -> Result<(), SetupError> {
+    run_command(
+        "sudo",
+        &["mkdir", "-p", "--mode=0755", "/usr/share/keyrings"],
+    )
+    .await?;
+    run_command(
+        "sudo",
+        &[
+            "bash",
+            "-lc",
+            "set -euo pipefail; curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null",
+        ],
+    )
+    .await?;
+    run_command(
+        "sudo",
+        &[
+            "bash",
+            "-lc",
+            "printf '%s\\n' 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' > /etc/apt/sources.list.d/cloudflared.list",
+        ],
+    )
+    .await?;
+    run_command("sudo", &["apt-get", "update"]).await?;
+    run_command("sudo", &["apt-get", "install", "-y", "cloudflared"]).await
+}
+
+async fn install_docker_with_apt() -> Result<(), SetupError> {
+    run_command("sudo", &["apt-get", "update"]).await?;
+    run_command(
+        "sudo",
+        &["apt-get", "install", "-y", "ca-certificates", "docker.io"],
+    )
+    .await
+}
+
+async fn run_command(program: &str, args: &[&str]) -> Result<(), SetupError> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .await
+        .map_err(|error| SetupError::SpawnFailed(format!("{program}: {error}")))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    Err(SetupError::CommandFailed {
+        command: format!("{program} {}", args.join(" ")),
+        code: output.status.code(),
+        stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+    })
 }
 
 fn binary_on_path(name: &str) -> bool {

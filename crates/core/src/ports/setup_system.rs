@@ -27,6 +27,8 @@ pub trait SetupSystemPort: Send + Sync {
 
     async fn write_env_file(&self, path: &Path, contents: &str) -> Result<(), SetupError>;
 
+    async fn path_exists(&self, path: &Path) -> Result<bool, SetupError>;
+
     async fn create_temp_log_file(&self) -> Result<PathBuf, SetupError>;
 
     async fn run_install_action(&self, action: InstallAction) -> Result<(), SetupError>;

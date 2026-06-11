@@ -2,6 +2,15 @@ use std::path::PathBuf;
 
 use crate::domain::model::ContainerRuntime;
 
+pub const DEFAULT_GATEWAY_PORT: u16 = 8421;
+pub const DEFAULT_CLIENT_ID: &str = "oauth2-gateway-client";
+pub const DEFAULT_USERNAME: &str = "admin";
+pub const DEFAULT_CONTAINER_IMAGE: &str = "ghcr.io/tleyden/brain3-mcp-vault-tools:latest";
+pub const DEFAULT_CONTAINER_HOST_PORT: u16 = 8420;
+pub const DEFAULT_CONTAINER_MCP_PORT: u16 = 8420;
+pub const DEFAULT_GENERATED_SECRET_BYTES: usize = 32;
+pub const DEFAULT_GENERATED_PASSWORD_LENGTH: usize = 24;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupPaths {
     pub app_home: PathBuf,
@@ -55,21 +64,29 @@ pub enum PackageManager {
     Apt,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DependencyStatus {
-    pub operating_system: SetupOperatingSystem,
-    pub package_manager: Option<PackageManager>,
-    pub cloudflared_installed: bool,
-    pub docker_installed: bool,
-    pub macos_container_installed: Option<bool>,
-    pub homebrew_installed: Option<bool>,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallAction {
     InstallCloudflared,
     InstallDocker,
     InstallMacOSContainer,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyAvailability {
+    Installed,
+    InstallAvailable(InstallAction),
+    ManualInstallRequired,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DependencyStatus {
+    pub operating_system: SetupOperatingSystem,
+    pub package_manager: Option<PackageManager>,
+    pub cloudflared: DependencyAvailability,
+    pub preferred_container_runtime: DependencyAvailability,
+    pub docker_installed: bool,
+    pub macos_container_installed: Option<bool>,
+    pub homebrew_installed: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,6 +105,19 @@ pub struct SetupSummary {
     pub paths: SetupPaths,
     pub draft: SetupDraftConfig,
     pub dependencies: DependencyStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetupPreparation {
+    pub paths: SetupPaths,
+    pub draft: SetupDraftConfig,
+    pub dependencies: DependencyStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FinalizeSetupRequest {
+    pub draft: SetupDraftConfig,
+    pub generate_password: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
