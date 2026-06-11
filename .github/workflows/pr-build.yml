@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
+    name: Build ${{ matrix.display }}
     if: github.event.action != 'closed'
     runs-on: ${{ matrix.os }}
     strategy:
@@ -19,12 +19,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
+            display: Linux x86_64
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
+            display: Linux ARM64
           - target: x86_64-apple-darwin
             os: macos-latest
+            display: macOS x86_64
           - target: aarch64-apple-darwin
             os: macos-latest
+            display: macOS ARM64
 
     steps:
       - uses: actions/checkout@v4
