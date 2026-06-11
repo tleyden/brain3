@@ -17,7 +17,7 @@ use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 
 #[derive(Parser)]
-#[command(name = "brain3-gateway", about = "OAuth2 gateway for MCP servers")]
+#[command(name = "brain3", about = "OAuth2 gateway for MCP servers")]
 struct Args {
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
@@ -98,14 +98,14 @@ async fn main() -> Result<()> {
             eprintln!(
                 "\nERROR: Cloudflare tunnel not yet provisioned.\n\
                  \n  Config file not found: {}\
-                 \n\n  Run the setup wizard:\n    brain3-gateway --setup\
+                 \n\n  Run the setup wizard:\n    brain3 --setup\
                  \n\n  Or use a quick tunnel instead (no setup needed):\n    Set CF_QUICK_TUNNEL=true in .env (and remove CF_TUNNEL_NAME/CF_DOMAIN)\n",
                 config_file.display()
             );
             tracing::error!(
                 config_file = %config_file.display(),
                 tunnel_name = %tunnel_name,
-                "named tunnel config file not found — run: brain3-gateway --setup"
+                "named tunnel config file not found — run: brain3 --setup"
             );
             std::process::exit(1);
         }

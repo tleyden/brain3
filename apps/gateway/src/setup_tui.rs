@@ -494,7 +494,5 @@ async fn run_setup(state: &mut SetupState) {
         }
     }
 
-    state.log(format!(
-        "Setup complete. Start the gateway with:  brain3-gateway"
-    ));
+    state.log(format!("Setup complete. Start the gateway with:  brain3"));
 }

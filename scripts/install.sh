@@ -7,7 +7,7 @@ set -eu
 #   INSTALL_DIR   where to place the binary (default: ~/.local/bin, fallback: /usr/local/bin)
 #   S3_BASE_URL   override the base URL (e.g. for a custom bucket or CloudFront domain)
 
-BINARY="brain3-gateway"
+BINARY="brain3"
 S3_BASE_URL="${S3_BASE_URL:-https://__BUCKET__.s3.amazonaws.com/releases/latest}"
 
 # Detect OS

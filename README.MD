@@ -31,7 +31,7 @@ You can also view and update your Brain3 repository via Obsidian directly, howev
                    │ HTTP localhost:8421
                    ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  brain3-gateway  (Rust)                                      │
+│  brain3  (Rust)                                              │
 │  OAuth2 authorization server + MCP reverse proxy             │
 │  Runs on host, handles auth, proxies MCP traffic             │
 └──────────────────┬───────────────────────────────────────────┘
@@ -46,7 +46,7 @@ You can also view and update your Brain3 repository via Obsidian directly, howev
 
 Two components run on your machine:
 
-- **brain3-gateway** — A Rust binary that handles OAuth2 authentication and reverse-proxies MCP traffic to the container. Your AI app talks to this.
+- **brain3** — A Rust binary that handles OAuth2 authentication and reverse-proxies MCP traffic to the container. Your AI app talks to this.
 - **MCP server** — Runs inside a macOS Container or Docker container with access to your markdown vault. Provides the vault tools that let AI read, search, and edit your notes.
 
 ## Quickstart
@@ -68,7 +68,7 @@ cd brain3
 cargo build --release
 ```
 
-The binary is at `./target/release/brain3-gateway`.
+The binary is at `./target/release/brain3`.
 
 No local MCP container build is required. Set `BRAIN3_CONTAINER_IMAGE` in `.env` to a published image such as `ghcr.io/tleyden/brain3-mcp-vault-tools:latest`. When the gateway starts, it pulls that configured image into your selected container runtime if it is not already present.
 
@@ -112,7 +112,7 @@ Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` to the public hostname your Caddy or nginx i
 ### 3. Start the gateway
 
 ```bash
-./target/release/brain3-gateway
+./target/release/brain3
 ```
 
 The gateway starts the MCP server container automatically on startup, pulling the configured image first if it is not already cached locally. You will see log lines confirming the container is running before the HTTP server binds.
@@ -179,7 +179,7 @@ docker stop brain3-mcp-vault-tools
 
 All configuration is via environment variables, loaded from a `.env` file.
 
-### Gateway (brain3-gateway)
+### Gateway (brain3)
 
 | Variable | Default | Description |
 |---|---|---|
@@ -277,7 +277,7 @@ INFO tunnel started url=https://brain3.yourdomain.com
 
 ```
 brain3/
-├── apps/gateway/          # brain3-gateway binary (composition root)
+├── apps/gateway/          # brain3 binary (composition root)
 ├── crates/
 │   ├── core/              # Domain model, business logic, port traits
 │   └── platform/          # Adapters: Axum HTTP, reqwest proxy, config, auth store
