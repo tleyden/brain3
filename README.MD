@@ -5,23 +5,23 @@
 
 As a heavy Obsidian user, I found myself wanting to interact w/ my second brain via Claude and ChatGPT.  I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.
 
-I then found https://github.com/jimprosser/obsidian-web-mcp on a Reddit post, and started to use it.  However, I found the overall security posture to be less than ideal, including some specific (now-fixed) security vulnerabilities like https://github.com/jimprosser/obsidian-web-mcp/issues/29.
+I then found [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) on a Reddit post, and started to use it. However, I found the overall security posture to be less than ideal, including some specific (now-fixed) security vulnerabilities like [obsidian-web-mcp#29](https://github.com/jimprosser/obsidian-web-mcp/issues/29).
 
 I decided to build Brain3 as a container-based solution with a heavy emphasis on defensible and robust security. 
 
 ## Features
 
-✅ Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web.  (read, summarize, create, edit) 
-✅ Obsidian-compatible, but Obsidian not required
-✅ TUI app for setup
+- Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
+- Obsidian-compatible, but Obsidian not required
+- TUI app for setup
 
 ## Privacy and Security
 
-✅ Your data stays 100% local and private - the AI assistant only sees a part of your vault based on your prompts
-✅ Designed with security and privacy in mind, using container-based isolation and a free Cloudflare tunnel
-✅ OAuth2.1 with PKCE is used to authenticate with the AI provider
-✅ Host process written in Rust to avoid several classes of vulnerabilities 
-✅ Container process uses the battle-tested FastMCP server framework 
+- Your data stays 100% local and private - the AI assistant only sees a part of your vault based on your prompts
+- Designed with security and privacy in mind, using container-based isolation and a free Cloudflare tunnel
+- OAuth2.1 with PKCE is used to authenticate with the AI provider
+- Host process written in Rust to avoid several classes of vulnerabilities
+- Container process uses the battle-tested FastMCP server framework
 
 ## Requirements
 
@@ -304,4 +304,4 @@ cargo build --release
 
 ## License 
 
-Apache 2.0
+Apache 2.0. See [LICENSE.MD](LICENSE.MD).
