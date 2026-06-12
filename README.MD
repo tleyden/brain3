@@ -21,6 +21,8 @@ I decided to build Brain3 as a container-based solution with a heavy emphasis on
 <table><tr>
 <td><img width="280" alt="Image" src="docs/screenshots/screenshot-2.png" /></td>
 <td><img width="280" alt="Image" src="docs/screenshots/screenshot-1.png" /></td>
+</tr><tr>
+<td colspan="2" align="center">Chatting w/ Brain3 MCP and showing tool calls</td>
 </tr></table>
 
 ## Privacy and Security
