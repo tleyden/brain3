@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::Router;
@@ -21,6 +22,7 @@ use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
+use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
 use crate::{apply_runtime_overrides, RuntimeOverrides};
 
@@ -99,7 +101,7 @@ where
         .local_addr()
         .context("failed to resolve bound gateway address")?;
     let local_url = local_url_from_addr(bind_addr);
-    let router = build_gateway_router(Arc::clone(&config), upstream_secret);
+    let router = build_gateway_router(Arc::clone(&config), upstream_secret)?;
 
     tracing::info!(bind_addr = %bind_addr, local_url = %local_url, "starting OAuth2 gateway");
     tracing::info!(
@@ -125,7 +127,7 @@ pub async fn spawn_gateway_server(
         .context("failed to resolve bound gateway address")?;
     let bind_addr_display = bind_addr.to_string();
     let local_url = local_url_from_addr(bind_addr);
-    let router = build_gateway_router(config, upstream_secret);
+    let router = build_gateway_router(config, upstream_secret)?;
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
     tracing::info!(
@@ -197,10 +199,20 @@ async fn bind_listener(host: &str, port: u16) -> Result<TcpListener> {
         .with_context(|| format!("failed to bind to {addr}"))
 }
 
-fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> Router {
+fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> Result<Router> {
     let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
     let oauth_config = Arc::new(config.oauth.clone());
+    let token_store: Arc<dyn brain3_core::ports::token_store::TokenStore> = Arc::new(
+        SqliteTokenStore::from_path(&config.token_db_path).with_context(|| {
+            format!(
+                "failed to initialize token store at {}",
+                config.token_db_path.display()
+            )
+        })?,
+    );
+
+    spawn_token_cleanup_task(Arc::clone(&token_store));
 
     let authorize = Arc::new(AuthorizeUseCase::new(
         Arc::clone(&oauth_config),
@@ -209,12 +221,13 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
     let token_exchange = Arc::new(TokenExchangeUseCase::new(
         Arc::clone(&oauth_config),
         Arc::clone(&auth_code_store),
+        Arc::clone(&token_store),
     ));
     let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
         mcp_proxy,
         config.mcp_reverse_proxy.mcp_upstream_url.clone(),
         upstream_secret,
-        config.oauth.access_token.clone(),
+        token_store,
         config.hostname_validation.clone(),
     ));
 
@@ -226,7 +239,19 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
         rate_limiter: Arc::new(OAuthRateLimiter::new()),
     };
 
-    build_router(app_state)
+    Ok(build_router(app_state))
+}
+
+fn spawn_token_cleanup_task(token_store: Arc<dyn brain3_core::ports::token_store::TokenStore>) {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(300));
+        loop {
+            interval.tick().await;
+            if let Err(error) = token_store.cleanup_expired().await {
+                tracing::warn!(%error, "failed to clean up expired access tokens");
+            }
+        }
+    });
 }
 
 fn local_url_from_addr(addr: SocketAddr) -> String {

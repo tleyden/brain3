@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
+use std::time::SystemTime;
 
 use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
 use crate::domain::redact::elide_secret;
 use crate::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
+use crate::ports::token_store::{StoredTokenKind, TokenStore};
 
 use super::validate_request::{validate_bearer_token, validate_host};
 
@@ -36,7 +38,7 @@ pub struct ProxyMcpUseCase<P: McpProxyPort> {
     proxy: Arc<P>,
     upstream_url: String,
     upstream_secret: String,
-    access_token: String,
+    token_store: Arc<dyn TokenStore>,
     hostname_validation: HostnameValidationConfig,
 }
 
@@ -45,24 +47,20 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
         proxy: Arc<P>,
         upstream_url: String,
         upstream_secret: String,
-        access_token: String,
+        token_store: Arc<dyn TokenStore>,
         hostname_validation: HostnameValidationConfig,
     ) -> Self {
         Self {
             proxy,
             upstream_url: upstream_url.trim_end_matches('/').to_string(),
             upstream_secret,
-            access_token,
+            token_store,
             hostname_validation,
         }
     }
 
     pub fn hostname_validation(&self) -> &HostnameValidationConfig {
         &self.hostname_validation
-    }
-
-    pub fn access_token(&self) -> &str {
-        &self.access_token
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -82,26 +80,73 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             self.hostname_validation.enforce,
         )?;
 
-        let received_token = auth_header.split_once(' ').map(|(_, t)| t).unwrap_or("");
-        if let Err(e) = validate_bearer_token(auth_header, &self.access_token) {
-            if received_token.is_empty() {
+        let received_token = match validate_bearer_token(auth_header) {
+            Ok(token) => token,
+            Err(e) => {
                 tracing::info!(
                     method = method,
                     path = path,
                     host = request_host,
                     "MCP proxy: unauthenticated probe, returning 401 with resource metadata"
                 );
-            } else {
+                return Err(e);
+            }
+        };
+
+        let token_data = match self.token_store.get(received_token).await {
+            Ok(Some(data)) => data,
+            Ok(None) => {
                 tracing::warn!(
                     received_token_hint = %elide_secret(received_token),
-                    expected_token_hint = %elide_secret(&self.access_token),
                     method = method,
                     path = path,
                     host = request_host,
-                    "MCP proxy rejected: bearer token mismatch"
+                    "MCP proxy rejected: bearer token not found"
                 );
+                return Err(ProxyError::Unauthorized(
+                    "Missing or invalid bearer token".into(),
+                ));
             }
-            return Err(e);
+            Err(error) => {
+                tracing::error!(
+                    %error,
+                    method = method,
+                    path = path,
+                    host = request_host,
+                    "MCP proxy rejected: token store lookup failed"
+                );
+                return Err(ProxyError::Unauthorized(
+                    "Missing or invalid bearer token".into(),
+                ));
+            }
+        };
+
+        if token_data.expires_at <= SystemTime::now() {
+            tracing::warn!(
+                received_token_hint = %elide_secret(received_token),
+                client_id = %token_data.client_id,
+                method = method,
+                path = path,
+                host = request_host,
+                "MCP proxy rejected: bearer token expired"
+            );
+            return Err(ProxyError::Unauthorized(
+                "Missing or invalid bearer token".into(),
+            ));
+        }
+
+        if token_data.kind != StoredTokenKind::Access {
+            tracing::warn!(
+                received_token_hint = %elide_secret(received_token),
+                client_id = %token_data.client_id,
+                method = method,
+                path = path,
+                host = request_host,
+                "MCP proxy rejected: token kind was not access"
+            );
+            return Err(ProxyError::Unauthorized(
+                "Missing or invalid bearer token".into(),
+            ));
         }
 
         let upstream_url = self.build_upstream_url(path, query);

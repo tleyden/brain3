@@ -33,7 +33,8 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         gateway_port: 8421,
         client_id: "custom-client".into(),
         client_secret: "secret-123".into(),
-        access_token: "access-456".into(),
+        access_token_lifetime_secs: 1234,
+        refresh_token_lifetime_secs: 7776000,
         username: "admin".into(),
         password: "correct horse battery staple".into(),
         tunnel_mode: TunnelModeDraft::CloudflareQuick,
@@ -52,7 +53,8 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("# Set the local port for this gateway. Default: 8421."));
     assert!(rendered.contains("B3_OAUTH2_GATEWAY_CLIENT_ID=\"custom-client\""));
     assert!(rendered.contains("B3_OAUTH2_GATEWAY_CLIENT_SECRET=\"secret-123\""));
-    assert!(rendered.contains("B3_OAUTH2_GATEWAY_ACCESS_TOKEN=\"access-456\""));
+    assert!(rendered.contains("B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS=\"1234\""));
+    assert!(rendered.contains("B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS=\"7776000\""));
     assert!(rendered.contains("B3_USERNAME=\"admin\""));
     assert!(rendered.contains("B3_PASSWORD=\"correct horse battery staple\""));
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));

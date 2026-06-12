@@ -8,7 +8,8 @@ use subtle::ConstantTimeEq;
 use super::errors::OAuthError;
 
 pub const AUTH_CODE_LIFETIME: Duration = Duration::from_secs(300);
-pub const ACCESS_TOKEN_LIFETIME_SECS: u64 = 86400;
+pub const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
+pub const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 
 #[derive(Debug, Clone)]
 pub struct AuthCodeData {
@@ -35,7 +36,8 @@ pub struct TokenRequest {
     pub grant_type: String,
     pub client_id: String,
     pub client_secret: String,
-    pub code: String,
+    pub code: Option<String>,
+    pub refresh_token: Option<String>,
     pub redirect_uri: Option<String>,
     pub code_verifier: Option<String>,
 }
@@ -45,6 +47,7 @@ pub struct TokenResponse {
     pub access_token: String,
     pub token_type: String,
     pub expires_in: u64,
+    pub refresh_token: Option<String>,
 }
 
 pub fn validate_authorize_request(

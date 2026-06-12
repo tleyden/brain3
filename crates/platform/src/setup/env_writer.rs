@@ -42,9 +42,16 @@ fn build_overrides(
         "B3_OAUTH2_GATEWAY_CLIENT_SECRET",
         draft.client_secret.clone(),
     );
+    values.insert(
+        "B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS",
+        draft.access_token_lifetime_secs.to_string(),
+    );
+    values.insert(
+        "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS",
+        draft.refresh_token_lifetime_secs.to_string(),
+    );
     values.insert("B3_USERNAME", draft.username.clone());
     values.insert("B3_PASSWORD", draft.password.clone());
-    values.insert("B3_OAUTH2_GATEWAY_ACCESS_TOKEN", draft.access_token.clone());
     values.insert(
         "B3_CONTAINER_RUNTIME",
         container_runtime_value(draft.container_runtime).to_string(),
@@ -59,10 +66,7 @@ fn build_overrides(
         "B3_CONTAINER_MCP_PORT",
         draft.container_mcp_port.to_string(),
     );
-    values.insert(
-        "B3_OAUTH2_PKCE_REQUIRED",
-        draft.pkce_required.to_string(),
-    );
+    values.insert("B3_OAUTH2_PKCE_REQUIRED", draft.pkce_required.to_string());
     values.insert(
         "B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK",
         draft.enforce_hostname_check.to_string(),

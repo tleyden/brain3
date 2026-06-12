@@ -60,6 +60,12 @@ pub enum ProxyError {
 }
 
 #[derive(Debug, Error)]
+pub enum TokenStoreError {
+    #[error("token store unavailable: {0}")]
+    Unavailable(String),
+}
+
+#[derive(Debug, Error)]
 pub enum ContainerError {
     #[error("container runtime not found: {0}")]
     RuntimeNotFound(String),
