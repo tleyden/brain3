@@ -927,7 +927,7 @@ mod tests {
             .join("\n");
 
         assert!(text.contains("Container:  Failed"));
-        assert!(text.contains("Container image: ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.4"));
+        assert!(text.contains("Container image: ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.5"));
         assert!(text.contains("Vault path does not exist"));
         assert!(text.contains("Gateway:  Not started"));
     }
@@ -995,7 +995,7 @@ mod tests {
                 },
                 container: Some(brain3_core::domain::model::ContainerStartupConfig {
                     runtime: ContainerRuntime::Docker,
-                    image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.4".into(),
+                    image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.5".into(),
                     container_name: "brain3-mcp-vault-tools".into(),
                     vault_path: PathBuf::from("/missing/vault"),
                     upstream_secret_dir: PathBuf::from("/tmp"),

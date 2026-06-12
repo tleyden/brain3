@@ -4,7 +4,7 @@
 
 **Why this follow-up exists:** Manual testing found two gaps after the versioned-tagging work landed:
 
-1. Gateway startup logs showed `image=ghcr.io/tleyden/brain3-mcp-vault-tools:latest`, so that run did **not** attempt `:v0.1.4`.
+1. Gateway startup logs showed `image=ghcr.io/tleyden/brain3-mcp-vault-tools:latest`, so that run did **not** attempt `:v0.1.5`.
 2. The TUI rendered `Container: Started`, but container logs showed `Vault path does not exist: /Obsidian/MyVault`, so startup success is currently based on “container process spawned” rather than “container stayed up and is actually serving”.
 
 **Goal:** Ensure Brain3 uses the release-matched MCP image by default even when older configs still contain the old official `:latest` image, and accurately report container startup failures in the TUI/CLI instead of optimistic `Started` status.
@@ -313,7 +313,7 @@ Expected: PASS
 - [ ] **Step 1: Clean-install smoke test**
 
 Run a fresh-install scenario with a temporary Brain3 app home and verify:
-- generated `.env` contains `B3_CONTAINER_IMAGE="ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.4"`
+- generated `.env` contains `B3_CONTAINER_IMAGE="ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.5"`
 - runtime logs show the same versioned image
 
 - [ ] **Step 2: Legacy-config smoke test**
@@ -325,7 +325,7 @@ B3_CONTAINER_IMAGE="ghcr.io/tleyden/brain3-mcp-vault-tools:latest"
 ```
 
 Run Brain3 without `--container-tag` and verify:
-- effective runtime image resolves to `v0.1.4`
+- effective runtime image resolves to `v0.1.5`
 - a warning or info message explains that a legacy default was remapped
 
 - [ ] **Step 3: Explicit opt-in smoke test**

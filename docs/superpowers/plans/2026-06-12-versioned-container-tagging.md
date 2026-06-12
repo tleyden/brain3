@@ -170,7 +170,7 @@ Expected: FAIL because `Args` has no `container_tag` field.
 Add `container_tag: Option<String>` to `Args`:
 
 ```rust
-#[arg(long, help = "Override the Brain3 MCP container tag for this run or new setup, e.g. latest, v0.1.4, pr-123")]
+#[arg(long, help = "Override the Brain3 MCP container tag for this run or new setup, e.g. latest, v0.1.5, pr-123")]
 container_tag: Option<String>,
 ```
 
