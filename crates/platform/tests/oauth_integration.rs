@@ -168,7 +168,7 @@ impl TestHarness {
         let config = Arc::new(GatewayConfig {
             port: 0,
             host: "127.0.0.1".into(),
-            token_db_path: "/tmp/brain3-test-tokens.db".into(),
+            token_db_path: "/tmp/brain3-test-brain3.db".into(),
             oauth: self.oauth,
             mcp_reverse_proxy: MCPReverseProxyConfig {
                 mcp_upstream_url: "http://127.0.0.1:8420".into(),

@@ -1152,7 +1152,7 @@ mod tests {
             Arc::new(GatewayConfig {
                 port: 8421,
                 host: "127.0.0.1".into(),
-                token_db_path: PathBuf::from("/tmp/brain3-home/tokens.db"),
+                token_db_path: PathBuf::from("/tmp/brain3-home/brain3.db"),
                 oauth: OAuthConfig {
                     client_id: "brain3-oauth2-client".into(),
                     client_secret: "secret".into(),

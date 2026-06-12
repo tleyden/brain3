@@ -111,7 +111,7 @@ fn resolve_token_db_path() -> Result<PathBuf, ConfigError> {
     }
 
     if let Some(root) = env::var_os("B3_HOME").filter(|value| !value.is_empty()) {
-        return Ok(PathBuf::from(root).join("tokens.db"));
+        return Ok(PathBuf::from(root).join("brain3.db"));
     }
 
     let home = env::var_os("HOME")
@@ -123,7 +123,7 @@ fn resolve_token_db_path() -> Result<PathBuf, ConfigError> {
             )
         })?;
 
-    Ok(PathBuf::from(home).join(".brain3").join("tokens.db"))
+    Ok(PathBuf::from(home).join(".brain3").join("brain3.db"))
 }
 
 fn require_nonempty(name: &str, errors: &mut Vec<String>) -> String {
