@@ -34,6 +34,10 @@ jobs:
       - name: Validate release tag matches apps/gateway version
         run: |
           APP_VERSION=$(awk -F '"' '/^version = / {print $2; exit}' apps/gateway/Cargo.toml)
+          if [ -z "${APP_VERSION}" ]; then
+            echo "Could not determine version from apps/gateway/Cargo.toml" >&2
+            exit 1
+          fi
           if [ "v${APP_VERSION}" != "${GITHUB_REF_NAME}" ]; then
             echo "Tag ${GITHUB_REF_NAME} does not match apps/gateway version v${APP_VERSION}" >&2
             exit 1
