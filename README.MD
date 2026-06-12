@@ -1,5 +1,5 @@
 
-<img width="800" alt="Image" src="https://github.com/user-attachments/assets/752e5eed-84c0-40cb-a3b3-104d79dd5210" />
+<img width="800" alt="Image" src="docs/screenshots/hero.png" />
 
 ## Why This Exists
 
@@ -15,6 +15,13 @@ I decided to build Brain3 as a container-based solution with a heavy emphasis on
 - Obsidian-compatible, but Obsidian not required
 - TUI app for setup
 - Not AI Slop - while I'm using coding agents, I'm committed to creating a high-quality product, including a healthy amount of dogfooding.
+
+## Screenshots (w/ Claude Mobile)
+
+<table><tr>
+<td><img width="280" alt="Image" src="docs/screenshots/screenshot-2.png" /></td>
+<td><img width="280" alt="Image" src="docs/screenshots/screenshot-1.png" /></td>
+</tr></table>
 
 ## Privacy and Security
 
@@ -75,10 +82,10 @@ sudo apt-get install cloudflared
 ### 1. Install the latest release
 
 ```bash
-curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.1/install.sh | sh
+curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.2/install.sh | sh
 ```
 
-This installs `brain3` from the `v0.1.1` release.
+This installs `brain3` from the `v0.1.2` release.
 
 ### 2. Start Brain3
 
@@ -147,37 +154,13 @@ Refer to your AI application's documentation for client-specific setup instructi
 
 Once connected, you can ask your AI to search, organize, summarize, and edit your notes directly through Brain3.
 
-### 4. Try it from your AI app
+### 4. Interact with Brain3 via your AI assistant
 
 Example prompt:
 `List all the files in my Brain3 vault.`
 
 Expected result:
 Brain3 should list the files in your vault.
-
-## Build from Source (Developers)
-
-### Prerequisites
-
-Refer to the [Quick Start](#quick-start) prerequisites above.
-
-### Clone and build from source
-
-```bash
-git clone https://github.com/tleyden/brain3.git
-cd brain3
-cargo build --release
-```
-
-The binary is at `./target/release/brain3`.
-
-### Start Brain3
-
-```bash
-./target/release/brain3
-```
-
-Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) for the full flow.
 
 ## Privacy & Security Details
 
@@ -187,13 +170,12 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 
 - Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities.
 - If you use Cloudflare Tunnel (default and recommended), `cloudflared` creates outbound-only connections to Cloudflare's network, so Brain3 does not need a publicly routable IP.
-- Cloudflare documents that Gateway can decrypt, inspect, and re-encrypt HTTPS traffic if you explicitly turn TLS decryption on in your Cloudflare environment.
 - ⚠ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
 - macOS or Docker container isolation. By default, the MCP server runs in a container with your vault mounted and a read-only upstream secret directory. No other host directories are mounted unless you enable dev mode.
 
 ### Authentication & Authorization
 
-- Preregistered clients only. Solely the client configured via `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic client registration is disabled.
+- Preregistered clients only. Solely the client configured via `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic Client Registration (DCR) and Client ID Metadata Document (CIMD) are disabled.
 - Client secret required at token exchange (`client_secret_post`).
 - PKCE (`S256`) enforced by default to prevent authorization-code interception.
 - Auth codes are single-use and expire after 5 minutes.
@@ -204,52 +186,6 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 - Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured.
 - Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
 - Constant-time comparison for all secret and token checks.
-
-
-
-## Configuration Reference
-
-All configuration is via environment variables, loaded from a `.env` file.
-
-### Brain3 App
-
-| Variable | Default | Description |
-|---|---|---|
-| `OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
-| `OAUTH2_GATEWAY_CLIENT_ID` | `oauth2-gateway-client` | OAuth client ID accepted by Brain3 |
-| `OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
-| `OAUTH2_GATEWAY_ACCESS_TOKEN` | *(required)* | Bearer token returned after successful auth |
-| `OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `http://127.0.0.1:8420` | URL of the MCP server |
-| `OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `/tmp/brain3-mcp-upstream-secret` | Path to the shared secret file |
-| `OAUTH2_PKCE_REQUIRED` | `true` | Require PKCE for OAuth flow |
-| `USERNAME` | *(required)* | Login username for the Brain3 sign-in page |
-| `PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
-| `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
-| `CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
-| `CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; Brain3 starts `cloudflared` automatically when set with `CF_DOMAIN` |
-| `CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `CF_TUNNEL_NAME`) |
-| `CF_TUNNEL_CONFIG_FILE` | *(required if `CF_TUNNEL_NAME` set)* | Path to the `cloudflared` config file written during tunnel provisioning |
-| `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
-| `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
-| `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
-| `BRAIN3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` |
-| `BRAIN3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
-
-## Tool Surface
-
-Once connected, your AI app has access to these vault tools:
-
-| Tool | Description |
-|---|---|
-| `vault_read` | Read a file or line range. Returns a content hash for safe patching. |
-| `vault_create_overwrite_file` | Create a new note or replace an existing one entirely. |
-| `vault_apply_unified_diff` | Apply a unified diff to an existing file. Preferred for precise edits. |
-| `vault_batch_frontmatter_update` | Update YAML frontmatter fields across one or more files. |
-| `vault_search` | Full-text search across the vault. |
-| `vault_search_frontmatter` | Search by frontmatter field values. |
-| `vault_list` | List files and directories in the vault. |
-| `vault_move` | Move or rename a file. |
-| `vault_delete` | Delete a file. |
 
 ## Advanced Configuration
 
@@ -281,6 +217,50 @@ brain3.yourdomain.com {
 }
 ```
 
+## Configuration Reference
+
+All configuration is via environment variables, loaded from a `.env` file.
+
+### Brain3 App
+
+| Variable | Default | Description |
+|---|---|---|
+| `OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
+| `OAUTH2_GATEWAY_CLIENT_ID` | `oauth2-gateway-client` | OAuth client ID accepted by Brain3 |
+| `OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
+| `OAUTH2_GATEWAY_ACCESS_TOKEN` | *(required)* | Bearer token returned after successful auth |
+| `OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `http://127.0.0.1:8420` | URL of the MCP server |
+| `OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `/tmp/brain3-mcp-upstream-secret` | Path to the shared secret file |
+| `OAUTH2_PKCE_REQUIRED` | `true` | Require PKCE for OAuth flow |
+| `USERNAME` | *(required)* | Login username for the Brain3 sign-in page |
+| `PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
+| `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
+| `CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
+| `CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; Brain3 starts `cloudflared` automatically when set with `CF_DOMAIN` |
+| `CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `CF_TUNNEL_NAME`) |
+| `CF_TUNNEL_CONFIG_FILE` | *(required if `CF_TUNNEL_NAME` set)* | Path to the `cloudflared` config file written during tunnel provisioning |
+| `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
+| `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
+| `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
+| `BRAIN3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` |
+| `BRAIN3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
+
+## MD Vault MCP Tools
+
+Once connected, your AI app has access to these vault tools:
+
+| Tool | Description |
+|---|---|
+| `vault_read` | Read a file or line range. Returns a content hash for safe patching. |
+| `vault_create_overwrite_file` | Create a new note or replace an existing one entirely. |
+| `vault_apply_unified_diff` | Apply a unified diff to an existing file. Preferred for precise edits. |
+| `vault_batch_frontmatter_update` | Update YAML frontmatter fields across one or more files. |
+| `vault_search` | Full-text search across the vault. |
+| `vault_search_frontmatter` | Search by frontmatter field values. |
+| `vault_list` | List files and directories in the vault. |
+| `vault_move` | Move or rename a file. |
+| `vault_delete` | Delete a file. |
+
 ## Development
 
 ### Running tests
@@ -294,6 +274,30 @@ cargo test
 ```bash
 cargo build --release
 ```
+
+## Build from Source (Developers)
+
+### Prerequisites
+
+Refer to the [Quick Start](#quick-start) prerequisites above.
+
+### Clone and build from source
+
+```bash
+git clone https://github.com/tleyden/brain3.git
+cd brain3
+cargo build --release
+```
+
+The binary is at `./target/release/brain3`.
+
+### Start Brain3
+
+```bash
+./target/release/brain3
+```
+
+Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) for the full flow.
 
 ## License 
 
