@@ -268,6 +268,29 @@ async fn event_loop(
                 KeyCode::Enter => {
                     finalize_and_start(state, use_case).await;
                 }
+                KeyCode::Tab | KeyCode::Down => {
+                    state.next_summary_focus();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    state.previous_summary_focus();
+                }
+                KeyCode::Char(' ') | KeyCode::Char('t')
+                    if !state.summary_focus_is_text_field() =>
+                {
+                    state.toggle_summary_field();
+                }
+                KeyCode::Backspace if state.summary_focus_is_text_field() => {
+                    state.summary_char_pop();
+                }
+                KeyCode::Char(ch) if state.summary_focus_is_text_field() => {
+                    if state.summary_focus_is_digits_only() {
+                        if ch.is_ascii_digit() {
+                            state.summary_char_push(ch);
+                        }
+                    } else {
+                        state.summary_char_push(ch);
+                    }
+                }
                 _ => {}
             },
             SetupStep::ConnectionCard => match key.code {

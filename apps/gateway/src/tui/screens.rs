@@ -15,7 +15,7 @@ use crate::server::GatewayServerStatus;
 use super::runtime_logs::RuntimeLogsState;
 use super::state::{
     install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, PortsField,
-    RuntimeView,
+    RuntimeView, SummaryField,
 };
 
 pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
@@ -468,38 +468,61 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 }
 
 fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
-    vec![
-        muted_line("Review the config Brain3 will write before startup begins."),
+    let f = state.summary_focus;
+    let mut lines = vec![
+        muted_line("Review and edit the config Brain3 will write before startup begins."),
         blank_line(),
-        key_value_line("Vault path", state.vault_path_input.clone()),
-        key_value_line("Username", state.username_input.clone()),
-        key_value_line("Client ID", state.client_id_input.clone()),
-        key_badge_line(
+        field_line("Vault path", &state.vault_path_input, f == SummaryField::VaultPath),
+        field_line("Username", &state.username_input, f == SummaryField::Username),
+        field_line("Client ID", &state.client_id_input, f == SummaryField::ClientId),
+        field_badge_line(
             "Password mode",
             if state.generate_password {
                 badge_span("Auto-generated", Color::Green)
             } else {
                 badge_span("Custom password", Color::Cyan)
             },
+            f == SummaryField::PasswordMode,
         ),
-        key_value_line("Gateway port", state.gateway_port_input.clone()),
-        key_value_line("Container host port", state.container_host_port_input.clone()),
-        key_value_line("Container MCP port", state.container_mcp_port_input.clone()),
-        key_badge_line(
+    ];
+
+    if !state.generate_password {
+        lines.push(field_line(
+            "Password",
+            &state.password_input,
+            f == SummaryField::PasswordValue,
+        ));
+    }
+
+    lines.extend([
+        field_line("Gateway port", &state.gateway_port_input, f == SummaryField::GatewayPort),
+        field_line(
+            "Container host port",
+            &state.container_host_port_input,
+            f == SummaryField::ContainerHostPort,
+        ),
+        field_line(
+            "Container MCP port",
+            &state.container_mcp_port_input,
+            f == SummaryField::ContainerMcpPort,
+        ),
+        field_badge_line(
             "PKCE required",
             if state.draft.pkce_required {
                 badge_span("Enabled", Color::Green)
             } else {
                 badge_span("Disabled", Color::Yellow)
             },
+            f == SummaryField::PkceRequired,
         ),
-        key_badge_line(
+        field_badge_line(
             "Hostname check",
             if state.draft.enforce_hostname_check {
                 badge_span("Enabled", Color::Green)
             } else {
                 badge_span("Disabled", Color::Yellow)
             },
+            f == SummaryField::HostnameCheck,
         ),
         key_value_line(
             "Container runtime",
@@ -512,7 +535,9 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             state.preparation.paths.env_file.display().to_string(),
         ),
         key_value_line("Logs", state.log_file.display().to_string()),
-    ]
+    ]);
+
+    lines
 }
 
 fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
@@ -667,12 +692,15 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             ("[q]", "Quit"),
         ]),
         SetupStep::Summary => vec![
-            primary_action_line("Ready to launch Brain3."),
+            primary_action_line("Edit any field, then save config and start."),
             muted_line("⚠ The UI will \"stick\" for 5s, but it's starting. Known issue."),
             hint_line(vec![
+                ("[Tab/↑↓]", "Move"),
+                ("[Type]", "Edit"),
+                ("[Space/t]", "Toggle"),
                 ("[Esc]", "Back"),
                 ("[q]", "Quit"),
-                ("[Enter]", "Save Config and Start"),
+                ("[Enter]", "Save & Start"),
             ]),
         ],
         SetupStep::ConnectionCard => vec![
@@ -811,6 +839,20 @@ fn field_line(label: &str, value: &str, active: bool) -> Line<'static> {
         pointer,
         Span::styled(format!("{label}: "), label_style),
         Span::styled(display_value, value_style),
+    ])
+}
+
+fn field_badge_line(label: &str, badge: Span<'static>, active: bool) -> Line<'static> {
+    let pointer = if active {
+        Span::styled("▶ ", accent_style())
+    } else {
+        Span::styled("  ", muted_style())
+    };
+    let label_style = if active { accent_style() } else { label_style() };
+    Line::from(vec![
+        pointer,
+        Span::styled(format!("{label}: "), label_style),
+        badge,
     ])
 }
 

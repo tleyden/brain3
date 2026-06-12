@@ -38,6 +38,20 @@ pub enum RuntimeView {
     Logs,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummaryField {
+    VaultPath,
+    Username,
+    ClientId,
+    PasswordMode,
+    PasswordValue,
+    GatewayPort,
+    ContainerHostPort,
+    ContainerMcpPort,
+    PkceRequired,
+    HostnameCheck,
+}
+
 pub struct FirstRunTuiState {
     pub host: String,
     pub log_file: PathBuf,
@@ -64,6 +78,7 @@ pub struct FirstRunTuiState {
     pub container_mcp_port_input: String,
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
+    pub summary_focus: SummaryField,
 }
 
 impl FirstRunTuiState {
@@ -108,6 +123,7 @@ impl FirstRunTuiState {
             container_mcp_port_input,
             dependency_focus,
             dependency_action_index: 0,
+            summary_focus: SummaryField::VaultPath,
         }
     }
 
@@ -274,6 +290,114 @@ impl FirstRunTuiState {
             self.ports_focus,
             PortsField::GatewayPort | PortsField::ContainerHostPort | PortsField::ContainerMcpPort
         )
+    }
+
+    pub fn next_summary_focus(&mut self) {
+        self.summary_focus = match self.summary_focus {
+            SummaryField::VaultPath => SummaryField::Username,
+            SummaryField::Username => SummaryField::ClientId,
+            SummaryField::ClientId => SummaryField::PasswordMode,
+            SummaryField::PasswordMode => {
+                if self.generate_password {
+                    SummaryField::GatewayPort
+                } else {
+                    SummaryField::PasswordValue
+                }
+            }
+            SummaryField::PasswordValue => SummaryField::GatewayPort,
+            SummaryField::GatewayPort => SummaryField::ContainerHostPort,
+            SummaryField::ContainerHostPort => SummaryField::ContainerMcpPort,
+            SummaryField::ContainerMcpPort => SummaryField::PkceRequired,
+            SummaryField::PkceRequired => SummaryField::HostnameCheck,
+            SummaryField::HostnameCheck => SummaryField::VaultPath,
+        };
+    }
+
+    pub fn previous_summary_focus(&mut self) {
+        self.summary_focus = match self.summary_focus {
+            SummaryField::VaultPath => SummaryField::HostnameCheck,
+            SummaryField::Username => SummaryField::VaultPath,
+            SummaryField::ClientId => SummaryField::Username,
+            SummaryField::PasswordMode => SummaryField::ClientId,
+            SummaryField::PasswordValue => SummaryField::PasswordMode,
+            SummaryField::GatewayPort => {
+                if self.generate_password {
+                    SummaryField::PasswordMode
+                } else {
+                    SummaryField::PasswordValue
+                }
+            }
+            SummaryField::ContainerHostPort => SummaryField::GatewayPort,
+            SummaryField::ContainerMcpPort => SummaryField::ContainerHostPort,
+            SummaryField::PkceRequired => SummaryField::ContainerMcpPort,
+            SummaryField::HostnameCheck => SummaryField::PkceRequired,
+        };
+    }
+
+    pub fn summary_focus_is_text_field(&self) -> bool {
+        matches!(
+            self.summary_focus,
+            SummaryField::VaultPath
+                | SummaryField::Username
+                | SummaryField::ClientId
+                | SummaryField::PasswordValue
+                | SummaryField::GatewayPort
+                | SummaryField::ContainerHostPort
+                | SummaryField::ContainerMcpPort
+        )
+    }
+
+    pub fn summary_focus_is_digits_only(&self) -> bool {
+        matches!(
+            self.summary_focus,
+            SummaryField::GatewayPort
+                | SummaryField::ContainerHostPort
+                | SummaryField::ContainerMcpPort
+        )
+    }
+
+    pub fn summary_char_push(&mut self, ch: char) {
+        match self.summary_focus {
+            SummaryField::VaultPath => self.vault_path_input.push(ch),
+            SummaryField::Username => self.username_input.push(ch),
+            SummaryField::ClientId => self.client_id_input.push(ch),
+            SummaryField::PasswordValue => self.password_input.push(ch),
+            SummaryField::GatewayPort => self.gateway_port_input.push(ch),
+            SummaryField::ContainerHostPort => self.container_host_port_input.push(ch),
+            SummaryField::ContainerMcpPort => self.container_mcp_port_input.push(ch),
+            _ => {}
+        }
+    }
+
+    pub fn summary_char_pop(&mut self) {
+        match self.summary_focus {
+            SummaryField::VaultPath => { self.vault_path_input.pop(); }
+            SummaryField::Username => { self.username_input.pop(); }
+            SummaryField::ClientId => { self.client_id_input.pop(); }
+            SummaryField::PasswordValue => { self.password_input.pop(); }
+            SummaryField::GatewayPort => { self.gateway_port_input.pop(); }
+            SummaryField::ContainerHostPort => { self.container_host_port_input.pop(); }
+            SummaryField::ContainerMcpPort => { self.container_mcp_port_input.pop(); }
+            _ => {}
+        }
+    }
+
+    pub fn toggle_summary_field(&mut self) {
+        match self.summary_focus {
+            SummaryField::PasswordMode => {
+                self.generate_password = !self.generate_password;
+                if self.generate_password && self.summary_focus == SummaryField::PasswordValue {
+                    self.summary_focus = SummaryField::GatewayPort;
+                }
+            }
+            SummaryField::PkceRequired => {
+                self.draft.pkce_required = !self.draft.pkce_required;
+            }
+            SummaryField::HostnameCheck => {
+                self.draft.enforce_hostname_check = !self.draft.enforce_hostname_check;
+            }
+            _ => {}
+        }
     }
 
     pub fn toggle_dependency_focus(&mut self) {
