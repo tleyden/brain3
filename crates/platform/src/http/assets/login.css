@@ -200,6 +200,46 @@ h1 {
     margin: 0.45rem 0 0;
 }
 
+.credential-options {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 1rem;
+    align-items: stretch;
+    margin-top: 0.75rem;
+}
+
+.credential-option {
+    display: flex;
+    align-items: center;
+}
+
+.credential-option p {
+    margin: 0;
+}
+
+.credential-divider {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    min-width: 2.5rem;
+}
+
+.credential-divider-line {
+    width: 1px;
+    flex: 1 1 auto;
+    min-height: 1.25rem;
+    background: rgba(84, 64, 206, 0.22);
+}
+
+.credential-divider-label {
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    color: var(--purple);
+}
+
 .error {
     background: var(--danger-bg);
     border: 1px solid rgba(180, 35, 24, 0.18);
@@ -372,6 +412,21 @@ button:focus-visible {
     .security-banner,
     .tunnel-badge {
         width: 100%;
+    }
+
+    .credential-options {
+        grid-template-columns: 1fr;
+    }
+
+    .credential-divider {
+        flex-direction: row;
+        gap: 0.6rem;
+    }
+
+    .credential-divider-line {
+        width: 100%;
+        height: 1px;
+        min-height: 0;
     }
 
     button {

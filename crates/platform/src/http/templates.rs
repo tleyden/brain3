@@ -107,7 +107,7 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
                 <path d="M10.75 12.25V11.25C10.75 10.56 11.31 10 12 10C12.69 10 13.25 10.56 13.25 11.25V12.25" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
               </svg>
             </div>
-            <p class="security-caption">Secure local sign-in</p>
+            <p class="security-caption">Sign In</p>
           </div>
           <div class="tunnel-badge" aria-label="Cloudflare Tunnel enabled by default">
             <span class="tunnel-icon" aria-hidden="true">
@@ -123,8 +123,19 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
         <p class="lead">ChatGPT, Claude, or another AI app is requesting access to your local Brain3 MCP gateway.</p>
         <div class="callout">
           <h2>Where to find your credentials</h2>
-          <p>See your app TUI (Terminal UI) to get these values under the MCP <code>[c]</code> MCP config settings.</p>
-          <p>You can also use the <code>B3_USERNAME</code> and <code>B3_PASSWORD</code> values from the <code>.env</code> file configured on this machine, which are the same.</p>
+          <div class="credential-options">
+            <div class="credential-option">
+              <p>See your app TUI (Terminal UI) to get these values under the MCP <code>[c]</code> MCP config settings.</p>
+            </div>
+            <div class="credential-divider" aria-hidden="true">
+              <span class="credential-divider-line"></span>
+              <span class="credential-divider-label">OR</span>
+              <span class="credential-divider-line"></span>
+            </div>
+            <div class="credential-option">
+              <p>You can also use the <code>B3_USERNAME</code> and <code>B3_PASSWORD</code> values from the <code>.env</code> file configured on this machine, which are the same.</p>
+            </div>
+          </div>
         </div>
         {error_html}
         <form class="form" method="post" action="/oauth/authorize">
@@ -147,9 +158,9 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
     );
 
     render_page(
-        "Sign in to finish connecting your AI app",
+        "Sign-in to your Brain3 Local Gateway",
         "Brain3 Local Gateway",
-        "Sign in to finish connecting your AI app",
+        "Sign-in to your Brain3 Local Gateway",
         &body_html,
     )
 }
