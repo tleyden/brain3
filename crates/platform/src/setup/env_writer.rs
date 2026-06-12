@@ -38,7 +38,10 @@ fn build_overrides(
 
     values.insert("B3_OAUTH2_GATEWAY_PORT", draft.gateway_port.to_string());
     values.insert("B3_OAUTH2_GATEWAY_CLIENT_ID", draft.client_id.clone());
-    values.insert("B3_OAUTH2_GATEWAY_CLIENT_SECRET", draft.client_secret.clone());
+    values.insert(
+        "B3_OAUTH2_GATEWAY_CLIENT_SECRET",
+        draft.client_secret.clone(),
+    );
     values.insert("B3_USERNAME", draft.username.clone());
     values.insert("B3_PASSWORD", draft.password.clone());
     values.insert("B3_OAUTH2_GATEWAY_ACCESS_TOKEN", draft.access_token.clone());

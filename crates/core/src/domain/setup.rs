@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::domain::model::ContainerRuntime;
 
 pub const DEFAULT_GATEWAY_PORT: u16 = 8421;
-pub const DEFAULT_CLIENT_ID: &str = "oauth2-gateway-client";
+pub const DEFAULT_CLIENT_ID: &str = "brain3-oauth2-client";
 pub const DEFAULT_USERNAME: &str = "admin";
 pub const DEFAULT_CONTAINER_IMAGE: &str = "ghcr.io/tleyden/brain3-mcp-vault-tools:latest";
 pub const DEFAULT_CONTAINER_HOST_PORT: u16 = 8420;

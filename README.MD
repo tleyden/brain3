@@ -3,18 +3,18 @@
 
 ## Why This Exists
 
-I want to be able to interact w/ my Obsidan second brain via Claude and ChatGPT, specifically from the mobile and desktop apps via remote MCP servers.  I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  
+I wanted a simple way to interact with my Obsidian markdown vault ("second brain") through Claude and ChatGPT, including their desktop and mobile apps.
 
-I then found [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) on a Reddit post, and started to use it.  I really like the fact that it is based on the MCP and OAuth2 open standards for maximum portability to any AI Assistant (including local open weights models), however, I wasn't satisfied w/ the overall security posture.  I even encountered some specific (now-fixed) security vulnerabilities like [obsidian-web-mcp#29](https://github.com/jimprosser/obsidian-web-mcp/issues/29).
+I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, but I wanted a container based security-first architecture. 
 
-I decided to build Brain3 as a container-based solution with a heavy emphasis on defensible security. 
+Brain3 lets you run a remotely available OAuth 2.1 compliant MCP server locally that securely bridges AI clients to your markdown vault via a Cloudflare Tunnel. The gateway is written in Rust and distributed as a single binary. It handles authentication, networking, and container management, then launches an isolated Docker or macOS native container that runs the MCP server with access limited to your vault directory.
 
 ## Features
 
 - Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
 - Obsidian-compatible, but Obsidian not required
 - TUI app for setup
-- Not AI Slop - while I'm using coding agents, I'm committed to creating a high-quality product, including a healthy amount of dogfooding.
+- **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) to ensure that the quality bar stays high.
 
 ## Screenshots (w/ Claude Mobile)
 
@@ -98,6 +98,8 @@ brain3
 On first run, Brain3 launches an interactive setup wizard that walks you through vault selection, credential creation, and dependency checks. It generates secrets automatically and writes the config to `~/.brain3/.env`. Once setup completes, Brain3 starts the MCP container and Cloudflare Tunnel and displays the public URL and connection details you will need in step 3.
 
 On subsequent runs, Brain3 goes straight to the runtime status screen.
+
+If you want a stable hostname on your own Cloudflare-managed domain instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
 
 ### 3. Connect your AI app
 
@@ -193,13 +195,21 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 
 ### Named Cloudflare Tunnel on your domain
 
-Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control. Provision the tunnel once, then let Brain3 run it:
+Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control.
 
-1. Install `cloudflared` — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
-2. Log in: `cloudflared tunnel login`
-3. Create the tunnel and DNS route (one-time setup — see Cloudflare docs)
-4. In your `.env`, set `B3_CF_TUNNEL_NAME`, `B3_CF_DOMAIN`, and `B3_CF_TUNNEL_CONFIG_FILE` (path to the `.yml` config file written during setup)
-5. Start Brain3. It will start `cloudflared` automatically and log:
+Brain3's normal first-run setup configures the app and defaults to a Cloudflare quick tunnel. Named tunnel provisioning is a separate guided flow:
+
+1. Run `brain3` once and complete the normal interactive setup wizard.
+2. Install `cloudflared` if it is not already available — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+3. In `~/.brain3/.env`, set `B3_CF_TUNNEL_NAME` and `B3_CF_DOMAIN`. Set `B3_CF_TUNNEL_CONFIG_FILE` only if you want a non-default config path; otherwise Brain3 uses `.cloudflared/<tunnel-name>.yml`.
+4. Run the named tunnel provisioning wizard:
+
+```bash
+brain3 --cf-setup
+```
+
+5. The wizard verifies `cloudflared`, handles login if needed, creates or reuses the named tunnel, writes the config file, and configures the DNS route.
+6. Start Brain3 normally with `brain3`. It will start `cloudflared` automatically and log:
 
 ```
 INFO tunnel started url=https://brain3.yourdomain.com
@@ -228,7 +238,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | Variable | Default | Description |
 |---|---|---|
 | `B3_OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
-| `B3_OAUTH2_GATEWAY_CLIENT_ID` | `oauth2-gateway-client` | OAuth client ID accepted by Brain3 |
+| `B3_OAUTH2_GATEWAY_CLIENT_ID` | `brain3-oauth2-client` | OAuth client ID accepted by Brain3 |
 | `B3_OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
 | `B3_OAUTH2_GATEWAY_ACCESS_TOKEN` | *(required)* | Bearer token returned after successful auth |
 | `B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `http://127.0.0.1:8420` | URL of the MCP server |
@@ -238,9 +248,9 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
 | `B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
 | `B3_CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
-| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; Brain3 starts `cloudflared` automatically when set with `B3_CF_DOMAIN` |
+| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cf-setup` to provision it |
 | `B3_CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `B3_CF_TUNNEL_NAME`) |
-| `B3_CF_TUNNEL_CONFIG_FILE` | *(required if `B3_CF_TUNNEL_NAME` set)* | Path to the `cloudflared` config file written during tunnel provisioning |
+| `B3_CF_TUNNEL_CONFIG_FILE` | `.cloudflared/<tunnel-name>.yml` | Optional path to the `cloudflared` config file written during named tunnel provisioning |
 | `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
 | `B3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
 | `B3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
@@ -299,7 +309,14 @@ The binary is at `./target/release/brain3`.
 ./target/release/brain3
 ```
 
-Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) for the full flow.
+Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) fo r the full flow.
+
+## Roadmap
+
+* Improve search
+* LLMWiki features
+* NotebookLM features
+* Desktop menu bar app with full system tray integration + GUI
 
 ## License 
 

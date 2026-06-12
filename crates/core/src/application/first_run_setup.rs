@@ -280,7 +280,7 @@ mod tests {
     fn sample_draft(vault_path: PathBuf) -> SetupDraftConfig {
         SetupDraftConfig {
             gateway_port: 8421,
-            client_id: "oauth2-gateway-client".into(),
+            client_id: "brain3-oauth2-client".into(),
             client_secret: String::new(),
             access_token: String::new(),
             username: "admin".into(),
@@ -343,6 +343,16 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_uses_brain3_oauth2_client_as_default_client_id() {
+        let port = Arc::new(MockSetupSystemPort::new(vec![]));
+        let use_case = FirstRunSetupUseCase::new(port);
+
+        let preparation = use_case.prepare().await.expect("prepare should succeed");
+
+        assert_eq!(preparation.draft.client_id, "brain3-oauth2-client");
+    }
+
+    #[tokio::test]
     async fn finalize_generates_missing_secrets_and_password() {
         let vault_path = PathBuf::from("/Users/test/vault");
         let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
@@ -392,12 +402,12 @@ mod tests {
         assert!(snapshot
             .written_env
             .expect("env should have been written")
-            .contains("CLIENT_ID=oauth2-gateway-client"));
+            .contains("CLIENT_ID=brain3-oauth2-client"));
         assert_eq!(
             card,
             ConnectionCard {
                 server_url: "https://example.trycloudflare.com".into(),
-                client_id: "oauth2-gateway-client".into(),
+                client_id: "brain3-oauth2-client".into(),
                 client_secret: "chosen-secret".into(),
                 username: "admin".into(),
                 password: "chosen-password".into(),

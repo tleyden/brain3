@@ -21,4 +21,5 @@ urlencoding = "2"
 
 [dev-dependencies]
 axum-test = "17"
+time = "=0.3.36"
 tokio = { version = "1", features = ["full"] }

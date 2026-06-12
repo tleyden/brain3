@@ -209,7 +209,7 @@ git commit -m "test: lock oauth gateway mcp proxy contract"
 import os
 
 OAUTH2_GATEWAY_PORT = int(os.environ.get("OAUTH2_GATEWAY_PORT", "8421"))
-OAUTH2_GATEWAY_CLIENT_ID = os.environ.get("OAUTH2_GATEWAY_CLIENT_ID", "oauth2-gateway-client")
+OAUTH2_GATEWAY_CLIENT_ID = os.environ.get("OAUTH2_GATEWAY_CLIENT_ID", "brain3-oauth2-client")
 OAUTH2_GATEWAY_CLIENT_SECRET = os.environ.get("OAUTH2_GATEWAY_CLIENT_SECRET", "")
 OAUTH2_GATEWAY_ACCESS_TOKEN = os.environ.get("OAUTH2_GATEWAY_ACCESS_TOKEN", "")
 OAUTH2_GATEWAY_MCP_UPSTREAM_URL = os.environ.get("OAUTH2_GATEWAY_MCP_UPSTREAM_URL", "http://127.0.0.1:8420")
@@ -500,7 +500,7 @@ Expected: `401 Unauthorized` with a `WWW-Authenticate` header that includes `res
 ```bash
 TOKEN=$(curl -s -X POST http://127.0.0.1:8421/oauth/token \
   -d "grant_type=client_credentials" \
-  -d "client_id=oauth2-gateway-client" \
+  -d "client_id=brain3-oauth2-client" \
   -d "client_secret=dev-secret" | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")
 
 curl -s -X POST http://127.0.0.1:8421/mcp \

@@ -141,7 +141,7 @@ fn setup_requires_named_tunnel() -> Result<()> {
         "\nBrain3 --cf-setup only applies to Cloudflare named tunnel provisioning.\n\
          \nRun this in an interactive terminal to use the normal setup/status flow:\n  brain3 --tui\n"
     );
-    anyhow::bail!("--cf-setup requires CF_TUNNEL_NAME and CF_DOMAIN to be set");
+    anyhow::bail!("--cf-setup requires B3_CF_TUNNEL_NAME and B3_CF_DOMAIN to be set");
 }
 
 fn runtime_launch_plan(resolved_env: &ResolvedEnvFile, log_file: PathBuf) -> RuntimeLaunchPlan {

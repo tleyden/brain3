@@ -34,7 +34,10 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
 
     let mut env_vars = vec![
         ("B3_VAULT_MCP_HOST".into(), "0.0.0.0".into()),
-        ("B3_VAULT_MCP_PORT".into(), startup.container_port.to_string()),
+        (
+            "B3_VAULT_MCP_PORT".into(),
+            startup.container_port.to_string(),
+        ),
         ("B3_VAULT_PATH".into(), "/vault".into()),
         (
             "B3_UPSTREAM_SHARED_SECRET_FILE".into(),

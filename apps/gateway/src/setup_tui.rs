@@ -103,7 +103,7 @@ pub async fn run(tunnel_config: &TunnelConfig) -> anyhow::Result<()> {
         ),
         _ => {
             eprintln!("Setup wizard only available for named Cloudflare tunnel mode.");
-            eprintln!("Set CF_TUNNEL_NAME and CF_DOMAIN in your .env file first.");
+            eprintln!("Set B3_CF_TUNNEL_NAME and B3_CF_DOMAIN in your .env file first.");
             return Ok(());
         }
     };

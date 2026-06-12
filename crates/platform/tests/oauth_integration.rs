@@ -17,7 +17,7 @@ use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 
-const CLIENT_ID: &str = "oauth2-gateway-client";
+const CLIENT_ID: &str = "brain3-oauth2-client";
 const CLIENT_SECRET: &str = "hardcoded-secret";
 const LOGIN_USERNAME: &str = "operator";
 const LOGIN_PASSWORD: &str = "password-123";

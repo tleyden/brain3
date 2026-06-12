@@ -56,8 +56,9 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));
     assert!(rendered.contains("B3_CONTAINER_RUNTIME=\"macos-container\""));
     assert!(rendered.contains("B3_VAULT_PATH=\"/Users/test/My Vault\""));
-    assert!(rendered
-        .contains("B3_CONTAINER_IMAGE=\"ghcr.io/tleyden/brain3-mcp-vault-tools:latest\""));
+    assert!(
+        rendered.contains("B3_CONTAINER_IMAGE=\"ghcr.io/tleyden/brain3-mcp-vault-tools:latest\"")
+    );
 }
 
 #[tokio::test]
