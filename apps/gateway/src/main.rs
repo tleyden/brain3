@@ -99,6 +99,20 @@ impl RuntimeOverrides {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EffectiveContainerImageSource {
+    FreshInstallDefault,
+    ConfiguredImage,
+    LegacyLatestConfig,
+    ExplicitTagOverride,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EffectiveContainerImage {
+    image: String,
+    source: EffectiveContainerImageSource,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LaunchMode {
     Tui,
@@ -211,15 +225,43 @@ fn plan_launch(
     })
 }
 
+fn resolve_effective_container_image(
+    configured_image: Option<&str>,
+    container_tag: Option<&str>,
+) -> EffectiveContainerImage {
+    if let Some(tag) = container_tag {
+        return EffectiveContainerImage {
+            image: release::container_image_for_tag(tag),
+            source: EffectiveContainerImageSource::ExplicitTagOverride,
+        };
+    }
+
+    if let Some(image) = configured_image {
+        if release::is_official_latest_container_image(image) {
+            return EffectiveContainerImage {
+                image: release::default_container_image(),
+                source: EffectiveContainerImageSource::LegacyLatestConfig,
+            };
+        }
+
+        return EffectiveContainerImage {
+            image: image.trim().to_string(),
+            source: EffectiveContainerImageSource::ConfiguredImage,
+        };
+    }
+
+    EffectiveContainerImage {
+        image: release::default_container_image(),
+        source: EffectiveContainerImageSource::FreshInstallDefault,
+    }
+}
+
 fn setup_defaults(runtime_overrides: &RuntimeOverrides) -> SetupDefaults {
-    let default_container_image = runtime_overrides
-        .container_tag
-        .as_deref()
-        .map(release::container_image_for_tag)
-        .unwrap_or_else(release::default_container_image);
+    let effective =
+        resolve_effective_container_image(None, runtime_overrides.container_tag.as_deref());
 
     SetupDefaults {
-        default_container_image,
+        default_container_image: effective.image,
     }
 }
 
@@ -227,16 +269,43 @@ fn apply_runtime_overrides(
     config: &mut GatewayConfig,
     runtime_overrides: &RuntimeOverrides,
 ) -> Result<()> {
-    let Some(tag) = runtime_overrides.container_tag.as_deref() else {
+    let Some(container) = config.container.as_mut() else {
+        if runtime_overrides.container_tag.is_some() {
+            anyhow::bail!("--container-tag requires container startup configuration");
+        }
         return Ok(());
     };
 
-    let Some(container) = config.container.as_mut() else {
-        anyhow::bail!("--container-tag requires container startup configuration");
-    };
+    let effective = resolve_effective_container_image(
+        Some(container.image.as_str()),
+        runtime_overrides.container_tag.as_deref(),
+    );
+    container.image = effective.image.clone();
 
-    container.image = release::container_image_for_tag(tag);
-    tracing::info!(tag, image = %container.image, "overriding configured MCP container image");
+    match effective.source {
+        EffectiveContainerImageSource::FreshInstallDefault => {
+            tracing::info!(image = %container.image, "resolved MCP container image");
+        }
+        EffectiveContainerImageSource::ConfiguredImage => {
+            tracing::info!(image = %container.image, source = ?effective.source, "resolved MCP container image");
+        }
+        EffectiveContainerImageSource::LegacyLatestConfig => {
+            tracing::warn!(
+                image = %container.image,
+                source = ?effective.source,
+                "remapping legacy official :latest MCP image to the release-matched default"
+            );
+        }
+        EffectiveContainerImageSource::ExplicitTagOverride => {
+            tracing::info!(
+                image = %container.image,
+                source = ?effective.source,
+                tag = runtime_overrides.container_tag.as_deref().unwrap_or_default(),
+                "resolved MCP container image"
+            );
+        }
+    }
+
     Ok(())
 }
 
@@ -472,11 +541,27 @@ async fn run_cli_mode(
         "runtime bootstrap complete"
     );
 
-    let _runtime = runtime;
+    if !runtime.can_start_gateway() {
+        let summary = runtime
+            .primary_failure_summary()
+            .unwrap_or("MCP container failed to start");
+        anyhow::bail!(
+            "Brain3 startup failed: {summary}. See logs: {}",
+            runtime.launch_plan.log_file.display()
+        );
+    }
+
+    if let Some(summary) = runtime.tunnel_status.failure_summary() {
+        tracing::warn!(
+            summary,
+            "tunnel failed to start; continuing with local gateway only"
+        );
+    }
+
     server::run_gateway_server_until(
         host,
         config,
-        _runtime.upstream_secret.clone(),
+        runtime.upstream_secret.clone(),
         shutdown_signal(),
     )
     .await
@@ -585,6 +670,39 @@ mod tests {
             .expect("container tag args should parse");
 
         assert_eq!(args.container_tag.as_deref(), Some("pr-123"));
+    }
+
+    #[test]
+    fn legacy_official_latest_resolves_to_release_tag() {
+        assert_eq!(
+            resolve_effective_container_image(
+                Some("ghcr.io/tleyden/brain3-mcp-vault-tools:latest"),
+                None,
+            )
+            .image,
+            release::default_container_image()
+        );
+    }
+
+    #[test]
+    fn explicit_container_tag_latest_wins_over_legacy_remap() {
+        assert_eq!(
+            resolve_effective_container_image(
+                Some("ghcr.io/tleyden/brain3-mcp-vault-tools:latest"),
+                Some("latest"),
+            )
+            .image,
+            release::container_image_for_tag("latest")
+        );
+    }
+
+    #[test]
+    fn custom_configured_image_is_left_unchanged() {
+        let custom = "ghcr.io/acme/custom-mcp:dev";
+        assert_eq!(
+            resolve_effective_container_image(Some(custom), None).image,
+            custom
+        );
     }
 
     #[test]

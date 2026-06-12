@@ -349,15 +349,31 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
         }
     };
 
-    let connection_card =
-        use_case.build_connection_card(session.display_url, state.log_file.clone(), &summary);
-
     state.summary = Some(summary);
-    state.connection_card = Some(connection_card);
     state.runtime = Some(session.runtime);
-    state.server = Some(session.server);
-    state.info_message = Some("Brain3 is running.".into());
-    state.step = SetupStep::ConnectionCard;
+    state.server = session.server;
+
+    if let Some(display_url) = session.display_url {
+        let summary = state.summary.as_ref().expect("summary should be present");
+        let connection_card =
+            use_case.build_connection_card(display_url, state.log_file.clone(), summary);
+        state.connection_card = Some(connection_card);
+    }
+
+    if let Some(runtime) = &state.runtime {
+        if let Some(failure) = runtime.primary_failure_summary() {
+            state.error_message = Some(failure.to_string());
+            state.info_message = None;
+            state.step = SetupStep::RuntimeStatus;
+        } else {
+            state.info_message = Some("Brain3 is running.".into());
+            state.step = if state.connection_card.is_some() {
+                SetupStep::ConnectionCard
+            } else {
+                SetupStep::RuntimeStatus
+            };
+        }
+    }
 }
 
 async fn start_configured_runtime_session(

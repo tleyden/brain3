@@ -91,24 +91,32 @@ impl FirstRunTuiState {
         host: String,
         log_file: PathBuf,
         preparation: SetupPreparation,
-        display_url: String,
+        display_url: Option<String>,
         runtime: RuntimeBootstrap,
-        server: GatewayServerHandle,
+        server: Option<GatewayServerHandle>,
     ) -> Self {
-        let connection_card = ConnectionCard {
-            server_url: display_url,
+        let connection_card = display_url.map(|server_url| ConnectionCard {
+            server_url,
             client_id: runtime.config.oauth.client_id.clone(),
             client_secret: runtime.config.oauth.client_secret.clone(),
             username: runtime.config.oauth.username.clone(),
             password: runtime.config.oauth.password.clone(),
             log_file: log_file.clone(),
-        };
+        });
         let mut state = Self::new(host, log_file, preparation);
-        state.connection_card = Some(connection_card);
+        state.connection_card = connection_card;
         state.runtime = Some(runtime);
-        state.server = Some(server);
+        state.server = server;
         state.step = SetupStep::RuntimeStatus;
-        state.info_message = Some("Brain3 is running.".into());
+
+        if let Some(runtime) = &state.runtime {
+            if let Some(summary) = runtime.primary_failure_summary() {
+                state.error_message = Some(summary.to_string());
+            } else {
+                state.info_message = Some("Brain3 is running.".into());
+            }
+        }
+
         state
     }
 

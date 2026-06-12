@@ -69,8 +69,31 @@ pub enum ContainerError {
     CommandFailed { code: i32, stderr: String },
     #[error("command could not be spawned: {0}")]
     SpawnFailed(String),
+    #[error("{summary}")]
+    StartupFailed {
+        summary: String,
+        logs: Option<String>,
+    },
     #[error("container error: {0}")]
     Other(String),
+}
+
+impl ContainerError {
+    pub fn summary(&self) -> String {
+        match self {
+            Self::StartupFailed { summary, .. } => summary.clone(),
+            other => other.to_string(),
+        }
+    }
+
+    pub fn recent_logs(&self) -> Option<&str> {
+        match self {
+            Self::StartupFailed {
+                logs: Some(logs), ..
+            } => Some(logs.as_str()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Error)]

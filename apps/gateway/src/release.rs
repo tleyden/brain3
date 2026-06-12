@@ -12,6 +12,14 @@ pub fn default_container_image() -> String {
     format!("{MCP_IMAGE_REPO}:v{APP_VERSION}")
 }
 
+pub fn official_latest_container_image() -> String {
+    format!("{MCP_IMAGE_REPO}:latest")
+}
+
+pub fn is_official_latest_container_image(image: &str) -> bool {
+    image.trim() == official_latest_container_image()
+}
+
 pub fn container_image_for_tag(tag: &str) -> String {
     format!("{MCP_IMAGE_REPO}:{}", tag.trim())
 }
@@ -34,5 +42,15 @@ mod tests {
             container_image_for_tag("pr-123"),
             format!("{MCP_IMAGE_REPO}:pr-123")
         );
+    }
+
+    #[test]
+    fn detects_official_latest_image() {
+        assert!(is_official_latest_container_image(
+            &official_latest_container_image()
+        ));
+        assert!(!is_official_latest_container_image(
+            "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.4"
+        ));
     }
 }

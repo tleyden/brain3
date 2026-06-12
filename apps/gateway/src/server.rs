@@ -25,8 +25,8 @@ use crate::{apply_runtime_overrides, RuntimeOverrides};
 
 pub struct ConfiguredGatewaySession {
     pub runtime: RuntimeBootstrap,
-    pub server: GatewayServerHandle,
-    pub display_url: String,
+    pub server: Option<GatewayServerHandle>,
+    pub display_url: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -161,13 +161,19 @@ pub async fn spawn_configured_gateway_session(
     apply_runtime_overrides(&mut config, &runtime_overrides)?;
     let config = Arc::new(config);
     let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
-    let server = spawn_gateway_server(
-        host,
-        Arc::clone(&runtime.config),
-        runtime.upstream_secret.clone(),
-    )
-    .await?;
-    let display_url = runtime.display_url(server.local_url());
+
+    let (server, display_url) = if runtime.can_start_gateway() {
+        let server = spawn_gateway_server(
+            host,
+            Arc::clone(&runtime.config),
+            runtime.upstream_secret.clone(),
+        )
+        .await?;
+        let display_url = runtime.display_url(server.local_url());
+        (Some(server), Some(display_url))
+    } else {
+        (None, None)
+    };
 
     Ok(ConfiguredGatewaySession {
         runtime,
