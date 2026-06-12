@@ -360,9 +360,10 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Brain3 is configured and running.",
             success_style(),
         )),
+        blank_line(),
         Line::from(Span::styled(
             "MCP Connection Details for AI app - See README for instructions",
-            accent_style(),
+            connection_heading_style(),
         )),
         blank_line(),
         key_value_line("Server URL", format!("{}/mcp", card.server_url)),
@@ -370,7 +371,6 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         key_value_line("Client Secret", card.client_secret.clone()),
         key_value_line("Username", card.username.clone()),
         key_value_line("Password", card.password.clone()),
-        key_value_line("Logs", card.log_file.display().to_string()),
     ]
 }
 
@@ -729,6 +729,12 @@ fn value_style() -> Style {
 fn accent_style() -> Style {
     Style::default()
         .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD)
+}
+
+fn connection_heading_style() -> Style {
+    Style::default()
+        .fg(Color::Rgb(255, 190, 120))
         .add_modifier(Modifier::BOLD)
 }
 
