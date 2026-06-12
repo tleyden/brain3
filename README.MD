@@ -304,6 +304,16 @@ cargo build --release
 
 Refer to the [Quick Start](#quick-start) prerequisites above.
 
+### Install a PR build
+
+PR install scripts are published at `https://brain3.s3.amazonaws.com/pr/<PR_NUMBER>/install.sh` while the PR is open.
+
+```bash
+curl -sSfL https://brain3.s3.amazonaws.com/pr/123/install.sh | sh
+```
+
+Replace `123` with the pull request number.
+
 ### Clone and build from source
 
 ```bash
