@@ -424,6 +424,7 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
     {
         Ok(session) => session,
         Err(error) => {
+            tracing::error!(error = %error, "failed to start gateway session");
             state.error_message = Some(error.to_string());
             state.info_message = None;
             return;
