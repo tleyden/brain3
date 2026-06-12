@@ -23,7 +23,7 @@ class ServerStartupTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "VAULT_PATH": str(TEST_VAULT),
+                "B3_VAULT_PATH": str(TEST_VAULT),
             },
             clear=False,
         ):
@@ -35,8 +35,8 @@ class ServerStartupTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "VAULT_PATH": str(TEST_VAULT),
-                "VAULT_MCP_HOST": "0.0.0.0",
+                "B3_VAULT_PATH": str(TEST_VAULT),
+                "B3_VAULT_MCP_HOST": "0.0.0.0",
             },
             clear=False,
         ):
@@ -48,8 +48,8 @@ class ServerStartupTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "VAULT_PATH": str(TEST_VAULT),
-                "VAULT_MCP_PORT": "8420",
+                "B3_VAULT_PATH": str(TEST_VAULT),
+                "B3_VAULT_MCP_PORT": "8420",
             },
             clear=False,
         ):
@@ -61,8 +61,8 @@ class ServerStartupTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {
-                "VAULT_PATH": str(TEST_VAULT),
-                "VAULT_MCP_PORT": "8420",
+                "B3_VAULT_PATH": str(TEST_VAULT),
+                "B3_VAULT_MCP_PORT": "8420",
             },
             clear=False,
         ):

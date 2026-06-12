@@ -38,8 +38,8 @@ class ToolWritePatchApiTests(unittest.TestCase):
         self.env_patcher = patch.dict(
             os.environ,
             {
-                "VAULT_PATH": str(self.vault),
-                "VAULT_MCP_PORT": "8420",
+                "B3_VAULT_PATH": str(self.vault),
+                "B3_VAULT_MCP_PORT": "8420",
             },
             clear=False,
         )

@@ -1,13 +1,13 @@
 import os
 from pathlib import Path
 
-VAULT_PATH = Path(os.environ.get("VAULT_PATH", os.path.expanduser("~/Obsidian/MyVault")))
-VAULT_MCP_HOST = os.environ.get("VAULT_MCP_HOST", "127.0.0.1")
-VAULT_MCP_PORT = int(os.environ.get("VAULT_MCP_PORT", "8420"))
+VAULT_PATH = Path(os.environ.get("B3_VAULT_PATH", os.path.expanduser("~/Obsidian/MyVault")))
+VAULT_MCP_HOST = os.environ.get("B3_VAULT_MCP_HOST", "127.0.0.1")
+VAULT_MCP_PORT = int(os.environ.get("B3_VAULT_MCP_PORT", "8420"))
 
-_extra = os.environ.get("VAULT_MCP_ALLOWED_HOSTS", "")
+_extra = os.environ.get("B3_VAULT_MCP_ALLOWED_HOSTS", "")
 VAULT_MCP_EXTRA_ALLOWED_HOSTS: list[str] = [host.strip() for host in _extra.split(",") if host.strip()]
-UPSTREAM_SHARED_SECRET_FILE = os.environ.get("UPSTREAM_SHARED_SECRET_FILE", "/run/brain3/upstream_secret")
+UPSTREAM_SHARED_SECRET_FILE = os.environ.get("B3_UPSTREAM_SHARED_SECRET_FILE", "/run/brain3/upstream_secret")
 UPSTREAM_SHARED_SECRET_HEADER = "x-brain3-upstream-secret"
 
 MAX_CONTENT_SIZE = 1_000_000

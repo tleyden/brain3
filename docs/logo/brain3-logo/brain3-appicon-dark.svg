@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="Brain3 app icon">
+<rect width="512" height="512" rx="112" fill="#1C1E26"/>
+<g transform="translate(97.28,97.28) scale(1.88952) translate(-16,-16)"><g fill="none" stroke-linecap="round">
+<path d="M114.5,25.4 A76,76 0 1 1 85.5,25.4" stroke="#5440CE" stroke-width="16"/>
+<path d="M118.7,146.4 A50,50 0 1 1 137.2,133.5" stroke="#6856E9" stroke-width="14"/>
+<path d="M76.4,111.0 A26,26 0 1 1 85.1,121.3" stroke="#877CF0" stroke-width="12"/>
+</g>
+<circle cx="100" cy="98.5" r="6.5" fill="#A69EF6"/>
+<rect x="96.75" y="100" width="6.5" height="10" rx="3.25" fill="#A69EF6"/></g>
+</svg>

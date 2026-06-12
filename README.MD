@@ -1,5 +1,5 @@
 
-<img width="800" alt="Image" src="docs/screenshots/hero.png" />
+<img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 
 ## Why This Exists
 
@@ -21,6 +21,8 @@ I decided to build Brain3 as a container-based solution with a heavy emphasis on
 <table><tr>
 <td><img width="280" alt="Image" src="docs/screenshots/screenshot-2.png" /></td>
 <td><img width="280" alt="Image" src="docs/screenshots/screenshot-1.png" /></td>
+</tr><tr>
+<td colspan="2" align="center">Chatting w/ Brain3 MCP and showing tool calls</td>
 </tr></table>
 
 ## Privacy and Security
@@ -175,7 +177,7 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 
 ### Authentication & Authorization
 
-- Preregistered clients only. Solely the client configured via `OAUTH2_GATEWAY_CLIENT_ID` and `OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic Client Registration (DCR) and Client ID Metadata Document (CIMD) are disabled.
+- Preregistered clients only. Solely the client configured via `B3_OAUTH2_GATEWAY_CLIENT_ID` and `B3_OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic Client Registration (DCR) and Client ID Metadata Document (CIMD) are disabled.
 - Client secret required at token exchange (`client_secret_post`).
 - PKCE (`S256`) enforced by default to prevent authorization-code interception.
 - Auth codes are single-use and expire after 5 minutes.
@@ -196,7 +198,7 @@ Recommended if you want a stable hostname like `brain3.yourdomain.com`. This req
 1. Install `cloudflared` — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
 2. Log in: `cloudflared tunnel login`
 3. Create the tunnel and DNS route (one-time setup — see Cloudflare docs)
-4. In your `.env`, set `CF_TUNNEL_NAME`, `CF_DOMAIN`, and `CF_TUNNEL_CONFIG_FILE` (path to the `.yml` config file written during setup)
+4. In your `.env`, set `B3_CF_TUNNEL_NAME`, `B3_CF_DOMAIN`, and `B3_CF_TUNNEL_CONFIG_FILE` (path to the `.yml` config file written during setup)
 5. Start Brain3. It will start `cloudflared` automatically and log:
 
 ```
@@ -207,7 +209,7 @@ INFO tunnel started url=https://brain3.yourdomain.com
 
 This is an alternative to a Cloudflare Tunnel if tunnels are not practical in your environment. It is less preferred because it involves exposing ports more directly, so only use it when a Cloudflare Tunnel is not a workable option.
 
-If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
+If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
 
 Example minimal Caddyfile:
 
@@ -225,25 +227,25 @@ All configuration is via environment variables, loaded from a `.env` file.
 
 | Variable | Default | Description |
 |---|---|---|
-| `OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
-| `OAUTH2_GATEWAY_CLIENT_ID` | `oauth2-gateway-client` | OAuth client ID accepted by Brain3 |
-| `OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
-| `OAUTH2_GATEWAY_ACCESS_TOKEN` | *(required)* | Bearer token returned after successful auth |
-| `OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `http://127.0.0.1:8420` | URL of the MCP server |
-| `OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `/tmp/brain3-mcp-upstream-secret` | Path to the shared secret file |
-| `OAUTH2_PKCE_REQUIRED` | `true` | Require PKCE for OAuth flow |
-| `USERNAME` | *(required)* | Login username for the Brain3 sign-in page |
-| `PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
-| `OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
-| `CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
-| `CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; Brain3 starts `cloudflared` automatically when set with `CF_DOMAIN` |
-| `CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `CF_TUNNEL_NAME`) |
-| `CF_TUNNEL_CONFIG_FILE` | *(required if `CF_TUNNEL_NAME` set)* | Path to the `cloudflared` config file written during tunnel provisioning |
-| `DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
-| `BRAIN3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
-| `BRAIN3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
-| `BRAIN3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` |
-| `BRAIN3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
+| `B3_OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
+| `B3_OAUTH2_GATEWAY_CLIENT_ID` | `oauth2-gateway-client` | OAuth client ID accepted by Brain3 |
+| `B3_OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
+| `B3_OAUTH2_GATEWAY_ACCESS_TOKEN` | *(required)* | Bearer token returned after successful auth |
+| `B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `http://127.0.0.1:8420` | URL of the MCP server |
+| `B3_OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `/tmp/brain3-mcp-upstream-secret` | Path to the shared secret file |
+| `B3_OAUTH2_PKCE_REQUIRED` | `true` | Require PKCE for OAuth flow |
+| `B3_USERNAME` | *(required)* | Login username for the Brain3 sign-in page |
+| `B3_PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
+| `B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
+| `B3_CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
+| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; Brain3 starts `cloudflared` automatically when set with `B3_CF_DOMAIN` |
+| `B3_CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `B3_CF_TUNNEL_NAME`) |
+| `B3_CF_TUNNEL_CONFIG_FILE` | *(required if `B3_CF_TUNNEL_NAME` set)* | Path to the `cloudflared` config file written during tunnel provisioning |
+| `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
+| `B3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
+| `B3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
+| `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` |
+| `B3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 
 ## MD Vault MCP Tools
 

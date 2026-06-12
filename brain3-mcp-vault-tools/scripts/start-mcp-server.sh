@@ -11,8 +11,8 @@ if [ -f ".env" ]; then
     set +o allexport
 fi
 
-if [ -z "${VAULT_MCP_ALLOWED_HOSTS:-}" ]; then
-    echo "INFO: VAULT_MCP_ALLOWED_HOSTS not set -- server only reachable via localhost"
+if [ -z "${B3_VAULT_MCP_ALLOWED_HOSTS:-}" ]; then
+    echo "INFO: B3_VAULT_MCP_ALLOWED_HOSTS not set -- server only reachable via localhost"
 fi
 
 if [ ! -d ".venv" ]; then
@@ -24,4 +24,4 @@ if [ ! -d ".venv" ]; then
     fi
 fi
 
-VAULT_PATH=${VAULT_PATH:-"$HOME/obsidian_vaults"} uv run brain3-mcp-vault-tools
+B3_VAULT_PATH=${B3_VAULT_PATH:-"$HOME/obsidian_vaults"} uv run brain3-mcp-vault-tools

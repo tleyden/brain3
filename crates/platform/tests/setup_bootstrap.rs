@@ -48,16 +48,16 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     let rendered = render_env_file(&draft, &paths).expect("env should render");
 
     assert!(rendered.contains("# Set the local port for this gateway. Default: 8421."));
-    assert!(rendered.contains("OAUTH2_GATEWAY_CLIENT_ID=\"custom-client\""));
-    assert!(rendered.contains("OAUTH2_GATEWAY_CLIENT_SECRET=\"secret-123\""));
-    assert!(rendered.contains("OAUTH2_GATEWAY_ACCESS_TOKEN=\"access-456\""));
-    assert!(rendered.contains("USERNAME=\"admin\""));
-    assert!(rendered.contains("PASSWORD=\"correct horse battery staple\""));
-    assert!(rendered.contains("CF_QUICK_TUNNEL=\"true\""));
-    assert!(rendered.contains("BRAIN3_CONTAINER_RUNTIME=\"macos-container\""));
-    assert!(rendered.contains("BRAIN3_VAULT_PATH=\"/Users/test/My Vault\""));
+    assert!(rendered.contains("B3_OAUTH2_GATEWAY_CLIENT_ID=\"custom-client\""));
+    assert!(rendered.contains("B3_OAUTH2_GATEWAY_CLIENT_SECRET=\"secret-123\""));
+    assert!(rendered.contains("B3_OAUTH2_GATEWAY_ACCESS_TOKEN=\"access-456\""));
+    assert!(rendered.contains("B3_USERNAME=\"admin\""));
+    assert!(rendered.contains("B3_PASSWORD=\"correct horse battery staple\""));
+    assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));
+    assert!(rendered.contains("B3_CONTAINER_RUNTIME=\"macos-container\""));
+    assert!(rendered.contains("B3_VAULT_PATH=\"/Users/test/My Vault\""));
     assert!(rendered
-        .contains("BRAIN3_CONTAINER_IMAGE=\"ghcr.io/tleyden/brain3-mcp-vault-tools:latest\""));
+        .contains("B3_CONTAINER_IMAGE=\"ghcr.io/tleyden/brain3-mcp-vault-tools:latest\""));
 }
 
 #[tokio::test]

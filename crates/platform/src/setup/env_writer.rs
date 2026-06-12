@@ -36,34 +36,34 @@ fn build_overrides(
 ) -> Result<HashMap<&'static str, String>, SetupError> {
     let mut values = HashMap::new();
 
-    values.insert("OAUTH2_GATEWAY_PORT", draft.gateway_port.to_string());
-    values.insert("OAUTH2_GATEWAY_CLIENT_ID", draft.client_id.clone());
-    values.insert("OAUTH2_GATEWAY_CLIENT_SECRET", draft.client_secret.clone());
-    values.insert("USERNAME", draft.username.clone());
-    values.insert("PASSWORD", draft.password.clone());
-    values.insert("OAUTH2_GATEWAY_ACCESS_TOKEN", draft.access_token.clone());
+    values.insert("B3_OAUTH2_GATEWAY_PORT", draft.gateway_port.to_string());
+    values.insert("B3_OAUTH2_GATEWAY_CLIENT_ID", draft.client_id.clone());
+    values.insert("B3_OAUTH2_GATEWAY_CLIENT_SECRET", draft.client_secret.clone());
+    values.insert("B3_USERNAME", draft.username.clone());
+    values.insert("B3_PASSWORD", draft.password.clone());
+    values.insert("B3_OAUTH2_GATEWAY_ACCESS_TOKEN", draft.access_token.clone());
     values.insert(
-        "BRAIN3_CONTAINER_RUNTIME",
+        "B3_CONTAINER_RUNTIME",
         container_runtime_value(draft.container_runtime).to_string(),
     );
-    values.insert("BRAIN3_VAULT_PATH", draft.vault_path.display().to_string());
-    values.insert("BRAIN3_CONTAINER_IMAGE", draft.container_image.clone());
+    values.insert("B3_VAULT_PATH", draft.vault_path.display().to_string());
+    values.insert("B3_CONTAINER_IMAGE", draft.container_image.clone());
     values.insert(
-        "BRAIN3_CONTAINER_HOST_PORT",
+        "B3_CONTAINER_HOST_PORT",
         draft.container_host_port.to_string(),
     );
     values.insert(
-        "BRAIN3_CONTAINER_MCP_PORT",
+        "B3_CONTAINER_MCP_PORT",
         draft.container_mcp_port.to_string(),
     );
 
     match &draft.tunnel_mode {
         TunnelModeDraft::CloudflareQuick => {
-            values.insert("CF_QUICK_TUNNEL", "true".into());
-            values.insert("CF_TUNNEL_NAME", String::new());
-            values.insert("CF_DOMAIN", String::new());
-            values.insert("CF_TUNNEL_CONFIG_FILE", String::new());
-            values.insert("DIRECT_PUBLIC_ORIGIN_HOSTNAME", String::new());
+            values.insert("B3_CF_QUICK_TUNNEL", "true".into());
+            values.insert("B3_CF_TUNNEL_NAME", String::new());
+            values.insert("B3_CF_DOMAIN", String::new());
+            values.insert("B3_CF_TUNNEL_CONFIG_FILE", String::new());
+            values.insert("B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME", String::new());
         }
         TunnelModeDraft::CloudflareNamed {
             tunnel_name,
@@ -74,18 +74,18 @@ fn build_overrides(
                     "named tunnel mode requires both tunnel_name and domain".into(),
                 ));
             }
-            values.insert("CF_QUICK_TUNNEL", "false".into());
-            values.insert("CF_TUNNEL_NAME", tunnel_name.clone());
-            values.insert("CF_DOMAIN", domain.clone());
+            values.insert("B3_CF_QUICK_TUNNEL", "false".into());
+            values.insert("B3_CF_TUNNEL_NAME", tunnel_name.clone());
+            values.insert("B3_CF_DOMAIN", domain.clone());
             values.insert(
-                "CF_TUNNEL_CONFIG_FILE",
+                "B3_CF_TUNNEL_CONFIG_FILE",
                 paths
                     .cloudflared_dir
                     .join(format!("{tunnel_name}.yml"))
                     .display()
                     .to_string(),
             );
-            values.insert("DIRECT_PUBLIC_ORIGIN_HOSTNAME", String::new());
+            values.insert("B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME", String::new());
         }
         TunnelModeDraft::DirectPublicOrigin { hostname } => {
             let direct_hostname = if hostname.trim().is_empty() {
@@ -102,11 +102,11 @@ fn build_overrides(
                     "direct public origin mode requires a hostname".into(),
                 ));
             }
-            values.insert("CF_QUICK_TUNNEL", "false".into());
-            values.insert("CF_TUNNEL_NAME", String::new());
-            values.insert("CF_DOMAIN", String::new());
-            values.insert("CF_TUNNEL_CONFIG_FILE", String::new());
-            values.insert("DIRECT_PUBLIC_ORIGIN_HOSTNAME", direct_hostname);
+            values.insert("B3_CF_QUICK_TUNNEL", "false".into());
+            values.insert("B3_CF_TUNNEL_NAME", String::new());
+            values.insert("B3_CF_DOMAIN", String::new());
+            values.insert("B3_CF_TUNNEL_CONFIG_FILE", String::new());
+            values.insert("B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME", direct_hostname);
         }
     }
 
