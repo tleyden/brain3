@@ -3,18 +3,18 @@
 
 ## Why This Exists
 
-I want to be able to interact w/ my Obsidan second brain via Claude and ChatGPT, specifically from the mobile and desktop apps via remote MCP servers.  I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  
+I wanted a simple way to interact with my Obsidian markdown vault ("second brain") through Claude and ChatGPT, including their desktop and mobile apps.
 
-I then found [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) on a Reddit post, and started to use it.  I really like the fact that it is based on the MCP and OAuth2 open standards for maximum portability to any AI Assistant (including local open weights models), however, I wasn't satisfied w/ the overall security posture.  I even encountered some specific (now-fixed) security vulnerabilities like [obsidian-web-mcp#29](https://github.com/jimprosser/obsidian-web-mcp/issues/29).
+I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, but I wanted a container based security-first architecture. 
 
-I decided to build Brain3 as a container-based solution with a heavy emphasis on defensible security. 
+Brain3 lets you run a remotely available OAuth 2.1 compliant MCP server locally that securely bridges AI clients to your markdown vault via a Cloudflare Tunnel. The gateway is written in Rust and distributed as a single binary. It handles authentication, networking, and container management, then launches an isolated Docker or macOS native container that runs the MCP server with access limited to your vault directory.
 
 ## Features
 
 - Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
 - Obsidian-compatible, but Obsidian not required
 - TUI app for setup
-- Not AI Slop - while I'm using coding agents, I'm committed to creating a high-quality product, including a healthy amount of dogfooding.
+- **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) to ensure that the quality bar stays high.
 
 ## Screenshots (w/ Claude Mobile)
 
@@ -309,7 +309,14 @@ The binary is at `./target/release/brain3`.
 ./target/release/brain3
 ```
 
-Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) for the full flow.
+Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) fo r the full flow.
+
+## Roadmap
+
+* Improve search
+* LLMWiki features
+* NotebookLM features
+* Desktop menu bar app with full system tray integration + GUI
 
 ## License 
 
