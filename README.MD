@@ -7,8 +7,6 @@ I wanted a simple way to interact with my Obsidian markdown vault ("second brain
 
 I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, but I wanted a container based security-first architecture. 
 
-Brain3 lets you run a remotely available OAuth 2.1 compliant MCP server locally that securely bridges AI clients to your markdown vault via a Cloudflare Tunnel. The gateway is written in Rust and distributed as a single binary. It handles authentication, networking, and container management, then launches an isolated Docker or macOS native container that runs the MCP server with access limited to your vault directory.
-
 ## Features
 
 - Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
