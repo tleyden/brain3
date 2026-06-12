@@ -1,4 +1,5 @@
 mod app;
+mod runtime_logs;
 mod screens;
 mod state;
 

@@ -1,4 +1,4 @@
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -11,7 +11,10 @@ use brain3_platform::runtime::StartupStatus;
 
 use crate::server::GatewayServerStatus;
 
-use super::state::{install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState};
+use super::runtime_logs::RuntimeLogsState;
+use super::state::{
+    install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, RuntimeView,
+};
 
 pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
     let area = f.area();
@@ -36,10 +39,7 @@ pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
         .wrap(Wrap { trim: false });
     f.render_widget(progress, chunks[1]);
 
-    let body = Paragraph::new(body_lines(state))
-        .block(panel_block(body_panel_title(state.step)))
-        .wrap(Wrap { trim: false });
-    f.render_widget(body, chunks[2]);
+    render_body(f, state, chunks[2]);
 
     let status = Paragraph::new(status_lines(state))
         .block(panel_block("Status"))
@@ -120,9 +120,10 @@ fn screen_title(step: SetupStep) -> &'static str {
     }
 }
 
-fn body_panel_title(step: SetupStep) -> &'static str {
-    match step {
+fn body_panel_title(state: &FirstRunTuiState) -> &'static str {
+    match state.step {
         SetupStep::ConnectionCard => "MCP Config",
+        SetupStep::RuntimeStatus if state.runtime_view == RuntimeView::Logs => "Logs",
         SetupStep::RuntimeStatus => "Runtime Status",
         _ => "Details",
     }
@@ -161,6 +162,78 @@ fn body_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::Summary => summary_lines(state),
         SetupStep::ConnectionCard => connection_card_lines(state),
         SetupStep::RuntimeStatus => runtime_lines(state),
+    }
+}
+
+fn render_body(f: &mut ratatui::Frame, state: &FirstRunTuiState, area: Rect) {
+    if state.step == SetupStep::RuntimeStatus && state.runtime_view == RuntimeView::Logs {
+        render_runtime_logs(f, state, area);
+        return;
+    }
+
+    let body = Paragraph::new(body_lines(state))
+        .block(panel_block(body_panel_title(state)))
+        .wrap(Wrap { trim: false });
+    f.render_widget(body, area);
+}
+
+fn render_runtime_logs(f: &mut ratatui::Frame, state: &FirstRunTuiState, area: Rect) {
+    let block = panel_block(body_panel_title(state));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if inner.height == 0 || inner.width == 0 {
+        return;
+    }
+
+    let sections = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(1)])
+        .split(inner);
+
+    let mode_line = if state.runtime_logs.is_following() {
+        Line::from(vec![
+            badge_span("LIVE", Color::Green),
+            Span::styled("  Following newest retained log lines.", muted_style()),
+        ])
+    } else {
+        Line::from(vec![
+            badge_span("SCROLLED", Color::Yellow),
+            Span::styled("  Press End to jump back to the live tail.", muted_style()),
+        ])
+    };
+    f.render_widget(Paragraph::new(mode_line), sections[0]);
+
+    match state.runtime_logs.state() {
+        RuntimeLogsState::Unavailable(message) => {
+            let body = Paragraph::new(vec![
+                muted_line("Runtime logs are temporarily unavailable."),
+                blank_line(),
+                Line::from(Span::styled(message.clone(), warning_style())),
+            ]);
+            f.render_widget(body, sections[1]);
+        }
+        RuntimeLogsState::Empty | RuntimeLogsState::Loading => {
+            let message = match state.runtime_logs.state() {
+                RuntimeLogsState::Loading => "Loading runtime logs...",
+                _ => "No complete log lines have been written yet.",
+            };
+            f.render_widget(Paragraph::new(vec![muted_line(message)]), sections[1]);
+        }
+        RuntimeLogsState::Ready => {
+            let log_lines: Vec<Line<'static>> = state
+                .runtime_logs
+                .lines()
+                .iter()
+                .cloned()
+                .map(Line::from)
+                .collect();
+            let scroll = state
+                .runtime_logs
+                .scroll_offset_for_height(sections[1].height as usize);
+            let body = Paragraph::new(log_lines).scroll((scroll, 0));
+            f.render_widget(body, sections[1]);
+        }
     }
 }
 
@@ -383,6 +456,8 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         lines.push(muted_line("Press c to switch back to MCP config settings."));
     }
 
+    lines.push(muted_line("Press l to toggle the logs view."));
+
     lines.push(blank_line());
 
     if let Some(runtime) = &state.runtime {
@@ -485,16 +560,38 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             primary_action_line("Open runtime status when you're ready."),
             hint_line(vec![("[q]", "Quit"), ("[Enter]", "Open runtime status")]),
         ],
-        SetupStep::RuntimeStatus => match state.previous_step() {
-            Some(SetupStep::ConnectionCard) => vec![
-                primary_action_line("Press c to view MCP config settings again."),
-                hint_line(vec![("[c]", "MCP config settings"), ("[q]", "Quit")]),
-            ],
-            _ => vec![
-                primary_action_line("Brain3 is running."),
-                hint_line(vec![("[q]", "Quit")]),
-            ],
-        },
+        SetupStep::RuntimeStatus => runtime_action_lines(state),
+    }
+}
+
+fn runtime_action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
+    match state.runtime_view {
+        RuntimeView::Status => {
+            let mut hints = vec![("[l]", "Logs")];
+            if matches!(state.previous_step(), Some(SetupStep::ConnectionCard)) {
+                hints.push(("[c]", "MCP config settings"));
+            }
+            hints.push(("[q]", "Quit"));
+
+            vec![primary_action_line("Brain3 is running."), hint_line(hints)]
+        }
+        RuntimeView::Logs => {
+            let mut hints = vec![
+                ("[l]", "Status"),
+                ("[Up/Down]", "Scroll"),
+                ("[PgUp/PgDn]", "Page"),
+                ("[End]", "Live"),
+            ];
+            if matches!(state.previous_step(), Some(SetupStep::ConnectionCard)) {
+                hints.push(("[c]", "MCP config settings"));
+            }
+            hints.push(("[q]", "Quit"));
+
+            vec![
+                primary_action_line("Viewing runtime logs."),
+                hint_line(hints),
+            ]
+        }
     }
 }
 

@@ -19,7 +19,9 @@ use crate::server;
 use crate::server::ConfiguredGatewaySession;
 
 use super::screens;
-use super::state::{install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState};
+use super::state::{
+    install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, RuntimeView,
+};
 
 pub enum GatewayTuiLaunch {
     FirstRun,
@@ -78,6 +80,7 @@ async fn event_loop(
     setup_system: Arc<dyn SetupSystemPort>,
 ) -> Result<()> {
     loop {
+        handle_runtime_tick(state);
         terminal.draw(|f| screens::draw(f, state))?;
 
         if !event::poll(Duration::from_millis(200))? {
@@ -202,18 +205,46 @@ async fn event_loop(
             SetupStep::ConnectionCard => match key.code {
                 KeyCode::Enter => {
                     state.clear_messages();
+                    state.show_runtime_status();
                     state.step = SetupStep::RuntimeStatus;
                 }
                 _ => {}
             },
-            SetupStep::RuntimeStatus => {
-                if key.code == KeyCode::Char('c') && state.connection_card.is_some() {
+            SetupStep::RuntimeStatus => match key.code {
+                KeyCode::Char('l') => state.toggle_runtime_view(),
+                KeyCode::Up if state.runtime_view == RuntimeView::Logs => state.scroll_logs_up(1),
+                KeyCode::Down if state.runtime_view == RuntimeView::Logs => {
+                    state.scroll_logs_down(1);
+                }
+                KeyCode::PageUp if state.runtime_view == RuntimeView::Logs => {
+                    state.scroll_logs_up(runtime_logs_page_size());
+                }
+                KeyCode::PageDown if state.runtime_view == RuntimeView::Logs => {
+                    state.scroll_logs_down(runtime_logs_page_size());
+                }
+                KeyCode::End if state.runtime_view == RuntimeView::Logs => {
+                    state.jump_logs_to_end();
+                }
+                KeyCode::Char('c') if state.connection_card.is_some() => {
                     state.clear_messages();
                     state.step = SetupStep::ConnectionCard;
                 }
-            }
+                _ => {}
+            },
         }
     }
+}
+
+fn handle_runtime_tick(state: &mut FirstRunTuiState) {
+    if matches!(state.step, SetupStep::RuntimeStatus) {
+        state.refresh_runtime_logs();
+    }
+}
+
+fn runtime_logs_page_size() -> usize {
+    crossterm::terminal::size()
+        .map(|(_, rows)| rows.saturating_sub(20).max(1) as usize)
+        .unwrap_or(10)
 }
 
 async fn advance_from_vault_path(state: &mut FirstRunTuiState, use_case: &FirstRunSetupUseCase) {

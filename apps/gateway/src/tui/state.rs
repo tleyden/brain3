@@ -8,6 +8,8 @@ use brain3_platform::runtime::RuntimeBootstrap;
 
 use crate::server::{GatewayServerHandle, GatewayServerStatus};
 
+use super::runtime_logs::RuntimeLogs;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthField {
     Username,
@@ -21,10 +23,18 @@ pub enum DependencyDoctorFocus {
     Continue,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeView {
+    Status,
+    Logs,
+}
+
 pub struct FirstRunTuiState {
     pub host: String,
     pub log_file: PathBuf,
     pub step: SetupStep,
+    pub runtime_view: RuntimeView,
+    pub runtime_logs: RuntimeLogs,
     pub preparation: SetupPreparation,
     pub draft: SetupDraftConfig,
     pub generate_password: bool,
@@ -54,8 +64,10 @@ impl FirstRunTuiState {
 
         Self {
             host,
+            runtime_logs: RuntimeLogs::new(log_file.clone()),
             log_file,
             step: SetupStep::Welcome,
+            runtime_view: RuntimeView::Status,
             vault_path_input: draft.vault_path.display().to_string(),
             username_input: draft.username.clone(),
             client_id_input: draft.client_id.clone(),
@@ -230,6 +242,39 @@ impl FirstRunTuiState {
             Some(server) => server.status(),
             None => GatewayServerStatus::NotStarted,
         }
+    }
+
+    pub fn toggle_runtime_view(&mut self) {
+        match self.runtime_view {
+            RuntimeView::Status => self.show_runtime_logs(),
+            RuntimeView::Logs => self.show_runtime_status(),
+        }
+    }
+
+    pub fn show_runtime_logs(&mut self) {
+        self.refresh_runtime_logs();
+        self.runtime_logs.jump_to_end();
+        self.runtime_view = RuntimeView::Logs;
+    }
+
+    pub fn show_runtime_status(&mut self) {
+        self.runtime_view = RuntimeView::Status;
+    }
+
+    pub fn refresh_runtime_logs(&mut self) {
+        self.runtime_logs.refresh();
+    }
+
+    pub fn scroll_logs_up(&mut self, lines: usize) {
+        self.runtime_logs.scroll_up(lines);
+    }
+
+    pub fn scroll_logs_down(&mut self, lines: usize) {
+        self.runtime_logs.scroll_down(lines);
+    }
+
+    pub fn jump_logs_to_end(&mut self) {
+        self.runtime_logs.jump_to_end();
     }
 
     fn sync_dependency_focus(&mut self) {
