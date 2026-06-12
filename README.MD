@@ -195,6 +195,8 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 
 Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control.
 
+Named tunnels are also known to be more reliable and less likely to suffer rate limits or connectivity restrictions than quick tunnels, since quick tunnels are available to anyone without a Cloudflare account and may be throttled accordingly. 
+
 Brain3's normal first-run setup configures the app and defaults to a Cloudflare quick tunnel. Named tunnel provisioning is a separate guided flow:
 
 1. Run `brain3` once and complete the normal interactive setup wizard.
