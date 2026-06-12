@@ -109,7 +109,7 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
             </div>
             <p class="security-caption">Sign In</p>
           </div>
-          <div class="tunnel-badge" aria-label="Cloudflare Tunnel enabled by default">
+          <div class="tunnel-badge" aria-label="Cloudflare Tunnel">
             <span class="tunnel-icon" aria-hidden="true">
               <svg viewBox="0 0 48 32" xmlns="http://www.w3.org/2000/svg">
                 <path d="M18.9 25.7H40.4C43.5 25.7 46 23.2 46 20.1C46 17.2 43.8 14.8 41 14.5C40.5 10 36.7 6.5 32.1 6.5C28.3 6.5 24.9 8.9 23.6 12.3C22.8 11.9 21.9 11.7 21 11.7C17.9 11.7 15.3 14 14.8 17H14.5C11.2 17 8.5 19.7 8.5 23C8.5 24 8.8 24.9 9.2 25.7H18.9Z" fill="#F38020"/>
@@ -117,7 +117,7 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
                 <path d="M31.1 24.8H39.7C41.4 24.8 42.8 23.4 42.8 21.7C42.8 20.2 41.7 18.9 40.2 18.7C39.9 16.1 37.8 14.1 35.1 14.1C32.9 14.1 31 15.5 30.2 17.5C29.8 17.3 29.3 17.2 28.8 17.2C27 17.2 25.6 18.5 25.3 20.2H25.2C23.3 20.2 21.8 21.7 21.8 23.6C21.8 24 21.9 24.4 22.1 24.8H31.1Z" fill="#F38020"/>
               </svg>
             </span>
-            <span class="tunnel-text"><span class="tunnel-label">Cloudflare Tunnel</span><span class="tunnel-subtitle">default route</span></span>
+            <span class="tunnel-text"><span class="tunnel-label">Cloudflare Tunnel</span></span>
           </div>
         </div>
         <p class="lead">ChatGPT, Claude, or another AI app is requesting access to your local Brain3 MCP gateway.</p>
