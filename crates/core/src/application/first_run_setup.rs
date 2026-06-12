@@ -41,6 +41,8 @@ impl FirstRunSetupUseCase {
             container_image: self.defaults.default_container_image.clone(),
             container_host_port: DEFAULT_CONTAINER_HOST_PORT,
             container_mcp_port: DEFAULT_CONTAINER_MCP_PORT,
+            pkce_required: true,
+            enforce_hostname_check: true,
             direct_public_origin_hostname: None,
         };
 
@@ -293,6 +295,8 @@ mod tests {
             container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
             container_host_port: 8420,
             container_mcp_port: 8420,
+            pkce_required: true,
+            enforce_hostname_check: true,
             direct_public_origin_hostname: None,
         }
     }

@@ -18,6 +18,15 @@ pub enum AuthField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PortsField {
+    GatewayPort,
+    ContainerHostPort,
+    ContainerMcpPort,
+    PkceRequired,
+    EnforceHostnameCheck,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DependencyDoctorFocus {
     InstallAction,
     Continue,
@@ -49,6 +58,10 @@ pub struct FirstRunTuiState {
     pub client_id_input: String,
     pub password_input: String,
     pub auth_focus: AuthField,
+    pub ports_focus: PortsField,
+    pub gateway_port_input: String,
+    pub container_host_port_input: String,
+    pub container_mcp_port_input: String,
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
 }
@@ -62,15 +75,22 @@ impl FirstRunTuiState {
             DependencyDoctorFocus::InstallAction
         };
 
+        let vault_path_input = draft.vault_path.display().to_string();
+        let username_input = draft.username.clone();
+        let client_id_input = draft.client_id.clone();
+        let gateway_port_input = draft.gateway_port.to_string();
+        let container_host_port_input = draft.container_host_port.to_string();
+        let container_mcp_port_input = draft.container_mcp_port.to_string();
+
         Self {
             host,
             runtime_logs: RuntimeLogs::new(log_file.clone()),
             log_file,
             step: SetupStep::Welcome,
             runtime_view: RuntimeView::Status,
-            vault_path_input: draft.vault_path.display().to_string(),
-            username_input: draft.username.clone(),
-            client_id_input: draft.client_id.clone(),
+            vault_path_input,
+            username_input,
+            client_id_input,
             password_input: String::new(),
             draft,
             preparation,
@@ -82,6 +102,10 @@ impl FirstRunTuiState {
             error_message: None,
             info_message: None,
             auth_focus: AuthField::Username,
+            ports_focus: PortsField::GatewayPort,
+            gateway_port_input,
+            container_host_port_input,
+            container_mcp_port_input,
             dependency_focus,
             dependency_action_index: 0,
         }
@@ -160,6 +184,16 @@ impl FirstRunTuiState {
             self.password_input.clone()
         };
 
+        if let Ok(port) = self.gateway_port_input.trim().parse::<u16>() {
+            self.draft.gateway_port = port;
+        }
+        if let Ok(port) = self.container_host_port_input.trim().parse::<u16>() {
+            self.draft.container_host_port = port;
+        }
+        if let Ok(port) = self.container_mcp_port_input.trim().parse::<u16>() {
+            self.draft.container_mcp_port = port;
+        }
+
         FinalizeSetupRequest {
             draft: self.draft.clone(),
             generate_password: self.generate_password,
@@ -201,6 +235,45 @@ impl FirstRunTuiState {
             AuthField::ClientId => AuthField::Username,
             AuthField::Password => AuthField::ClientId,
         };
+    }
+
+    pub fn next_ports_focus(&mut self) {
+        self.ports_focus = match self.ports_focus {
+            PortsField::GatewayPort => PortsField::ContainerHostPort,
+            PortsField::ContainerHostPort => PortsField::ContainerMcpPort,
+            PortsField::ContainerMcpPort => PortsField::PkceRequired,
+            PortsField::PkceRequired => PortsField::EnforceHostnameCheck,
+            PortsField::EnforceHostnameCheck => PortsField::GatewayPort,
+        };
+    }
+
+    pub fn previous_ports_focus(&mut self) {
+        self.ports_focus = match self.ports_focus {
+            PortsField::GatewayPort => PortsField::EnforceHostnameCheck,
+            PortsField::ContainerHostPort => PortsField::GatewayPort,
+            PortsField::ContainerMcpPort => PortsField::ContainerHostPort,
+            PortsField::PkceRequired => PortsField::ContainerMcpPort,
+            PortsField::EnforceHostnameCheck => PortsField::PkceRequired,
+        };
+    }
+
+    pub fn toggle_ports_boolean(&mut self) {
+        match self.ports_focus {
+            PortsField::PkceRequired => {
+                self.draft.pkce_required = !self.draft.pkce_required;
+            }
+            PortsField::EnforceHostnameCheck => {
+                self.draft.enforce_hostname_check = !self.draft.enforce_hostname_check;
+            }
+            _ => {}
+        }
+    }
+
+    pub fn ports_focus_is_text_field(&self) -> bool {
+        matches!(
+            self.ports_focus,
+            PortsField::GatewayPort | PortsField::ContainerHostPort | PortsField::ContainerMcpPort
+        )
     }
 
     pub fn toggle_dependency_focus(&mut self) {
@@ -261,7 +334,8 @@ impl FirstRunTuiState {
             SetupStep::DependencyDoctor => Some(SetupStep::Welcome),
             SetupStep::VaultPath => Some(SetupStep::DependencyDoctor),
             SetupStep::Auth => Some(SetupStep::VaultPath),
-            SetupStep::Summary => Some(SetupStep::Auth),
+            SetupStep::PortsAndSettings => Some(SetupStep::Auth),
+            SetupStep::Summary => Some(SetupStep::PortsAndSettings),
             SetupStep::ConnectionCard => None,
             SetupStep::RuntimeStatus => self
                 .connection_card
@@ -319,6 +393,18 @@ impl FirstRunTuiState {
         }
 
         self.dependency_action_index = self.dependency_action_index.min(action_count - 1);
+    }
+}
+
+pub fn validate_port_input(input: &str, label: &str) -> Result<u16, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{label} must not be empty"));
+    }
+    match trimmed.parse::<u16>() {
+        Ok(0) => Err(format!("{label} must be greater than 0")),
+        Ok(port) => Ok(port),
+        Err(_) => Err(format!("{label} must be a valid port number (1-65535)")),
     }
 }
 

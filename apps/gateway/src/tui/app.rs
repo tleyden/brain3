@@ -23,7 +23,8 @@ use crate::RuntimeOverrides;
 
 use super::screens;
 use super::state::{
-    install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, RuntimeView,
+    install_action_label, validate_port_input, AuthField, DependencyDoctorFocus,
+    FirstRunTuiState, PortsField, RuntimeView,
 };
 
 pub enum GatewayTuiLaunch {
@@ -170,7 +171,7 @@ async fn event_loop(
                 }
                 KeyCode::Enter => {
                     state.clear_messages();
-                    state.step = SetupStep::Summary;
+                    state.step = SetupStep::PortsAndSettings;
                 }
                 KeyCode::Tab | KeyCode::Down => {
                     state.next_auth_focus();
@@ -206,10 +207,63 @@ async fn event_loop(
                 },
                 _ => {}
             },
-            SetupStep::Summary => match key.code {
+            SetupStep::PortsAndSettings => match key.code {
                 KeyCode::Esc => {
                     state.clear_messages();
                     state.step = SetupStep::Auth;
+                }
+                KeyCode::Enter => {
+                    state.clear_messages();
+                    if let Err(msg) = validate_port_input(
+                        &state.gateway_port_input,
+                        "Gateway port",
+                    ) {
+                        state.error_message = Some(msg);
+                    } else if let Err(msg) = validate_port_input(
+                        &state.container_host_port_input,
+                        "Container host port",
+                    ) {
+                        state.error_message = Some(msg);
+                    } else if let Err(msg) = validate_port_input(
+                        &state.container_mcp_port_input,
+                        "Container MCP port",
+                    ) {
+                        state.error_message = Some(msg);
+                    } else {
+                        state.step = SetupStep::Summary;
+                    }
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    state.next_ports_focus();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    state.previous_ports_focus();
+                }
+                KeyCode::Char('t') => {
+                    state.toggle_ports_boolean();
+                }
+                KeyCode::Backspace if state.ports_focus_is_text_field() => {
+                    match state.ports_focus {
+                        PortsField::GatewayPort => { state.gateway_port_input.pop(); }
+                        PortsField::ContainerHostPort => { state.container_host_port_input.pop(); }
+                        PortsField::ContainerMcpPort => { state.container_mcp_port_input.pop(); }
+                        _ => {}
+                    }
+                }
+                KeyCode::Char(ch) if state.ports_focus_is_text_field() && ch.is_ascii_digit() => {
+                    match state.ports_focus {
+                        PortsField::GatewayPort => state.gateway_port_input.push(ch),
+                        PortsField::ContainerHostPort => state.container_host_port_input.push(ch),
+                        PortsField::ContainerMcpPort => state.container_mcp_port_input.push(ch),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            },
+            SetupStep::Summary => match key.code {
+                KeyCode::Esc => {
+                    state.clear_messages();
+                    state.step = SetupStep::PortsAndSettings;
                 }
                 KeyCode::Enter => {
                     finalize_and_start(state, use_case).await;
