@@ -32,9 +32,9 @@ class UpstreamAccessControlTests(unittest.TestCase):
         self.env_patcher = patch.dict(
             os.environ,
             {
-                "VAULT_PATH": str(self.vault),
-                "VAULT_MCP_PORT": "8420",
-                "UPSTREAM_SHARED_SECRET_FILE": str(self.secret_file),
+                "B3_VAULT_PATH": str(self.vault),
+                "B3_VAULT_MCP_PORT": "8420",
+                "B3_UPSTREAM_SHARED_SECRET_FILE": str(self.secret_file),
             },
             clear=False,
         )

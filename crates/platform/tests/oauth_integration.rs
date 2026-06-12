@@ -403,8 +403,8 @@ async fn authorize_shows_login_form_with_credential_guidance() {
     resp.assert_status_ok();
     let text = resp.text();
     assert!(text.contains("Sign in to continue connecting your AI app"));
-    assert!(text.contains("USERNAME"));
-    assert!(text.contains("PASSWORD"));
+    assert!(text.contains("B3_USERNAME"));
+    assert!(text.contains("B3_PASSWORD"));
     assert!(text.contains(".env"));
     assert!(text.contains("ChatGPT"));
     assert!(text.contains("Claude"));
@@ -432,7 +432,7 @@ async fn authorize_returns_503_when_login_credentials_are_not_configured() {
 
     assert_eq!(resp.status_code(), 503);
     let text = resp.text();
-    assert!(text.contains("PASSWORD"));
+    assert!(text.contains("B3_PASSWORD"));
     assert!(text.contains(".env"));
 }
 

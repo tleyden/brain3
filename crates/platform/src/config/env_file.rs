@@ -40,15 +40,15 @@ impl ConfigPort for EnvFileConfigAdapter {
     fn load(&self) -> Result<GatewayConfig, ConfigError> {
         self.load_env_file();
 
-        let port = env_var_or("OAUTH2_GATEWAY_PORT", "8421")
+        let port = env_var_or("B3_OAUTH2_GATEWAY_PORT", "8421")
             .parse::<u16>()
-            .map_err(|e| ConfigError::Invalid(format!("OAUTH2_GATEWAY_PORT: {e}")))?;
+            .map_err(|e| ConfigError::Invalid(format!("B3_OAUTH2_GATEWAY_PORT: {e}")))?;
 
         let expected_host = resolve_expected_host()?;
-        let enforce_hostname = env_bool("OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
+        let enforce_hostname = env_bool("B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
 
         let upstream_secret_file = PathBuf::from(env_var_or(
-            "OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
+            "B3_OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
             "/tmp/brain3-mcp-upstream-secret",
         ));
 
@@ -60,10 +60,10 @@ impl ConfigPort for EnvFileConfigAdapter {
         };
 
         let mut missing = Vec::new();
-        let client_secret = require_nonempty("OAUTH2_GATEWAY_CLIENT_SECRET", &mut missing);
-        let access_token = require_nonempty("OAUTH2_GATEWAY_ACCESS_TOKEN", &mut missing);
-        let username = require_nonempty("USERNAME", &mut missing);
-        let password = require_nonempty("PASSWORD", &mut missing);
+        let client_secret = require_nonempty("B3_OAUTH2_GATEWAY_CLIENT_SECRET", &mut missing);
+        let access_token = require_nonempty("B3_OAUTH2_GATEWAY_ACCESS_TOKEN", &mut missing);
+        let username = require_nonempty("B3_USERNAME", &mut missing);
+        let password = require_nonempty("B3_PASSWORD", &mut missing);
         if !missing.is_empty() {
             return Err(ConfigError::Missing(format!(
                 "required env vars not set: {}",
@@ -77,16 +77,16 @@ impl ConfigPort for EnvFileConfigAdapter {
             port,
             host: "127.0.0.1".to_string(),
             oauth: OAuthConfig {
-                client_id: env_var_or("OAUTH2_GATEWAY_CLIENT_ID", "oauth2-gateway-client"),
+                client_id: env_var_or("B3_OAUTH2_GATEWAY_CLIENT_ID", "oauth2-gateway-client"),
                 client_secret,
                 access_token,
-                pkce_required: env_bool("OAUTH2_PKCE_REQUIRED", true),
+                pkce_required: env_bool("B3_OAUTH2_PKCE_REQUIRED", true),
                 username,
                 password,
             },
             mcp_reverse_proxy: MCPReverseProxyConfig {
                 mcp_upstream_url: env_var_or(
-                    "OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
+                    "B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
                     &default_upstream_url,
                 ),
                 upstream_secret_file,
@@ -132,7 +132,7 @@ fn derive_container_name_from_image(image: &str) -> Result<String, ConfigError> 
         .filter(|segment| !segment.is_empty())
         .ok_or_else(|| {
             ConfigError::Invalid(format!(
-                "BRAIN3_CONTAINER_IMAGE: could not derive container name from '{image}'"
+                "B3_CONTAINER_IMAGE: could not derive container name from '{image}'"
             ))
         })?;
 
@@ -141,7 +141,7 @@ fn derive_container_name_from_image(image: &str) -> Result<String, ConfigError> 
 
     if name.is_empty() {
         return Err(ConfigError::Invalid(format!(
-            "BRAIN3_CONTAINER_IMAGE: could not derive container name from '{image}'"
+            "B3_CONTAINER_IMAGE: could not derive container name from '{image}'"
         )));
     }
 
@@ -160,8 +160,8 @@ fn normalize_hostname(value: &str) -> String {
 }
 
 fn named_tunnel_host() -> Option<String> {
-    let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
-    let domain = normalize_hostname(&env_var_or("CF_DOMAIN", ""));
+    let tunnel_name = normalize_hostname(&env_var_or("B3_CF_TUNNEL_NAME", ""));
+    let domain = normalize_hostname(&env_var_or("B3_CF_DOMAIN", ""));
     if tunnel_name.is_empty() || domain.is_empty() {
         return None;
     }
@@ -169,7 +169,7 @@ fn named_tunnel_host() -> Option<String> {
 }
 
 fn direct_public_origin_hostname() -> Option<String> {
-    let hostname = normalize_hostname(&env_var_or("DIRECT_PUBLIC_ORIGIN_HOSTNAME", ""));
+    let hostname = normalize_hostname(&env_var_or("B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME", ""));
     if hostname.is_empty() {
         None
     } else {
@@ -180,7 +180,7 @@ fn direct_public_origin_hostname() -> Option<String> {
 fn load_container_startup_config(
     upstream_secret_file: &PathBuf,
 ) -> Result<Option<ContainerStartupConfig>, ConfigError> {
-    let runtime_str = env_var_or("BRAIN3_CONTAINER_RUNTIME", "");
+    let runtime_str = env_var_or("B3_CONTAINER_RUNTIME", "");
     let runtime_str = runtime_str.trim();
     if runtime_str.is_empty() {
         return Ok(None);
@@ -191,35 +191,35 @@ fn load_container_startup_config(
         "macos-container" => ContainerRuntime::MacOSContainer,
         other => {
             return Err(ConfigError::Invalid(format!(
-                "BRAIN3_CONTAINER_RUNTIME: unknown value '{other}'; expected 'docker' or 'macos-container'"
+                "B3_CONTAINER_RUNTIME: unknown value '{other}'; expected 'docker' or 'macos-container'"
             )))
         }
     };
 
     let vault_path_str =
-        require_nonempty_env("BRAIN3_VAULT_PATH", "when BRAIN3_CONTAINER_RUNTIME is set")?;
+        require_nonempty_env("B3_VAULT_PATH", "when B3_CONTAINER_RUNTIME is set")?;
 
     let image = require_nonempty_env(
-        "BRAIN3_CONTAINER_IMAGE",
-        "when BRAIN3_CONTAINER_RUNTIME is set",
+        "B3_CONTAINER_IMAGE",
+        "when B3_CONTAINER_RUNTIME is set",
     )?;
 
     let container_name = derive_container_name_from_image(&image)?;
 
-    let host_port = env_var_or("BRAIN3_CONTAINER_HOST_PORT", "8420")
+    let host_port = env_var_or("B3_CONTAINER_HOST_PORT", "8420")
         .parse::<u16>()
-        .map_err(|e| ConfigError::Invalid(format!("BRAIN3_CONTAINER_HOST_PORT: {e}")))?;
+        .map_err(|e| ConfigError::Invalid(format!("B3_CONTAINER_HOST_PORT: {e}")))?;
 
-    let container_port = env_var_or("BRAIN3_CONTAINER_MCP_PORT", "8420")
+    let container_port = env_var_or("B3_CONTAINER_MCP_PORT", "8420")
         .parse::<u16>()
-        .map_err(|e| ConfigError::Invalid(format!("BRAIN3_CONTAINER_MCP_PORT: {e}")))?;
+        .map_err(|e| ConfigError::Invalid(format!("B3_CONTAINER_MCP_PORT: {e}")))?;
 
     let upstream_secret_dir = upstream_secret_file
         .parent()
         .unwrap_or(std::path::Path::new("/tmp"))
         .to_path_buf();
 
-    let dev_mount_source = env::var("BRAIN3_DEV_CONTAINER_MOUNT_SOURCE")
+    let dev_mount_source = env::var("B3_DEV_CONTAINER_MOUNT_SOURCE")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from);
@@ -238,25 +238,25 @@ fn load_container_startup_config(
 
 fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigError> {
     // CF_QUICK_TUNNEL=true takes explicit precedence over named-tunnel vars.
-    let quick_explicit = env::var("CF_QUICK_TUNNEL")
+    let quick_explicit = env::var("B3_CF_QUICK_TUNNEL")
         .map(|v| !["0", "false", "no", "off"].contains(&v.trim().to_lowercase().as_str()))
         .unwrap_or(false);
 
     if quick_explicit {
         tracing::info!(
-            "CF_QUICK_TUNNEL=true — using Cloudflare quick tunnel (named tunnel vars ignored)"
+            "B3_CF_QUICK_TUNNEL=true — using Cloudflare quick tunnel (named tunnel vars ignored)"
         );
         return Ok(Some(TunnelConfig::CloudflareQuick {
             local_port: gateway_port,
         }));
     }
 
-    let tunnel_name = normalize_hostname(&env_var_or("CF_TUNNEL_NAME", ""));
-    let domain = normalize_hostname(&env_var_or("CF_DOMAIN", ""));
+    let tunnel_name = normalize_hostname(&env_var_or("B3_CF_TUNNEL_NAME", ""));
+    let domain = normalize_hostname(&env_var_or("B3_CF_DOMAIN", ""));
     let named = !tunnel_name.is_empty() && !domain.is_empty();
 
     if named {
-        let config_file_str = env_var_or("CF_TUNNEL_CONFIG_FILE", "");
+        let config_file_str = env_var_or("B3_CF_TUNNEL_CONFIG_FILE", "");
         let config_file = if config_file_str.is_empty() {
             PathBuf::from(format!(".cloudflared/{tunnel_name}.yml"))
         } else {
@@ -272,22 +272,22 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
     }
 
     // Default: quick tunnel unless explicitly disabled.
-    let quick_default = env_bool("CF_QUICK_TUNNEL", true);
+    let quick_default = env_bool("B3_CF_QUICK_TUNNEL", true);
     if quick_default {
-        tracing::info!("CF_QUICK_TUNNEL defaulting to true — using Cloudflare quick tunnel");
+        tracing::info!("B3_CF_QUICK_TUNNEL defaulting to true — using Cloudflare quick tunnel");
         return Ok(Some(TunnelConfig::CloudflareQuick {
             local_port: gateway_port,
         }));
     }
 
-    tracing::info!("CF_QUICK_TUNNEL=false and no named tunnel vars set — no tunnel configured");
+    tracing::info!("B3_CF_QUICK_TUNNEL=false and no named tunnel vars set — no tunnel configured");
     Ok(None)
 }
 
 fn resolve_expected_host() -> Result<Option<String>, ConfigError> {
     // Quick tunnel hostname is ephemeral (changes every restart), so there is no
     // stable expected host to enforce. Named tunnel vars must not bleed through.
-    let quick_explicit = env::var("CF_QUICK_TUNNEL")
+    let quick_explicit = env::var("B3_CF_QUICK_TUNNEL")
         .map(|v| !["0", "false", "no", "off"].contains(&v.trim().to_lowercase().as_str()))
         .unwrap_or(false);
     if quick_explicit {
@@ -295,9 +295,9 @@ fn resolve_expected_host() -> Result<Option<String>, ConfigError> {
         if named.is_some() {
             tracing::warn!(
                 named_host = ?named,
-                "CF_QUICK_TUNNEL=true overrides CF_TUNNEL_NAME/CF_DOMAIN for tunnel mode; \
+                "B3_CF_QUICK_TUNNEL=true overrides B3_CF_TUNNEL_NAME/B3_CF_DOMAIN for tunnel mode; \
                  hostname validation will be disabled (quick tunnel URL is ephemeral). \
-                 Remove CF_TUNNEL_NAME/CF_DOMAIN or switch to a named tunnel to enable hostname enforcement."
+                 Remove B3_CF_TUNNEL_NAME/B3_CF_DOMAIN or switch to a named tunnel to enable hostname enforcement."
             );
         }
         return Ok(None);
@@ -308,8 +308,8 @@ fn resolve_expected_host() -> Result<Option<String>, ConfigError> {
 
     if named.is_some() && direct.is_some() {
         return Err(ConfigError::Conflict(
-            "Both named Cloudflare tunnel hostname settings (CF_TUNNEL_NAME and CF_DOMAIN) \
-             and DIRECT_PUBLIC_ORIGIN_HOSTNAME are set. Choose only one public hostname configuration."
+            "Both named Cloudflare tunnel hostname settings (B3_CF_TUNNEL_NAME and B3_CF_DOMAIN) \
+             and B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME are set. Choose only one public hostname configuration."
                 .into(),
         ));
     }

@@ -18,7 +18,7 @@ MODE="image"
 IMAGE_NAME="${IMAGE_NAME:-brain3-mcp-vault-tools:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-brain3-mcp-vault-tools}"
 HOST_PORT="${HOST_PORT:-8420}"
-HOST_VAULT_PATH="${HOST_VAULT_PATH:-${VAULT_PATH:-}}"
+HOST_VAULT_PATH="${HOST_VAULT_PATH:-${B3_VAULT_PATH:-}}"
 SOURCE_MOUNT_PATH="/workspace/brain3-mcp-vault-tools"
 CONTAINER_UPSTREAM_SECRET_DIR="/run/brain3"
 CONTAINER_UPSTREAM_SECRET_PATH="${CONTAINER_UPSTREAM_SECRET_DIR}/upstream_secret"
@@ -49,7 +49,7 @@ Options:
 Networking:
   The server listens on 0.0.0.0:8420 inside the container so published traffic can reach it.
   The host publishes that port on 127.0.0.1 only, so it is not exposed on other host interfaces.
-  VAULT_MCP_ALLOWED_HOSTS adds allowed HTTP Host headers for DNS rebinding protection; it does not
+  B3_VAULT_MCP_ALLOWED_HOSTS adds allowed HTTP Host headers for DNS rebinding protection; it does not
   publish the port on additional host interfaces.
 EOF
 }
@@ -61,8 +61,8 @@ print_networking_summary() {
     echo "  Host exposure:    loopback only; remote hosts cannot connect via other host interfaces"
     echo "  Host header ACL:  defaults to 127.0.0.1, localhost, [::1]"
 
-    if [ -n "${VAULT_MCP_ALLOWED_HOSTS:-}" ]; then
-        echo "                    plus VAULT_MCP_ALLOWED_HOSTS=${VAULT_MCP_ALLOWED_HOSTS}"
+    if [ -n "${B3_VAULT_MCP_ALLOWED_HOSTS:-}" ]; then
+        echo "                    plus B3_VAULT_MCP_ALLOWED_HOSTS=${B3_VAULT_MCP_ALLOWED_HOSTS}"
     fi
 
     echo "                    this changes allowed HTTP Host headers, not socket binding"
@@ -237,7 +237,7 @@ case "$CONTAINER_RUNTIME" in
 esac
 
 if [ -z "$HOST_VAULT_PATH" ]; then
-    echo "Error: no vault path provided. Set HOST_VAULT_PATH, VAULT_PATH, or pass --vault-path." >&2
+    echo "Error: no vault path provided. Set HOST_VAULT_PATH, B3_VAULT_PATH, or pass --vault-path." >&2
     exit 1
 fi
 
@@ -263,15 +263,15 @@ run_args=(
     --name "$CONTAINER_NAME"
     --user "$(id -u):$(id -g)"
     --publish "${HOST_BIND_ADDRESS}:${HOST_PORT}:${CONTAINER_PORT}"
-    --env "VAULT_MCP_HOST=${CONTAINER_LISTEN_HOST}"
-    --env "VAULT_PATH=/vault"
-    --env "UPSTREAM_SHARED_SECRET_FILE=${CONTAINER_UPSTREAM_SECRET_PATH}"
+    --env "B3_VAULT_MCP_HOST=${CONTAINER_LISTEN_HOST}"
+    --env "B3_VAULT_PATH=/vault"
+    --env "B3_UPSTREAM_SHARED_SECRET_FILE=${CONTAINER_UPSTREAM_SECRET_PATH}"
     --mount "type=bind,source=${HOST_VAULT_PATH},target=/vault"
     --mount "type=bind,source=${HOST_UPSTREAM_SECRET_DIR},target=${CONTAINER_UPSTREAM_SECRET_DIR},readonly"
 )
 
-if [ -n "${VAULT_MCP_ALLOWED_HOSTS:-}" ]; then
-    run_args+=(--env "VAULT_MCP_ALLOWED_HOSTS=${VAULT_MCP_ALLOWED_HOSTS}")
+if [ -n "${B3_VAULT_MCP_ALLOWED_HOSTS:-}" ]; then
+    run_args+=(--env "B3_VAULT_MCP_ALLOWED_HOSTS=${B3_VAULT_MCP_ALLOWED_HOSTS}")
 fi
 
 if [ "$DETACH" = true ]; then

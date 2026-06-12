@@ -23,7 +23,7 @@ impl Brain3AppHome {
     }
 
     pub fn resolve_from_env() -> Result<Self, SetupError> {
-        if let Some(override_dir) = env::var_os("BRAIN3_HOME")
+        if let Some(override_dir) = env::var_os("B3_HOME")
             .filter(|value| !value.is_empty())
             .map(PathBuf::from)
         {

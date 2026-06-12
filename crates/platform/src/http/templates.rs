@@ -65,7 +65,7 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
   <body style="font-family: sans-serif; max-width: 36rem; margin: 3rem auto; line-height: 1.5;">
     <h1>Sign in to continue connecting your AI app</h1>
     <p>ChatGPT, Claude, or another AI app is connecting to your local MCP gateway.</p>
-    <p>Use the <code>USERNAME</code> and <code>PASSWORD</code> values from the <code>.env</code> file you configured earlier on this machine.</p>
+    <p>Use the <code>B3_USERNAME</code> and <code>B3_PASSWORD</code> values from the <code>.env</code> file you configured earlier on this machine.</p>
     {error_html}
     <form method="post" action="/oauth/authorize">
       {fields_html}
@@ -90,7 +90,7 @@ pub fn render_misconfigured_page() -> String {
   <body style="font-family: sans-serif; max-width: 36rem; margin: 3rem auto; line-height: 1.5;">
     <h1>Login credentials not configured</h1>
     <p>This gateway requires a login before ChatGPT, Claude, or another AI app can finish connecting.</p>
-    <p>Set <code>USERNAME</code> and <code>PASSWORD</code> in the <code>.env</code> file you configured earlier, then restart the gateway.</p>
+    <p>Set <code>B3_USERNAME</code> and <code>B3_PASSWORD</code> in the <code>.env</code> file you configured earlier, then restart the gateway.</p>
   </body>
 </html>"#
         .to_string()
