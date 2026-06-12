@@ -172,6 +172,7 @@ impl TestHarness {
             token_exchange,
             proxy_mcp,
             config,
+            rate_limiter: Arc::new(brain3_platform::http::rate_limit::OAuthRateLimiter::new()),
         };
 
         let router = build_router(state);
