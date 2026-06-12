@@ -238,7 +238,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | Variable | Default | Description |
 |---|---|---|
 | `B3_OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
-| `B3_OAUTH2_GATEWAY_CLIENT_ID` | `oauth2-gateway-client` | OAuth client ID accepted by Brain3 |
+| `B3_OAUTH2_GATEWAY_CLIENT_ID` | `brain3-oauth2-client` | OAuth client ID accepted by Brain3 |
 | `B3_OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
 | `B3_OAUTH2_GATEWAY_ACCESS_TOKEN` | *(required)* | Bearer token returned after successful auth |
 | `B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | `http://127.0.0.1:8420` | URL of the MCP server |

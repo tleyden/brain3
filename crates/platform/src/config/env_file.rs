@@ -77,7 +77,7 @@ impl ConfigPort for EnvFileConfigAdapter {
             port,
             host: "127.0.0.1".to_string(),
             oauth: OAuthConfig {
-                client_id: env_var_or("B3_OAUTH2_GATEWAY_CLIENT_ID", "oauth2-gateway-client"),
+                client_id: env_var_or("B3_OAUTH2_GATEWAY_CLIENT_ID", "brain3-oauth2-client"),
                 client_secret,
                 access_token,
                 pkce_required: env_bool("B3_OAUTH2_PKCE_REQUIRED", true),
