@@ -1,23 +1,63 @@
+use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 
 use crate::domain::errors::ContainerError;
-use crate::domain::model::ContainerConfig;
+use crate::domain::model::{ContainerConfig, PortMapping};
 use crate::ports::container::{ContainerId, ContainerPort};
+
+const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const DEFAULT_LOG_TAIL_LINES: usize = 40;
+const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(200);
+
+#[derive(Debug, Clone, Copy)]
+struct StartupProbeSettings {
+    timeout: Duration,
+    poll_interval: Duration,
+    log_tail_lines: usize,
+}
+
+impl Default for StartupProbeSettings {
+    fn default() -> Self {
+        Self {
+            timeout: DEFAULT_STARTUP_TIMEOUT,
+            poll_interval: DEFAULT_STARTUP_POLL_INTERVAL,
+            log_tail_lines: DEFAULT_LOG_TAIL_LINES,
+        }
+    }
+}
 
 pub struct EnsureContainerUseCase {
     port: Arc<dyn ContainerPort>,
+    probe_settings: StartupProbeSettings,
 }
 
 impl EnsureContainerUseCase {
     pub fn new(port: Arc<dyn ContainerPort>) -> Self {
-        Self { port }
+        Self {
+            port,
+            probe_settings: StartupProbeSettings::default(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_probe_settings(
+        port: Arc<dyn ContainerPort>,
+        probe_settings: StartupProbeSettings,
+    ) -> Self {
+        Self {
+            port,
+            probe_settings,
+        }
     }
 
     pub async fn ensure(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
         if !self.port.image_exists(&config.image).await? {
-            tracing::info!(
+            tracing::warn!(
                 image = %config.image,
-                "container image not found locally; pulling from registry"
+                "container image not found locally; will pull from registry"
             );
             self.port.pull_image(&config.image).await?;
 
@@ -39,13 +79,108 @@ impl EnsureContainerUseCase {
 
         tracing::info!(container = %config.name, image = %config.image, "starting container");
         let id = self.port.run(config).await?;
-        tracing::info!(container = %config.name, "container started");
+        self.verify_startup(&id, config).await?;
+        tracing::info!(container = %config.name, "container ready");
         Ok(id)
     }
+
+    async fn verify_startup(
+        &self,
+        id: &ContainerId,
+        config: &ContainerConfig,
+    ) -> Result<(), ContainerError> {
+        let deadline = Instant::now() + self.probe_settings.timeout;
+
+        loop {
+            if !self.port.is_running(id).await? {
+                return Err(self
+                    .startup_failed(
+                        id,
+                        format!(
+                            "container '{}' exited during startup verification",
+                            config.name
+                        ),
+                    )
+                    .await);
+            }
+
+            let ports_ready = config.port_mappings.is_empty()
+                || config
+                    .port_mappings
+                    .iter()
+                    .all(|mapping| tcp_port_ready(&mapping.host_address, mapping.host_port));
+
+            if ports_ready {
+                return Ok(());
+            }
+
+            if Instant::now() >= deadline {
+                return Err(self
+                    .startup_failed(
+                        id,
+                        format!(
+                            "container '{}' did not become reachable on {} before timeout",
+                            config.name,
+                            format_port_mappings(&config.port_mappings)
+                        ),
+                    )
+                    .await);
+            }
+
+            sleep(self.probe_settings.poll_interval);
+        }
+    }
+
+    async fn startup_failed(&self, id: &ContainerId, summary: String) -> ContainerError {
+        let logs = match self
+            .port
+            .logs_tail(id, self.probe_settings.log_tail_lines)
+            .await
+        {
+            Ok(output) => {
+                let trimmed = output.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            }
+            Err(error) => {
+                tracing::warn!(container = %id.0, error = %error, "failed to collect recent container logs");
+                None
+            }
+        };
+
+        if let Some(logs) = &logs {
+            tracing::error!(container = %id.0, summary, logs = %logs, "container startup verification failed");
+        } else {
+            tracing::error!(container = %id.0, summary, "container startup verification failed");
+        }
+
+        ContainerError::StartupFailed { summary, logs }
+    }
+}
+
+fn tcp_port_ready(host: &str, port: u16) -> bool {
+    match (host, port).to_socket_addrs() {
+        Ok(addrs) => addrs
+            .into_iter()
+            .any(|addr| TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT).is_ok()),
+        Err(_) => false,
+    }
+}
+
+fn format_port_mappings(port_mappings: &[PortMapping]) -> String {
+    port_mappings
+        .iter()
+        .map(|mapping| format!("{}:{}", mapping.host_address, mapping.host_port))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 #[cfg(test)]
 mod tests {
+    use std::net::TcpListener;
     use std::sync::Mutex;
 
     use super::*;
@@ -55,10 +190,13 @@ mod tests {
         image_exists: bool,
         container_exists: bool,
         container_running: bool,
+        running_checks: Vec<bool>,
+        logs_tail_output: Option<String>,
         pull_count: usize,
         stop_count: usize,
         remove_count: usize,
         run_count: usize,
+        logs_tail_count: usize,
         actions: Vec<&'static str>,
     }
 
@@ -103,7 +241,21 @@ mod tests {
         async fn is_running(&self, _id: &ContainerId) -> Result<bool, ContainerError> {
             let mut state = self.state.lock().unwrap();
             state.actions.push("is_running");
+            if !state.running_checks.is_empty() {
+                state.container_running = state.running_checks.remove(0);
+            }
             Ok(state.container_running)
+        }
+
+        async fn logs_tail(
+            &self,
+            _id: &ContainerId,
+            _lines: usize,
+        ) -> Result<String, ContainerError> {
+            let mut state = self.state.lock().unwrap();
+            state.actions.push("logs_tail");
+            state.logs_tail_count += 1;
+            Ok(state.logs_tail_output.clone().unwrap_or_default())
         }
 
         async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
@@ -147,10 +299,21 @@ mod tests {
         }
     }
 
+    fn short_probe_use_case(port: Arc<dyn ContainerPort>) -> EnsureContainerUseCase {
+        EnsureContainerUseCase::with_probe_settings(
+            port,
+            StartupProbeSettings {
+                timeout: Duration::from_millis(30),
+                poll_interval: Duration::from_millis(5),
+                log_tail_lines: 10,
+            },
+        )
+    }
+
     #[tokio::test]
     async fn pulls_missing_image_before_running_container() {
         let port = Arc::new(MockContainerPort::new(MockState::default()));
-        let use_case = EnsureContainerUseCase::new(port.clone());
+        let use_case = short_probe_use_case(port.clone());
         let config = sample_config();
 
         let id = use_case.ensure(&config).await.unwrap();
@@ -169,7 +332,8 @@ mod tests {
                 "pull_image",
                 "image_exists",
                 "exists",
-                "run"
+                "run",
+                "is_running"
             ]
         );
     }
@@ -182,7 +346,7 @@ mod tests {
             container_running: true,
             ..Default::default()
         }));
-        let use_case = EnsureContainerUseCase::new(port.clone());
+        let use_case = short_probe_use_case(port.clone());
         let config = sample_config();
 
         let id = use_case.ensure(&config).await.unwrap();
@@ -202,8 +366,78 @@ mod tests {
                 "is_running",
                 "stop",
                 "remove",
-                "run"
+                "run",
+                "is_running"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn returns_error_when_container_exits_during_startup_probe() {
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            running_checks: vec![false],
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let config = sample_config();
+
+        let error = use_case
+            .ensure(&config)
+            .await
+            .expect_err("container should fail startup verification");
+
+        match error {
+            ContainerError::StartupFailed { summary, .. } => {
+                assert!(summary.contains("exited during startup verification"));
+            }
+            other => panic!("expected startup failure, got {other:?}"),
+        }
+
+        let state = port.snapshot();
+        assert_eq!(state.logs_tail_count, 1);
+        assert!(state.actions.ends_with(&["run", "is_running", "logs_tail"]));
+    }
+
+    #[tokio::test]
+    async fn startup_failure_includes_recent_container_logs() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let unused_port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            logs_tail_output: Some(
+                "Vault path does not exist: /Obsidian/MyVault\ncontainer exiting".into(),
+            ),
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let mut config = sample_config();
+        config.port_mappings = vec![PortMapping {
+            host_address: "127.0.0.1".into(),
+            host_port: unused_port,
+            container_port: 8420,
+        }];
+
+        let error = use_case
+            .ensure(&config)
+            .await
+            .expect_err("container should fail readiness timeout");
+
+        match error {
+            ContainerError::StartupFailed {
+                summary,
+                logs: Some(logs),
+            } => {
+                assert!(summary.contains("did not become reachable"));
+                assert!(logs.contains("Vault path does not exist"));
+            }
+            other => panic!("expected startup failure with logs, got {other:?}"),
+        }
+
+        let state = port.snapshot();
+        assert_eq!(state.logs_tail_count, 1);
+        assert!(state.actions.contains(&"logs_tail"));
     }
 }

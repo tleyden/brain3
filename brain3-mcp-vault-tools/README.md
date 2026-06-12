@@ -128,7 +128,7 @@ For metadata-only changes:
 
 ## Container Build
 
-For normal Brain3 gateway usage, you should not need to build this image locally. The gateway defaults to pulling `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` automatically when `BRAIN3_CONTAINER_IMAGE` is not set.
+For normal Brain3 gateway usage, you should not need to build this image locally. Fresh Brain3 installs default to pulling `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. The registry still publishes `:latest`, but that is opt-in via `brain3 --container-tag latest` or an explicit `B3_CONTAINER_IMAGE` override. Older Brain3 configs that still point at the exact official `:latest` image are treated as a legacy default and remapped by the gateway to the current release-matched tag unless you explicitly request `--container-tag latest`.
 
 The commands below are for developing the container itself or testing local image changes.
 

@@ -31,6 +31,11 @@ impl ContainerPort for MacOsContainerAdapter {
         }
     }
 
+    async fn logs_tail(&self, id: &ContainerId, lines: usize) -> Result<String, ContainerError> {
+        let lines = lines.to_string();
+        run_command("container", &["logs", "--tail", &lines, &id.0]).await
+    }
+
     async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
         let mut args: Vec<String> = vec!["run".into(), "--name".into(), config.name.clone()];
 

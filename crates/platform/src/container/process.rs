@@ -1,14 +1,20 @@
+use std::process::Output;
+
 use brain3_core::domain::errors::ContainerError;
 use tokio::process::Command;
 
-pub async fn run_command(bin: &str, args: &[&str]) -> Result<String, ContainerError> {
+async fn run_command_output(bin: &str, args: &[&str]) -> Result<Output, ContainerError> {
     tracing::debug!(cmd = bin, args = ?args, "running container command");
 
-    let output = Command::new(bin)
+    Command::new(bin)
         .args(args)
         .output()
         .await
-        .map_err(|e| ContainerError::SpawnFailed(format!("{bin}: {e}")))?;
+        .map_err(|e| ContainerError::SpawnFailed(format!("{bin}: {e}")))
+}
+
+pub async fn run_command(bin: &str, args: &[&str]) -> Result<String, ContainerError> {
+    let output = run_command_output(bin, args).await?;
 
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -22,9 +28,6 @@ pub async fn run_command(bin: &str, args: &[&str]) -> Result<String, ContainerEr
 
 /// Run command, return true if exit 0, false if exit non-zero, err only on spawn failure.
 pub async fn command_succeeds(bin: &str, args: &[&str]) -> Result<bool, ContainerError> {
-    match run_command(bin, args).await {
-        Ok(_) => Ok(true),
-        Err(ContainerError::CommandFailed { .. }) => Ok(false),
-        Err(e) => Err(e),
-    }
+    let output = run_command_output(bin, args).await?;
+    Ok(output.status.success())
 }

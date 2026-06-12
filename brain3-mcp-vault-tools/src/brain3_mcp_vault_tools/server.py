@@ -3,6 +3,7 @@
 import hmac
 import logging
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
@@ -50,6 +51,13 @@ from .tools.write import (
 logger = logging.getLogger(__name__)
 
 frontmatter_index = FrontmatterIndex()
+
+
+def _package_version() -> str:
+    try:
+        return version("brain3-mcp-vault-tools")
+    except PackageNotFoundError:
+        return "unknown"
 
 
 def _elide(s: str) -> str:
@@ -381,7 +389,11 @@ def main() -> None:
 
     _start_process_resources()
     try:
-        logger.info(f"Starting authless MCP server on port {VAULT_MCP_PORT}")
+        logger.info(
+            "Starting authless MCP server version=%s on port %s",
+            _package_version(),
+            VAULT_MCP_PORT,
+        )
         mcp.run(transport="streamable-http")
     finally:
         _stop_process_resources()

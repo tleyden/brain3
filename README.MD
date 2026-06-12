@@ -82,10 +82,10 @@ sudo apt-get install cloudflared
 ### 1. Install the latest release
 
 ```bash
-curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.3/install.sh | sh
+curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.4/install.sh | sh
 ```
 
-This installs `brain3` from the `v0.1.3` release.
+This installs `brain3` from the `v0.1.4` release.
 
 ### 2. Start Brain3
 
@@ -93,7 +93,7 @@ This installs `brain3` from the `v0.1.3` release.
 brain3
 ```
 
-On first run, Brain3 launches an interactive setup wizard that walks you through vault selection, credential creation, and dependency checks. It generates secrets automatically and writes the config to `~/.brain3/.env`. Once setup completes, Brain3 starts the MCP container and Cloudflare Tunnel and displays the public URL and connection details you will need in step 3.
+On first run, Brain3 launches an interactive setup wizard that walks you through vault selection, credential creation, and dependency checks.
 
 On subsequent runs, Brain3 goes straight to the runtime status screen.
 
@@ -252,8 +252,25 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
 | `B3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
 | `B3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
-| `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` |
+| `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`. New installs default to the Brain3 release-matched tag; `:latest` is still published but must be chosen explicitly. |
 | `B3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
+
+### MCP container image selection
+
+Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. The registry still publishes `:latest`, but Brain3 does not select it automatically for new installs.
+
+If an older Brain3 config still contains the exact official `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` image, Brain3 now treats that as a legacy default and remaps it to the current release-matched tag for that run. Use `--container-tag latest` if you explicitly want to stay on `:latest`.
+
+If you need a different published MCP image for a single launch or while creating a brand-new config, use `--container-tag`:
+
+```bash
+brain3 --container-tag latest
+brain3 --container-tag pr-123
+```
+
+On an already configured install, `--container-tag` overrides the MCP container image for that launch only. During first-run setup, the selected tag becomes the image written into the new config.
+
+The runtime status screen now reports whether the container is actually `Ready` or `Failed` after startup verification. If the container exits early, Brain3 shows the failure summary and log path instead of incorrectly reporting a successful start.
 
 ## MD Vault MCP Tools
 
@@ -290,6 +307,16 @@ cargo build --release
 ### Prerequisites
 
 Refer to the [Quick Start](#quick-start) prerequisites above.
+
+### Install a PR build
+
+PR install scripts are published at `https://brain3.s3.amazonaws.com/pr/<PR_NUMBER>/install.sh` while the PR is open.
+
+```bash
+curl -sSfL https://brain3.s3.amazonaws.com/pr/123/install.sh | sh
+```
+
+Replace `123` with the pull request number.
 
 ### Clone and build from source
 

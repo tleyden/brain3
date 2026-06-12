@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
+use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::tunnel::TunnelPort;
@@ -9,10 +10,24 @@ use crate::config::{log_config, upstream_secret};
 use crate::container::startup::ensure_mcp_container;
 use crate::tunnel::start_tunnel;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StartupStatus {
     NotConfigured,
-    Started,
+    Ready,
+    Failed { summary: String },
+}
+
+impl StartupStatus {
+    pub fn failure_summary(&self) -> Option<&str> {
+        match self {
+            Self::Failed { summary } => Some(summary.as_str()),
+            _ => None,
+        }
+    }
+
+    pub fn allows_gateway_start(&self) -> bool {
+        !matches!(self, Self::Failed { .. })
+    }
 }
 
 pub struct RuntimeBootstrap {
@@ -26,10 +41,39 @@ pub struct RuntimeBootstrap {
 }
 
 impl RuntimeBootstrap {
+    pub fn new(
+        config: Arc<GatewayConfig>,
+        upstream_secret: String,
+        launch_plan: RuntimeLaunchPlan,
+        public_url: Option<String>,
+        container_status: StartupStatus,
+        tunnel_status: StartupStatus,
+    ) -> Self {
+        Self {
+            config,
+            upstream_secret,
+            launch_plan,
+            public_url,
+            container_status,
+            tunnel_status,
+            _tunnel_guard: None,
+        }
+    }
+
     pub fn display_url(&self, local_url: &str) -> String {
         self.public_url
             .clone()
             .unwrap_or_else(|| local_url.to_string())
+    }
+
+    pub fn can_start_gateway(&self) -> bool {
+        self.container_status.allows_gateway_start()
+    }
+
+    pub fn primary_failure_summary(&self) -> Option<&str> {
+        self.container_status
+            .failure_summary()
+            .or_else(|| self.tunnel_status.failure_summary())
     }
 }
 
@@ -54,22 +98,44 @@ pub async fn bootstrap_configured_runtime(
         upstream_secret::read_or_create(&config.mcp_reverse_proxy.upstream_secret_file)?;
 
     let container_status = if let Some(startup) = &config.container {
-        ensure_mcp_container(startup)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .context("failed to start MCP container")?;
-        StartupStatus::Started
+        match ensure_mcp_container(startup).await {
+            Ok(()) => StartupStatus::Ready,
+            Err(error) => container_failure_status(startup.container_name.as_str(), &error),
+        }
     } else {
         StartupStatus::NotConfigured
     };
 
-    let (tunnel_status, public_url, tunnel_guard) = if let Some(tunnel_config) = &config.tunnel {
-        let (adapter, info) = start_tunnel(tunnel_config)
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))
-            .context("failed to start tunnel")?;
-        tracing::info!(url = %info.public_url, "tunnel started");
-        (StartupStatus::Started, Some(info.public_url), Some(adapter))
+    let (tunnel_status, public_url, tunnel_guard) = if !container_status.allows_gateway_start() {
+        match &config.tunnel {
+            Some(_) => (
+                StartupStatus::Failed {
+                    summary:
+                        "Tunnel not started because the MCP container failed startup verification"
+                            .into(),
+                },
+                None,
+                None,
+            ),
+            None => (StartupStatus::NotConfigured, None, None),
+        }
+    } else if let Some(tunnel_config) = &config.tunnel {
+        match start_tunnel(tunnel_config).await {
+            Ok((adapter, info)) => {
+                tracing::info!(url = %info.public_url, "tunnel started");
+                (StartupStatus::Ready, Some(info.public_url), Some(adapter))
+            }
+            Err(error) => {
+                tracing::error!(error = %error, "failed to start tunnel");
+                (
+                    StartupStatus::Failed {
+                        summary: error.to_string(),
+                    },
+                    None,
+                    None,
+                )
+            }
+        }
     } else {
         (StartupStatus::NotConfigured, None, None)
     };
@@ -83,6 +149,21 @@ pub async fn bootstrap_configured_runtime(
         tunnel_status,
         _tunnel_guard: tunnel_guard,
     })
+}
+
+fn container_failure_status(container_name: &str, error: &ContainerError) -> StartupStatus {
+    let summary = error.summary();
+    if let Some(logs) = error.recent_logs() {
+        tracing::error!(container = container_name, summary, logs = %logs, "MCP container startup failed");
+    } else {
+        tracing::error!(
+            container = container_name,
+            summary,
+            "MCP container startup failed"
+        );
+    }
+
+    StartupStatus::Failed { summary }
 }
 
 fn log_tunnel_mode(config: &GatewayConfig) {

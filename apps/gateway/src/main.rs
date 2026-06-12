@@ -1,4 +1,5 @@
 mod logging;
+mod release;
 mod server;
 mod setup_tui;
 #[allow(dead_code)]
@@ -12,8 +13,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 
 use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
-use brain3_core::domain::setup::RuntimeLaunchPlan;
-use brain3_core::domain::setup::{DependencyAvailability, DependencyStatus};
+use brain3_core::domain::setup::{
+    DependencyAvailability, DependencyStatus, RuntimeLaunchPlan, SetupDefaults,
+};
 use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
@@ -47,7 +49,13 @@ impl LogLevel {
 }
 
 #[derive(Parser)]
-#[command(name = "brain3", about = "OAuth2 gateway for MCP servers")]
+#[command(
+    name = "brain3",
+    about = "OAuth2 gateway for MCP servers",
+    long_about = release::HELP_ABOUT,
+    version = release::APP_VERSION,
+    long_version = release::APP_VERSION
+)]
 struct Args {
     #[arg(long, default_value = DEFAULT_HOST)]
     host: String,
@@ -68,8 +76,41 @@ struct Args {
     )]
     cf_setup: bool,
 
+    #[arg(
+        long,
+        help = "Override the Brain3 MCP container tag for this run or new setup, e.g. latest, v0.1.4, pr-123"
+    )]
+    container_tag: Option<String>,
+
     #[arg(long, value_enum, default_value = "info")]
     log_level: LogLevel,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct RuntimeOverrides {
+    container_tag: Option<String>,
+}
+
+impl RuntimeOverrides {
+    fn from_args(args: &Args) -> Self {
+        Self {
+            container_tag: args.container_tag.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum EffectiveContainerImageSource {
+    FreshInstallDefault,
+    ConfiguredImage,
+    LegacyLatestConfig,
+    ExplicitTagOverride,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EffectiveContainerImage {
+    image: String,
+    source: EffectiveContainerImageSource,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -184,6 +225,90 @@ fn plan_launch(
     })
 }
 
+fn resolve_effective_container_image(
+    configured_image: Option<&str>,
+    container_tag: Option<&str>,
+) -> EffectiveContainerImage {
+    if let Some(tag) = container_tag {
+        return EffectiveContainerImage {
+            image: release::container_image_for_tag(tag),
+            source: EffectiveContainerImageSource::ExplicitTagOverride,
+        };
+    }
+
+    if let Some(image) = configured_image {
+        if release::is_official_latest_container_image(image) {
+            return EffectiveContainerImage {
+                image: release::default_container_image(),
+                source: EffectiveContainerImageSource::LegacyLatestConfig,
+            };
+        }
+
+        return EffectiveContainerImage {
+            image: image.trim().to_string(),
+            source: EffectiveContainerImageSource::ConfiguredImage,
+        };
+    }
+
+    EffectiveContainerImage {
+        image: release::default_container_image(),
+        source: EffectiveContainerImageSource::FreshInstallDefault,
+    }
+}
+
+fn setup_defaults(runtime_overrides: &RuntimeOverrides) -> SetupDefaults {
+    let effective =
+        resolve_effective_container_image(None, runtime_overrides.container_tag.as_deref());
+
+    SetupDefaults {
+        default_container_image: effective.image,
+    }
+}
+
+fn apply_runtime_overrides(
+    config: &mut GatewayConfig,
+    runtime_overrides: &RuntimeOverrides,
+) -> Result<()> {
+    let Some(container) = config.container.as_mut() else {
+        if runtime_overrides.container_tag.is_some() {
+            anyhow::bail!("--container-tag requires container startup configuration");
+        }
+        return Ok(());
+    };
+
+    let effective = resolve_effective_container_image(
+        Some(container.image.as_str()),
+        runtime_overrides.container_tag.as_deref(),
+    );
+    container.image = effective.image.clone();
+
+    match effective.source {
+        EffectiveContainerImageSource::FreshInstallDefault => {
+            tracing::info!(image = %container.image, "resolved MCP container image");
+        }
+        EffectiveContainerImageSource::ConfiguredImage => {
+            tracing::info!(image = %container.image, source = ?effective.source, "resolved MCP container image");
+        }
+        EffectiveContainerImageSource::LegacyLatestConfig => {
+            tracing::warn!(
+                image = %container.image,
+                source = ?effective.source,
+                "remapping legacy official :latest MCP image to the release-matched default"
+            );
+        }
+        EffectiveContainerImageSource::ExplicitTagOverride => {
+            tracing::info!(
+                image = %container.image,
+                source = ?effective.source,
+                tag = runtime_overrides.container_tag.as_deref().unwrap_or_default(),
+                "resolved MCP container image"
+            );
+        }
+    }
+
+    Ok(())
+}
+
 fn missing_custom_env_file(env_file: &Path) -> Result<LaunchDispatch> {
     eprintln!(
         "\nCustom Brain3 config file not found.\n\
@@ -216,6 +341,11 @@ fn brain3_command(args: &Args, mode: LaunchMode) -> String {
     if let Some(env_file) = &args.env_file {
         parts.push("--env-file".into());
         parts.push(shell_quote(&env_file.display().to_string()));
+    }
+
+    if let Some(container_tag) = &args.container_tag {
+        parts.push("--container-tag".into());
+        parts.push(shell_quote(container_tag));
     }
 
     parts.join(" ")
@@ -363,17 +493,20 @@ fn ensure_cli_ready(dependencies: &DependencyStatus) -> Result<()> {
     );
 }
 
-fn load_config(env_file: PathBuf) -> Result<Arc<brain3_core::domain::model::GatewayConfig>> {
+fn load_config(
+    env_file: PathBuf,
+    runtime_overrides: &RuntimeOverrides,
+) -> Result<Arc<brain3_core::domain::model::GatewayConfig>> {
     let config_adapter = EnvFileConfigAdapter::new(Some(env_file));
-    Ok(Arc::new(
-        config_adapter
-            .load()
-            .context("failed to load configuration")?,
-    ))
+    let mut config = config_adapter
+        .load()
+        .context("failed to load configuration")?;
+    apply_runtime_overrides(&mut config, runtime_overrides)?;
+    Ok(Arc::new(config))
 }
 
 async fn run_setup_mode(env_file: PathBuf) -> Result<()> {
-    let config = load_config(env_file)?;
+    let config = load_config(env_file, &RuntimeOverrides::default())?;
 
     match &config.tunnel {
         Some(tc @ TunnelConfig::CloudflareNamed { .. }) => setup_tui::run(tc).await,
@@ -408,11 +541,27 @@ async fn run_cli_mode(
         "runtime bootstrap complete"
     );
 
-    let _runtime = runtime;
+    if !runtime.can_start_gateway() {
+        let summary = runtime
+            .primary_failure_summary()
+            .unwrap_or("MCP container failed to start");
+        anyhow::bail!(
+            "Brain3 startup failed: {summary}. See logs: {}",
+            runtime.launch_plan.log_file.display()
+        );
+    }
+
+    if let Some(summary) = runtime.tunnel_status.failure_summary() {
+        tracing::warn!(
+            summary,
+            "tunnel failed to start; continuing with local gateway only"
+        );
+    }
+
     server::run_gateway_server_until(
         host,
         config,
-        _runtime.upstream_secret.clone(),
+        runtime.upstream_secret.clone(),
         shutdown_signal(),
     )
     .await
@@ -421,6 +570,7 @@ async fn run_cli_mode(
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let runtime_overrides = RuntimeOverrides::from_args(&args);
     let logging = logging::init_logging(args.log_level.as_str()).await?;
     let resolved_env = resolve_config_env_file(&args)?;
     let interactive_terminal = is_interactive_terminal();
@@ -441,11 +591,13 @@ async fn main() -> Result<()> {
                 &args.host,
                 logging.log_file.clone(),
                 GatewayTuiLaunch::FirstRun,
+                setup_defaults(&runtime_overrides),
+                runtime_overrides.clone(),
             )
             .await
         }
         LaunchDispatch::TuiConfigured { launch_plan } => {
-            let config = load_config(launch_plan.env_file.clone())?;
+            let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
             if let Some(tunnel_config) = named_tunnel_setup_config(&config) {
                 if !interactive_terminal {
                     return named_tunnel_setup_requires_tui(&args, &resolved_env);
@@ -459,11 +611,13 @@ async fn main() -> Result<()> {
                 &args.host,
                 logging.log_file.clone(),
                 GatewayTuiLaunch::Configured { launch_plan },
+                setup_defaults(&runtime_overrides),
+                runtime_overrides.clone(),
             )
             .await
         }
         LaunchDispatch::Cli { launch_plan } => {
-            let config = load_config(launch_plan.env_file.clone())?;
+            let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
             if named_tunnel_setup_config(&config).is_some() {
                 return named_tunnel_setup_requires_tui(&args, &resolved_env);
             }
@@ -508,6 +662,47 @@ mod tests {
     #[test]
     fn old_setup_flag_is_rejected() {
         assert!(Args::try_parse_from(["brain3", "--setup"]).is_err());
+    }
+
+    #[test]
+    fn parses_container_tag_override() {
+        let args = Args::try_parse_from(["brain3", "--container-tag", "pr-123"])
+            .expect("container tag args should parse");
+
+        assert_eq!(args.container_tag.as_deref(), Some("pr-123"));
+    }
+
+    #[test]
+    fn legacy_official_latest_resolves_to_release_tag() {
+        assert_eq!(
+            resolve_effective_container_image(
+                Some("ghcr.io/tleyden/brain3-mcp-vault-tools:latest"),
+                None,
+            )
+            .image,
+            release::default_container_image()
+        );
+    }
+
+    #[test]
+    fn explicit_container_tag_latest_wins_over_legacy_remap() {
+        assert_eq!(
+            resolve_effective_container_image(
+                Some("ghcr.io/tleyden/brain3-mcp-vault-tools:latest"),
+                Some("latest"),
+            )
+            .image,
+            release::container_image_for_tag("latest")
+        );
+    }
+
+    #[test]
+    fn custom_configured_image_is_left_unchanged() {
+        let custom = "ghcr.io/acme/custom-mcp:dev";
+        assert_eq!(
+            resolve_effective_container_image(Some(custom), None).image,
+            custom
+        );
     }
 
     #[test]

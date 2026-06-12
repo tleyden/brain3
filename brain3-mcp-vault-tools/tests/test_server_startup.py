@@ -3,7 +3,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_VAULT = PROJECT_ROOT / "test_vault"
@@ -71,11 +71,16 @@ class ServerStartupTests(unittest.TestCase):
         with (
             patch.object(server, "_start_process_resources"),
             patch.object(server, "_stop_process_resources"),
+            patch.object(server, "_package_version", return_value="0.1.4"),
+            patch.object(server.logger, "info") as info_mock,
             patch.object(server.mcp, "run") as run_mock,
         ):
             server.main()
 
         run_mock.assert_called_once_with(transport="streamable-http")
+        info_mock.assert_any_call(
+            "Starting authless MCP server version=%s on port %s", "0.1.4", ANY
+        )
 
 
 if __name__ == "__main__":

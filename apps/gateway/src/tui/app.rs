@@ -11,12 +11,15 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 
 use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
-use brain3_core::domain::setup::{FinalizeSetupRequest, RuntimeLaunchPlan, SetupStep};
+use brain3_core::domain::setup::{
+    FinalizeSetupRequest, RuntimeLaunchPlan, SetupDefaults, SetupStep,
+};
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::setup::PlatformSetupSystem;
 
 use crate::server;
 use crate::server::ConfiguredGatewaySession;
+use crate::RuntimeOverrides;
 
 use super::screens;
 use super::state::{
@@ -32,9 +35,11 @@ pub async fn run_gateway_tui(
     host: &str,
     log_file: std::path::PathBuf,
     launch: GatewayTuiLaunch,
+    setup_defaults: SetupDefaults,
+    runtime_overrides: RuntimeOverrides,
 ) -> Result<()> {
     let setup_system: Arc<dyn SetupSystemPort> = Arc::new(PlatformSetupSystem::new());
-    let use_case = FirstRunSetupUseCase::new(Arc::clone(&setup_system));
+    let use_case = FirstRunSetupUseCase::new(Arc::clone(&setup_system), setup_defaults);
     let preparation = use_case
         .prepare()
         .await
@@ -45,7 +50,12 @@ pub async fn run_gateway_tui(
             FirstRunTuiState::new(host.to_string(), log_file.clone(), preparation)
         }
         GatewayTuiLaunch::Configured { launch_plan } => {
-            let session = server::spawn_configured_gateway_session(host, launch_plan).await?;
+            let session = server::spawn_configured_gateway_session(
+                host,
+                launch_plan,
+                runtime_overrides.clone(),
+            )
+            .await?;
             FirstRunTuiState::new_runtime(
                 host.to_string(),
                 log_file.clone(),
@@ -339,22 +349,38 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
         }
     };
 
-    let connection_card =
-        use_case.build_connection_card(session.display_url, state.log_file.clone(), &summary);
-
     state.summary = Some(summary);
-    state.connection_card = Some(connection_card);
     state.runtime = Some(session.runtime);
-    state.server = Some(session.server);
-    state.info_message = Some("Brain3 is running.".into());
-    state.step = SetupStep::ConnectionCard;
+    state.server = session.server;
+
+    if let Some(display_url) = session.display_url {
+        let summary = state.summary.as_ref().expect("summary should be present");
+        let connection_card =
+            use_case.build_connection_card(display_url, state.log_file.clone(), summary);
+        state.connection_card = Some(connection_card);
+    }
+
+    if let Some(runtime) = &state.runtime {
+        if let Some(failure) = runtime.primary_failure_summary() {
+            state.error_message = Some(failure.to_string());
+            state.info_message = None;
+            state.step = SetupStep::RuntimeStatus;
+        } else {
+            state.info_message = Some("Brain3 is running.".into());
+            state.step = if state.connection_card.is_some() {
+                SetupStep::ConnectionCard
+            } else {
+                SetupStep::RuntimeStatus
+            };
+        }
+    }
 }
 
 async fn start_configured_runtime_session(
     host: &str,
     launch_plan: RuntimeLaunchPlan,
 ) -> Result<ConfiguredGatewaySession> {
-    server::spawn_configured_gateway_session(host, launch_plan).await
+    server::spawn_configured_gateway_session(host, launch_plan, RuntimeOverrides::default()).await
 }
 
 async fn cleanup(state: &mut FirstRunTuiState) -> Result<()> {

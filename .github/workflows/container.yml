@@ -48,6 +48,38 @@ jobs:
             type=semver,pattern=v{{major}}.{{minor}}
             type=semver,pattern=v{{major}}
 
+      - name: Smoke test container startup
+        run: |
+          set -euo pipefail
+          docker build -f ./brain3-mcp-vault-tools/Containerfile -t brain3-mcp-vault-tools:ci-smoke ./brain3-mcp-vault-tools
+          VAULT_DIR="$(mktemp -d)"
+          SECRET_DIR="$(mktemp -d)"
+          printf 'test-shared-secret\n' > "${SECRET_DIR}/upstream_secret"
+
+          cleanup() {
+            docker rm -f brain3-mcp-vault-tools-smoke >/dev/null 2>&1 || true
+            rm -rf "${VAULT_DIR}" "${SECRET_DIR}"
+          }
+          trap cleanup EXIT
+
+          docker run -d \
+            --name brain3-mcp-vault-tools-smoke \
+            --publish 127.0.0.1:8420:8420 \
+            --env B3_VAULT_MCP_HOST=0.0.0.0 \
+            --env B3_VAULT_MCP_PORT=8420 \
+            --env B3_VAULT_PATH=/vault \
+            --env B3_UPSTREAM_SHARED_SECRET_FILE=/run/brain3/upstream_secret \
+            --mount "type=bind,source=${VAULT_DIR},target=/vault" \
+            --mount "type=bind,source=${SECRET_DIR},target=/run/brain3,readonly" \
+            brain3-mcp-vault-tools:ci-smoke
+
+          sleep 5
+
+          if [ "$(docker inspect --format '{{.State.Running}}' brain3-mcp-vault-tools-smoke)" != "true" ]; then
+            docker logs brain3-mcp-vault-tools-smoke
+            exit 1
+          fi
+
       - name: Build and publish image
         uses: docker/build-push-action@v6
         with:

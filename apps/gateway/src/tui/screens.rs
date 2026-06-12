@@ -9,6 +9,7 @@ use brain3_core::domain::setup::{
 };
 use brain3_platform::runtime::StartupStatus;
 
+use crate::release;
 use crate::server::GatewayServerStatus;
 
 use super::runtime_logs::RuntimeLogsState;
@@ -54,7 +55,7 @@ pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
 
 fn header_line(state: &FirstRunTuiState) -> Line<'static> {
     Line::from(vec![
-        Span::styled("Brain3 Gateway", heading_style()),
+        Span::styled(release::APP_VERSION_DISPLAY, heading_style()),
         Span::styled("  •  ", muted_style()),
         Span::styled(screen_title(state.step).to_string(), value_style()),
     ])
@@ -411,6 +412,7 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Container runtime",
             format_container_runtime(state.draft.container_runtime),
         ),
+        key_value_line("Container image", state.draft.container_image.clone()),
         key_value_line("Tunnel", format_tunnel_mode(&state.draft.tunnel_mode)),
         key_value_line(
             "Env file",
@@ -463,15 +465,27 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     if let Some(runtime) = &state.runtime {
         lines.push(key_badge_line(
             "Container",
-            startup_badge(runtime.container_status),
+            startup_badge(&runtime.container_status),
         ));
         lines.push(key_badge_line(
             "Tunnel",
-            startup_badge(runtime.tunnel_status),
+            startup_badge(&runtime.tunnel_status),
         ));
+
+        if let Some(container) = runtime.config.container.as_ref() {
+            lines.push(key_value_line("Container image", container.image.clone()));
+        }
 
         if let Some(url) = &runtime.public_url {
             lines.push(key_value_line("Public URL", url.clone()));
+        }
+
+        if let Some(summary) = runtime.container_status.failure_summary() {
+            lines.push(key_value_line("Container error", summary.to_string()));
+        }
+
+        if let Some(summary) = runtime.tunnel_status.failure_summary() {
+            lines.push(key_value_line("Tunnel error", summary.to_string()));
         }
 
         lines.push(key_value_line(
@@ -491,6 +505,11 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
                 "Gateway",
                 badge_span("Not started", Color::Yellow),
             ));
+            if let Some(runtime) = &state.runtime {
+                if let Some(summary) = runtime.primary_failure_summary() {
+                    lines.push(key_value_line("Gateway status", summary.to_string()));
+                }
+            }
         }
         GatewayServerStatus::Running {
             bind_addr,
@@ -573,7 +592,18 @@ fn runtime_action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             }
             hints.push(("[q]", "Quit"));
 
-            vec![primary_action_line("Brain3 is running."), hint_line(hints)]
+            let message = if state
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.primary_failure_summary())
+                .is_some()
+            {
+                "Brain3 startup failed. Review the runtime status and logs."
+            } else {
+                "Brain3 is running."
+            };
+
+            vec![primary_action_line(message), hint_line(hints)]
         }
         RuntimeView::Logs => {
             let mut hints = vec![
@@ -733,10 +763,11 @@ fn optional_bool_badge(installed: Option<bool>) -> Span<'static> {
     }
 }
 
-fn startup_badge(status: StartupStatus) -> Span<'static> {
+fn startup_badge(status: &StartupStatus) -> Span<'static> {
     match status {
         StartupStatus::NotConfigured => badge_span("Not configured", Color::Yellow),
-        StartupStatus::Started => badge_span("Started", Color::Green),
+        StartupStatus::Ready => badge_span("Ready", Color::Green),
+        StartupStatus::Failed { .. } => badge_span("Failed", Color::Red),
     }
 }
 
@@ -857,4 +888,140 @@ fn muted_style() -> Style {
 
 fn border_style() -> Style {
     Style::default().fg(Color::DarkGray)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use brain3_core::domain::model::{
+        ContainerRuntime, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
+        OAuthConfig,
+    };
+    use brain3_core::domain::setup::{
+        DependencyAvailability, DependencyStatus, PackageManager, RuntimeLaunchPlan,
+        SetupDraftConfig, SetupOperatingSystem, SetupPaths, SetupPreparation, SetupStep,
+        TunnelModeDraft,
+    };
+    use brain3_platform::runtime::{RuntimeBootstrap, StartupStatus};
+
+    use super::*;
+
+    #[test]
+    fn header_mentions_brain3_version() {
+        let state = sample_state();
+        let text = header_line(&state).to_string();
+
+        assert!(text.contains("Brain3 v"));
+        assert!(text.contains(release::APP_VERSION));
+    }
+
+    #[test]
+    fn runtime_screen_shows_failed_container_status() {
+        let state = sample_failed_runtime_state();
+        let text = runtime_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Container:  Failed"));
+        assert!(text.contains("Container image: ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.4"));
+        assert!(text.contains("Vault path does not exist"));
+        assert!(text.contains("Gateway:  Not started"));
+    }
+
+    fn sample_state() -> FirstRunTuiState {
+        FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3.log"),
+            SetupPreparation {
+                paths: SetupPaths::new(
+                    PathBuf::from("/tmp/brain3-home"),
+                    PathBuf::from("/tmp/brain3-home/.env"),
+                    PathBuf::from("/tmp/brain3-home/cloudflared"),
+                ),
+                draft: SetupDraftConfig {
+                    gateway_port: 8421,
+                    client_id: "brain3-oauth2-client".into(),
+                    client_secret: "secret".into(),
+                    access_token: "token".into(),
+                    username: "admin".into(),
+                    password: String::new(),
+                    tunnel_mode: TunnelModeDraft::CloudflareQuick,
+                    container_runtime: ContainerRuntime::MacOSContainer,
+                    vault_path: PathBuf::from("/tmp/vault"),
+                    container_image: release::default_container_image(),
+                    container_host_port: 8420,
+                    container_mcp_port: 8420,
+                    direct_public_origin_hostname: None,
+                },
+                dependencies: DependencyStatus {
+                    operating_system: SetupOperatingSystem::MacOS,
+                    package_manager: Some(PackageManager::Homebrew),
+                    cloudflared: DependencyAvailability::Installed,
+                    preferred_container_runtime: DependencyAvailability::Installed,
+                    docker_installed: true,
+                    macos_container_installed: Some(true),
+                    homebrew_installed: Some(true),
+                },
+            },
+        )
+    }
+
+    fn sample_failed_runtime_state() -> FirstRunTuiState {
+        let mut state = sample_state();
+        state.step = SetupStep::RuntimeStatus;
+        state.runtime = Some(RuntimeBootstrap::new(
+            Arc::new(GatewayConfig {
+                port: 8421,
+                host: "127.0.0.1".into(),
+                oauth: OAuthConfig {
+                    client_id: "brain3-oauth2-client".into(),
+                    client_secret: "secret".into(),
+                    access_token: "token".into(),
+                    pkce_required: true,
+                    username: "admin".into(),
+                    password: "password".into(),
+                },
+                mcp_reverse_proxy: MCPReverseProxyConfig {
+                    mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                    upstream_secret_file: PathBuf::from("/tmp/upstream_secret"),
+                },
+                hostname_validation: HostnameValidationConfig {
+                    expected_host: None,
+                    enforce: true,
+                },
+                container: Some(brain3_core::domain::model::ContainerStartupConfig {
+                    runtime: ContainerRuntime::Docker,
+                    image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.4".into(),
+                    container_name: "brain3-mcp-vault-tools".into(),
+                    vault_path: PathBuf::from("/missing/vault"),
+                    upstream_secret_dir: PathBuf::from("/tmp"),
+                    host_port: 8420,
+                    container_port: 8420,
+                    dev_mount_source: None,
+                }),
+                tunnel: None,
+            }),
+            "secret".into(),
+            RuntimeLaunchPlan {
+                paths: SetupPaths::new(
+                    PathBuf::from("/tmp/brain3-home"),
+                    PathBuf::from("/tmp/brain3-home/.env"),
+                    PathBuf::from("/tmp/brain3-home/cloudflared"),
+                ),
+                env_file: PathBuf::from("/tmp/brain3-home/.env"),
+                log_file: PathBuf::from("/tmp/brain3.log"),
+            },
+            None,
+            StartupStatus::Failed {
+                summary: "Vault path does not exist: /Obsidian/MyVault".into(),
+            },
+            StartupStatus::NotConfigured,
+        ));
+        state.error_message = Some("Vault path does not exist: /Obsidian/MyVault".into());
+        state
+    }
 }
