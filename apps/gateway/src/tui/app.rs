@@ -23,7 +23,8 @@ use crate::RuntimeOverrides;
 
 use super::screens;
 use super::state::{
-    install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, RuntimeView,
+    install_action_label, validate_port_input, AuthField, DependencyDoctorFocus,
+    FirstRunTuiState, PortsField, RuntimeView,
 };
 
 pub enum GatewayTuiLaunch {
@@ -170,7 +171,7 @@ async fn event_loop(
                 }
                 KeyCode::Enter => {
                     state.clear_messages();
-                    state.step = SetupStep::Summary;
+                    state.step = SetupStep::PortsAndSettings;
                 }
                 KeyCode::Tab | KeyCode::Down => {
                     state.next_auth_focus();
@@ -206,13 +207,92 @@ async fn event_loop(
                 },
                 _ => {}
             },
-            SetupStep::Summary => match key.code {
+            SetupStep::PortsAndSettings => match key.code {
                 KeyCode::Esc => {
                     state.clear_messages();
                     state.step = SetupStep::Auth;
                 }
                 KeyCode::Enter => {
+                    state.clear_messages();
+                    if let Err(msg) = validate_port_input(
+                        &state.gateway_port_input,
+                        "Gateway port",
+                    ) {
+                        tracing::debug!(msg, "port validation failed");
+                        state.error_message = Some(msg);
+                    } else if let Err(msg) = validate_port_input(
+                        &state.container_host_port_input,
+                        "Container host port",
+                    ) {
+                        tracing::debug!(msg, "port validation failed");
+                        state.error_message = Some(msg);
+                    } else if let Err(msg) = validate_port_input(
+                        &state.container_mcp_port_input,
+                        "Container MCP port",
+                    ) {
+                        tracing::debug!(msg, "port validation failed");
+                        state.error_message = Some(msg);
+                    } else {
+                        state.step = SetupStep::Summary;
+                    }
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    state.next_ports_focus();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    state.previous_ports_focus();
+                }
+                KeyCode::Char('t') => {
+                    state.toggle_ports_boolean();
+                }
+                KeyCode::Backspace if state.ports_focus_is_text_field() => {
+                    match state.ports_focus {
+                        PortsField::GatewayPort => { state.gateway_port_input.pop(); }
+                        PortsField::ContainerHostPort => { state.container_host_port_input.pop(); }
+                        PortsField::ContainerMcpPort => { state.container_mcp_port_input.pop(); }
+                        _ => {}
+                    }
+                }
+                KeyCode::Char(ch) if state.ports_focus_is_text_field() && ch.is_ascii_digit() => {
+                    match state.ports_focus {
+                        PortsField::GatewayPort => state.gateway_port_input.push(ch),
+                        PortsField::ContainerHostPort => state.container_host_port_input.push(ch),
+                        PortsField::ContainerMcpPort => state.container_mcp_port_input.push(ch),
+                        _ => {}
+                    }
+                }
+                _ => {}
+            },
+            SetupStep::Summary => match key.code {
+                KeyCode::Esc => {
+                    state.clear_messages();
+                    state.step = SetupStep::PortsAndSettings;
+                }
+                KeyCode::Enter => {
                     finalize_and_start(state, use_case).await;
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    state.next_summary_focus();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    state.previous_summary_focus();
+                }
+                KeyCode::Char(' ') | KeyCode::Char('t')
+                    if !state.summary_focus_is_text_field() =>
+                {
+                    state.toggle_summary_field();
+                }
+                KeyCode::Backspace if state.summary_focus_is_text_field() => {
+                    state.summary_char_pop();
+                }
+                KeyCode::Char(ch) if state.summary_focus_is_text_field() => {
+                    if state.summary_focus_is_digits_only() {
+                        if ch.is_ascii_digit() {
+                            state.summary_char_push(ch);
+                        }
+                    } else {
+                        state.summary_char_push(ch);
+                    }
                 }
                 _ => {}
             },
@@ -272,6 +352,7 @@ async fn advance_from_vault_path(state: &mut FirstRunTuiState, use_case: &FirstR
             state.step = SetupStep::Auth;
         }
         Err(error) => {
+            tracing::error!(error = %error, "vault path validation failed");
             state.error_message = Some(error.to_string());
         }
     }
@@ -288,6 +369,7 @@ async fn refresh_dependencies(
             state.info_message = Some("Dependency status refreshed.".into());
         }
         Err(error) => {
+            tracing::error!(error = %error, "failed to collect dependency status");
             state.error_message = Some(error.to_string());
             state.info_message = None;
         }
@@ -310,6 +392,7 @@ async fn run_install_action(
             refresh_dependencies(state, setup_system).await;
         }
         Err(error) => {
+            tracing::error!(error = %error, action = %action_label, "install action failed");
             state.error_message = Some(error.to_string());
             state.info_message = None;
         }
@@ -329,6 +412,7 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
     {
         Ok(summary) => summary,
         Err(error) => {
+            tracing::error!(error = %error, "failed to finalize setup");
             state.error_message = Some(error.to_string());
             state.info_message = None;
             return;
@@ -347,6 +431,7 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
     {
         Ok(session) => session,
         Err(error) => {
+            tracing::error!(error = %error, "failed to start gateway session");
             state.error_message = Some(error.to_string());
             state.info_message = None;
             return;
@@ -367,6 +452,7 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
 
     if let Some(runtime) = &state.runtime {
         if let Some(failure) = runtime.primary_failure_summary() {
+            tracing::error!(failure, "runtime reported primary failure");
             state.error_message = Some(failure.to_string());
             state.info_message = None;
             state.step = SetupStep::RuntimeStatus;

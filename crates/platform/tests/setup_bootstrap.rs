@@ -42,6 +42,8 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
         container_host_port: 8420,
         container_mcp_port: 8420,
+        pkce_required: true,
+        enforce_hostname_check: true,
         direct_public_origin_hostname: None,
     };
 

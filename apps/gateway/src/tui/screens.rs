@@ -14,7 +14,8 @@ use crate::server::GatewayServerStatus;
 
 use super::runtime_logs::RuntimeLogsState;
 use super::state::{
-    install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, RuntimeView,
+    install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, PortsField,
+    RuntimeView, SummaryField,
 };
 
 pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
@@ -68,6 +69,7 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Dependencies",
         "Vault",
         "Auth",
+        "Ports",
         "Start",
         "Running",
     ];
@@ -115,6 +117,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::DependencyDoctor => "Dependency Doctor",
         SetupStep::VaultPath => "Vault Path",
         SetupStep::Auth => "Auth Setup",
+        SetupStep::PortsAndSettings => "Ports & Settings",
         SetupStep::Summary => "Summary",
         SetupStep::ConnectionCard => "MCP Config Settings",
         SetupStep::RuntimeStatus => "Runtime Status",
@@ -136,6 +139,7 @@ fn progress_caption(step: SetupStep) -> &'static str {
         SetupStep::DependencyDoctor => "Confirm local dependencies and install anything missing.",
         SetupStep::VaultPath => "Choose the Obsidian-compatible vault Brain3 should expose.",
         SetupStep::Auth => "Review the generated login defaults and customize them if needed.",
+        SetupStep::PortsAndSettings => "Override ports and security settings if the defaults conflict.",
         SetupStep::Summary => "Confirm what Brain3 will write before startup begins.",
         SetupStep::ConnectionCard | SetupStep::RuntimeStatus => {
             "Brain3 is configured. Use the connection details or monitor runtime status."
@@ -149,8 +153,9 @@ fn wizard_stage_index(step: SetupStep) -> usize {
         SetupStep::DependencyDoctor => 1,
         SetupStep::VaultPath => 2,
         SetupStep::Auth => 3,
-        SetupStep::Summary => 4,
-        SetupStep::ConnectionCard | SetupStep::RuntimeStatus => 5,
+        SetupStep::PortsAndSettings => 4,
+        SetupStep::Summary => 5,
+        SetupStep::ConnectionCard | SetupStep::RuntimeStatus => 6,
     }
 }
 
@@ -160,6 +165,7 @@ fn body_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::DependencyDoctor => dependency_lines(state),
         SetupStep::VaultPath => vault_lines(state),
         SetupStep::Auth => auth_lines(state),
+        SetupStep::PortsAndSettings => ports_and_settings_lines(state),
         SetupStep::Summary => summary_lines(state),
         SetupStep::ConnectionCard => connection_card_lines(state),
         SetupStep::RuntimeStatus => runtime_lines(state),
@@ -393,20 +399,130 @@ fn auth_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     ]
 }
 
-fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
-    vec![
-        muted_line("Review the config Brain3 will write before startup begins."),
+fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        muted_line("Override ports if the defaults conflict with other services on this machine."),
+        muted_line("Toggle security settings only if your client requires it."),
         blank_line(),
-        key_value_line("Vault path", state.vault_path_input.clone()),
-        key_value_line("Username", state.username_input.clone()),
-        key_value_line("Client ID", state.client_id_input.clone()),
-        key_badge_line(
+    ];
+
+    lines.push(field_line(
+        "Gateway port",
+        &state.gateway_port_input,
+        state.ports_focus == PortsField::GatewayPort,
+    ));
+    lines.push(field_line(
+        "Container host port",
+        &state.container_host_port_input,
+        state.ports_focus == PortsField::ContainerHostPort,
+    ));
+    lines.push(field_line(
+        "Container MCP port",
+        &state.container_mcp_port_input,
+        state.ports_focus == PortsField::ContainerMcpPort,
+    ));
+
+    lines.push(blank_line());
+
+    let pkce_active = state.ports_focus == PortsField::PkceRequired;
+    let pkce_badge = if state.draft.pkce_required {
+        badge_span("Enabled", Color::Green)
+    } else {
+        badge_span("Disabled", Color::Yellow)
+    };
+    let pkce_pointer = if pkce_active {
+        Span::styled("▶ ", accent_style())
+    } else {
+        Span::styled("  ", muted_style())
+    };
+    lines.push(Line::from(vec![
+        pkce_pointer,
+        Span::styled(
+            "PKCE required: ".to_string(),
+            if pkce_active { accent_style() } else { label_style() },
+        ),
+        pkce_badge,
+    ]));
+
+    let hostname_active = state.ports_focus == PortsField::EnforceHostnameCheck;
+    let hostname_badge = if state.draft.enforce_hostname_check {
+        badge_span("Enabled", Color::Green)
+    } else {
+        badge_span("Disabled", Color::Yellow)
+    };
+    let hostname_pointer = if hostname_active {
+        Span::styled("▶ ", accent_style())
+    } else {
+        Span::styled("  ", muted_style())
+    };
+    lines.push(Line::from(vec![
+        hostname_pointer,
+        Span::styled(
+            "Enforce hostname check: ".to_string(),
+            if hostname_active { accent_style() } else { label_style() },
+        ),
+        hostname_badge,
+    ]));
+
+    lines
+}
+
+fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
+    let f = state.summary_focus;
+    let mut lines = vec![
+        muted_line("Review and edit the config Brain3 will write before startup begins."),
+        blank_line(),
+        field_line("Vault path", &state.vault_path_input, f == SummaryField::VaultPath),
+        field_line("Username", &state.username_input, f == SummaryField::Username),
+        field_line("Client ID", &state.client_id_input, f == SummaryField::ClientId),
+        field_badge_line(
             "Password mode",
             if state.generate_password {
                 badge_span("Auto-generated", Color::Green)
             } else {
                 badge_span("Custom password", Color::Cyan)
             },
+            f == SummaryField::PasswordMode,
+        ),
+    ];
+
+    if !state.generate_password {
+        lines.push(field_line(
+            "Password",
+            &state.password_input,
+            f == SummaryField::PasswordValue,
+        ));
+    }
+
+    lines.extend([
+        field_line("Gateway port", &state.gateway_port_input, f == SummaryField::GatewayPort),
+        field_line(
+            "Container host port",
+            &state.container_host_port_input,
+            f == SummaryField::ContainerHostPort,
+        ),
+        field_line(
+            "Container MCP port",
+            &state.container_mcp_port_input,
+            f == SummaryField::ContainerMcpPort,
+        ),
+        field_badge_line(
+            "PKCE required",
+            if state.draft.pkce_required {
+                badge_span("Enabled", Color::Green)
+            } else {
+                badge_span("Disabled", Color::Yellow)
+            },
+            f == SummaryField::PkceRequired,
+        ),
+        field_badge_line(
+            "Hostname check",
+            if state.draft.enforce_hostname_check {
+                badge_span("Enabled", Color::Green)
+            } else {
+                badge_span("Disabled", Color::Yellow)
+            },
+            f == SummaryField::HostnameCheck,
         ),
         key_value_line(
             "Container runtime",
@@ -419,7 +535,9 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             state.preparation.paths.env_file.display().to_string(),
         ),
         key_value_line("Logs", state.log_file.display().to_string()),
-    ]
+    ]);
+
+    lines
 }
 
 fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
@@ -566,13 +684,23 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             ("[Esc]", "Back"),
             ("[q]", "Quit"),
         ]),
+        SetupStep::PortsAndSettings => continue_action_lines(vec![
+            ("[Tab/Up/Down]", "Move"),
+            ("[Type]", "Edit port"),
+            ("[t]", "Toggle setting"),
+            ("[Esc]", "Back"),
+            ("[q]", "Quit"),
+        ]),
         SetupStep::Summary => vec![
-            primary_action_line("Ready to launch Brain3."),
+            primary_action_line("Edit any field, then save config and start."),
             muted_line("⚠ The UI will \"stick\" for 5s, but it's starting. Known issue."),
             hint_line(vec![
+                ("[Tab/↑↓]", "Move"),
+                ("[Type]", "Edit"),
+                ("[Space/t]", "Toggle"),
                 ("[Esc]", "Back"),
                 ("[q]", "Quit"),
-                ("[Enter]", "Save Config and Start"),
+                ("[Enter]", "Save & Start"),
             ]),
         ],
         SetupStep::ConnectionCard => vec![
@@ -711,6 +839,20 @@ fn field_line(label: &str, value: &str, active: bool) -> Line<'static> {
         pointer,
         Span::styled(format!("{label}: "), label_style),
         Span::styled(display_value, value_style),
+    ])
+}
+
+fn field_badge_line(label: &str, badge: Span<'static>, active: bool) -> Line<'static> {
+    let pointer = if active {
+        Span::styled("▶ ", accent_style())
+    } else {
+        Span::styled("  ", muted_style())
+    };
+    let label_style = if active { accent_style() } else { label_style() };
+    Line::from(vec![
+        pointer,
+        Span::styled(format!("{label}: "), label_style),
+        badge,
     ])
 }
 
@@ -955,6 +1097,8 @@ mod tests {
                     container_image: release::default_container_image(),
                     container_host_port: 8420,
                     container_mcp_port: 8420,
+                    pkce_required: true,
+                    enforce_hostname_check: true,
                     direct_public_origin_hostname: None,
                 },
                 dependencies: DependencyStatus {
