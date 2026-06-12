@@ -8,7 +8,7 @@ use sqlx::{Row, SqlitePool};
 use tokio::sync::OnceCell;
 
 use brain3_core::domain::errors::TokenStoreError;
-use brain3_core::ports::token_store::{AccessTokenData, TokenStore};
+use brain3_core::ports::token_store::{StoredTokenData, StoredTokenKind, TokenStore};
 
 pub struct SqliteTokenStore {
     pool: SqlitePool,
@@ -53,12 +53,29 @@ impl SqliteTokenStore {
                     "CREATE TABLE IF NOT EXISTS access_tokens (
                         token TEXT PRIMARY KEY,
                         client_id TEXT NOT NULL,
+                        kind TEXT NOT NULL DEFAULT 'access',
                         expires_at INTEGER NOT NULL
                     )",
                 )
                 .execute(&self.pool)
                 .await
                 .map_err(|error| TokenStoreError::Unavailable(error.to_string()))?;
+
+                let has_kind = sqlx::query_scalar::<_, i64>(
+                    "SELECT COUNT(*) FROM pragma_table_info('access_tokens') WHERE name = 'kind'",
+                )
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|error| TokenStoreError::Unavailable(error.to_string()))?;
+
+                if has_kind == 0 {
+                    sqlx::query(
+                        "ALTER TABLE access_tokens ADD COLUMN kind TEXT NOT NULL DEFAULT 'access'",
+                    )
+                    .execute(&self.pool)
+                    .await
+                    .map_err(|error| TokenStoreError::Unavailable(error.to_string()))?;
+                }
 
                 Ok(())
             })
@@ -69,15 +86,16 @@ impl SqliteTokenStore {
 
 #[async_trait]
 impl TokenStore for SqliteTokenStore {
-    async fn store(&self, token: String, data: AccessTokenData) -> Result<(), TokenStoreError> {
+    async fn store(&self, token: String, data: StoredTokenData) -> Result<(), TokenStoreError> {
         self.ensure_schema().await?;
 
         sqlx::query(
-            "INSERT OR REPLACE INTO access_tokens (token, client_id, expires_at)
-             VALUES (?1, ?2, ?3)",
+            "INSERT OR REPLACE INTO access_tokens (token, client_id, kind, expires_at)
+             VALUES (?1, ?2, ?3, ?4)",
         )
         .bind(token)
         .bind(data.client_id)
+        .bind(token_kind_to_str(data.kind))
         .bind(system_time_to_unix_seconds(data.expires_at)?)
         .execute(&self.pool)
         .await
@@ -86,11 +104,11 @@ impl TokenStore for SqliteTokenStore {
         Ok(())
     }
 
-    async fn get(&self, token: &str) -> Result<Option<AccessTokenData>, TokenStoreError> {
+    async fn get(&self, token: &str) -> Result<Option<StoredTokenData>, TokenStoreError> {
         self.ensure_schema().await?;
 
         let row = sqlx::query(
-            "SELECT client_id, expires_at
+            "SELECT client_id, kind, expires_at
              FROM access_tokens
              WHERE token = ?1",
         )
@@ -103,12 +121,17 @@ impl TokenStore for SqliteTokenStore {
             let client_id: String = row
                 .try_get("client_id")
                 .map_err(|error| TokenStoreError::Unavailable(error.to_string()))?;
+            let kind = token_kind_from_str(
+                &row.try_get::<String, _>("kind")
+                    .map_err(|error| TokenStoreError::Unavailable(error.to_string()))?,
+            )?;
             let expires_at: i64 = row
                 .try_get("expires_at")
                 .map_err(|error| TokenStoreError::Unavailable(error.to_string()))?;
 
-            Ok(AccessTokenData {
+            Ok(StoredTokenData {
                 client_id,
+                kind,
                 expires_at: unix_seconds_to_system_time(expires_at)?,
             })
         })
@@ -160,4 +183,21 @@ fn unix_seconds_to_system_time(seconds: i64) -> Result<SystemTime, TokenStoreErr
     let seconds =
         u64::try_from(seconds).map_err(|error| TokenStoreError::Unavailable(error.to_string()))?;
     Ok(UNIX_EPOCH + Duration::from_secs(seconds))
+}
+
+fn token_kind_to_str(kind: StoredTokenKind) -> &'static str {
+    match kind {
+        StoredTokenKind::Access => "access",
+        StoredTokenKind::Refresh => "refresh",
+    }
+}
+
+fn token_kind_from_str(value: &str) -> Result<StoredTokenKind, TokenStoreError> {
+    match value {
+        "access" => Ok(StoredTokenKind::Access),
+        "refresh" => Ok(StoredTokenKind::Refresh),
+        other => Err(TokenStoreError::Unavailable(format!(
+            "unknown token kind '{other}' in sqlite store"
+        ))),
+    }
 }

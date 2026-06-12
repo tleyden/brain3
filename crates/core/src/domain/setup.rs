@@ -8,6 +8,7 @@ pub const DEFAULT_USERNAME: &str = "admin";
 pub const DEFAULT_CONTAINER_HOST_PORT: u16 = 8420;
 pub const DEFAULT_CONTAINER_MCP_PORT: u16 = 8420;
 pub const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
+pub const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 pub const DEFAULT_GENERATED_SECRET_BYTES: usize = 32;
 pub const DEFAULT_GENERATED_PASSWORD_LENGTH: usize = 24;
 
@@ -46,6 +47,7 @@ pub struct SetupDraftConfig {
     pub client_id: String,
     pub client_secret: String,
     pub access_token_lifetime_secs: u64,
+    pub refresh_token_lifetime_secs: u64,
     pub username: String,
     pub password: String,
     pub tunnel_mode: TunnelModeDraft,

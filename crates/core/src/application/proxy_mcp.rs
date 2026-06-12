@@ -6,7 +6,7 @@ use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
 use crate::domain::redact::elide_secret;
 use crate::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
-use crate::ports::token_store::TokenStore;
+use crate::ports::token_store::{StoredTokenKind, TokenStore};
 
 use super::validate_request::{validate_bearer_token, validate_host};
 
@@ -129,6 +129,20 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
                 path = path,
                 host = request_host,
                 "MCP proxy rejected: bearer token expired"
+            );
+            return Err(ProxyError::Unauthorized(
+                "Missing or invalid bearer token".into(),
+            ));
+        }
+
+        if token_data.kind != StoredTokenKind::Access {
+            tracing::warn!(
+                received_token_hint = %elide_secret(received_token),
+                client_id = %token_data.client_id,
+                method = method,
+                path = path,
+                host = request_host,
+                "MCP proxy rejected: token kind was not access"
             );
             return Err(ProxyError::Unauthorized(
                 "Missing or invalid bearer token".into(),

@@ -8,7 +8,7 @@ use crate::domain::oauth::{
 };
 use crate::domain::redact::elide_secret;
 use crate::ports::auth_code_store::AuthCodeStore;
-use crate::ports::token_store::{AccessTokenData, TokenStore};
+use crate::ports::token_store::{StoredTokenData, StoredTokenKind, TokenStore};
 
 pub struct TokenExchangeUseCase<S: AuthCodeStore> {
     config: Arc<OAuthConfig>,
@@ -35,27 +35,27 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
             "token exchange request received"
         );
 
-        if req.grant_type != "authorization_code" {
-            return Err(OAuthError::UnsupportedGrantType);
+        match req.grant_type.as_str() {
+            "authorization_code" => self.exchange_authorization_code(req).await,
+            "refresh_token" => self.exchange_refresh_token(req).await,
+            _ => Err(OAuthError::UnsupportedGrantType),
         }
+    }
 
-        self.store.cleanup_expired().await;
-
+    fn validate_client(&self, req: &TokenRequest) -> Result<(), OAuthError> {
         if req.client_id != self.config.client_id {
             tracing::warn!(
                 received = %req.client_id,
                 expected = %self.config.client_id,
                 "token exchange rejected: client_id mismatch"
             );
-            return Err(OAuthError::InvalidClient);
-        }
-        if self.config.client_secret.is_empty() {
+            Err(OAuthError::InvalidClient)
+        } else if self.config.client_secret.is_empty() {
             tracing::warn!("token exchange rejected: client_secret not configured on server");
-            return Err(OAuthError::ServerError(
+            Err(OAuthError::ServerError(
                 "client secret not configured".into(),
-            ));
-        }
-        if !constant_time_eq(
+            ))
+        } else if !constant_time_eq(
             req.client_secret.as_bytes(),
             self.config.client_secret.as_bytes(),
         ) {
@@ -64,15 +64,31 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
                 expected = %elide_secret(&self.config.client_secret),
                 "token exchange rejected: client_secret mismatch"
             );
-            return Err(OAuthError::InvalidClient);
+            Err(OAuthError::InvalidClient)
+        } else {
+            Ok(())
         }
+    }
+
+    async fn exchange_authorization_code(
+        &self,
+        req: &TokenRequest,
+    ) -> Result<TokenResponse, OAuthError> {
+        self.store.cleanup_expired().await;
+        self.validate_client(req)?;
+
+        let code = req
+            .code
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| OAuthError::InvalidRequest("code required".into()))?;
 
         let code_data = self
             .store
-            .take(&req.code)
+            .take(code)
             .await
             .ok_or_else(|| {
-                tracing::warn!(code = %req.code, "token exchange rejected: auth code not found or expired");
+                tracing::warn!(code = %code, "token exchange rejected: auth code not found or expired");
                 OAuthError::InvalidGrant("Invalid or expired code".into())
             })?;
 
@@ -133,15 +149,95 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
             }
         }
 
+        let response = self.issue_token_pair(&req.client_id).await?;
+
+        tracing::info!(
+            client_id = %req.client_id,
+            "token exchange succeeded: access and refresh tokens issued"
+        );
+
+        Ok(response)
+    }
+
+    async fn exchange_refresh_token(&self, req: &TokenRequest) -> Result<TokenResponse, OAuthError> {
+        self.validate_client(req)?;
+
+        let refresh_token = req
+            .refresh_token
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| OAuthError::InvalidRequest("refresh_token required".into()))?;
+
+        let stored = self
+            .token_store
+            .get(refresh_token)
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "refresh exchange failed to load refresh token");
+                OAuthError::ServerError("failed to load refresh token".into())
+            })?
+            .ok_or_else(|| OAuthError::InvalidGrant("Invalid or expired refresh token".into()))?;
+
+        if stored.kind != StoredTokenKind::Refresh {
+            tracing::warn!(
+                refresh_token_hint = %elide_secret(refresh_token),
+                "refresh exchange rejected: token kind was not refresh"
+            );
+            return Err(OAuthError::InvalidGrant("Invalid refresh token".into()));
+        }
+
+        if stored.expires_at <= SystemTime::now() {
+            tracing::warn!(
+                refresh_token_hint = %elide_secret(refresh_token),
+                client_id = %stored.client_id,
+                "refresh exchange rejected: refresh token expired"
+            );
+            return Err(OAuthError::InvalidGrant("Invalid or expired refresh token".into()));
+        }
+
+        if !constant_time_eq(req.client_id.as_bytes(), stored.client_id.as_bytes()) {
+            tracing::warn!(
+                request_client_id = %req.client_id,
+                stored_client_id = %stored.client_id,
+                "refresh exchange rejected: client_id mismatch"
+            );
+            return Err(OAuthError::InvalidGrant("client_id mismatch".into()));
+        }
+
+        let response = self.issue_token_pair(&req.client_id).await?;
+
+        self.token_store.revoke(refresh_token).await.map_err(|error| {
+            tracing::error!(
+                %error,
+                refresh_token_hint = %elide_secret(refresh_token),
+                "refresh exchange failed to revoke used refresh token"
+            );
+            OAuthError::ServerError("failed to rotate refresh token".into())
+        })?;
+
+        tracing::info!(
+            client_id = %req.client_id,
+            "refresh exchange succeeded: access and refresh tokens rotated"
+        );
+
+        Ok(response)
+    }
+
+    async fn issue_token_pair(&self, client_id: &str) -> Result<TokenResponse, OAuthError> {
         let access_token = generate_secure_token();
-        let expires_in = self.config.access_token_lifetime_secs;
-        let expires_at = SystemTime::now() + Duration::from_secs(expires_in);
+        let refresh_token = generate_secure_token();
+        let access_expires_in = self.config.access_token_lifetime_secs;
+        let access_expires_at = SystemTime::now() + Duration::from_secs(access_expires_in);
+        let refresh_expires_at =
+            SystemTime::now() + Duration::from_secs(self.config.refresh_token_lifetime_secs);
+
         self.token_store
             .store(
                 access_token.clone(),
-                AccessTokenData {
-                    client_id: req.client_id.clone(),
-                    expires_at,
+                StoredTokenData {
+                    client_id: client_id.to_string(),
+                    kind: StoredTokenKind::Access,
+                    expires_at: access_expires_at,
                 },
             )
             .await
@@ -150,15 +246,39 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
                 OAuthError::ServerError("failed to persist access token".into())
             })?;
 
-        tracing::info!(
-            client_id = %req.client_id,
-            "token exchange succeeded: access token issued"
-        );
+        match self
+            .token_store
+            .store(
+                refresh_token.clone(),
+                StoredTokenData {
+                    client_id: client_id.to_string(),
+                    kind: StoredTokenKind::Refresh,
+                    expires_at: refresh_expires_at,
+                },
+            )
+            .await
+        {
+            Ok(()) => {}
+            Err(error) => {
+                if let Err(revoke_error) = self.token_store.revoke(&access_token).await {
+                    tracing::error!(
+                        %revoke_error,
+                        access_token_hint = %elide_secret(&access_token),
+                        "token exchange failed to clean up access token after refresh token write failure"
+                    );
+                }
+                tracing::error!(%error, "token exchange failed to persist refresh token");
+                return Err(OAuthError::ServerError(
+                    "failed to persist refresh token".into(),
+                ));
+            }
+        }
 
         Ok(TokenResponse {
             access_token,
             token_type: "bearer".into(),
-            expires_in,
+            expires_in: access_expires_in,
+            refresh_token: Some(refresh_token),
         })
     }
 }

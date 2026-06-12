@@ -234,6 +234,12 @@ async fn event_loop(
                     ) {
                         tracing::debug!(msg, "lifetime validation failed");
                         state.error_message = Some(msg);
+                    } else if let Err(msg) = validate_positive_u64_input(
+                        &state.refresh_token_lifetime_secs_input,
+                        "Refresh token lifetime",
+                    ) {
+                        tracing::debug!(msg, "lifetime validation failed");
+                        state.error_message = Some(msg);
                     } else {
                         state.step = SetupStep::Summary;
                     }
@@ -261,6 +267,9 @@ async fn event_loop(
                         PortsField::AccessTokenLifetimeSecs => {
                             state.access_token_lifetime_secs_input.pop();
                         }
+                        PortsField::RefreshTokenLifetimeSecs => {
+                            state.refresh_token_lifetime_secs_input.pop();
+                        }
                         _ => {}
                     }
                 }
@@ -271,6 +280,9 @@ async fn event_loop(
                         PortsField::ContainerMcpPort => state.container_mcp_port_input.push(ch),
                         PortsField::AccessTokenLifetimeSecs => {
                             state.access_token_lifetime_secs_input.push(ch)
+                        }
+                        PortsField::RefreshTokenLifetimeSecs => {
+                            state.refresh_token_lifetime_secs_input.push(ch)
                         }
                         _ => {}
                     }

@@ -6,7 +6,8 @@ use crate::domain::setup::{
     ConnectionCard, FinalizeSetupRequest, SetupDefaults, SetupDraftConfig, SetupPreparation,
     SetupSummary, TunnelModeDraft, DEFAULT_ACCESS_TOKEN_LIFETIME_SECS, DEFAULT_CLIENT_ID,
     DEFAULT_CONTAINER_HOST_PORT, DEFAULT_CONTAINER_MCP_PORT, DEFAULT_GATEWAY_PORT,
-    DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES, DEFAULT_USERNAME,
+    DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES,
+    DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME,
 };
 use crate::ports::setup_system::SetupSystemPort;
 
@@ -31,6 +32,7 @@ impl FirstRunSetupUseCase {
                 .port
                 .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?,
             access_token_lifetime_secs: DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
+            refresh_token_lifetime_secs: DEFAULT_REFRESH_TOKEN_LIFETIME_SECS,
             username: DEFAULT_USERNAME.to_string(),
             password: String::new(),
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
@@ -81,6 +83,7 @@ impl FirstRunSetupUseCase {
         validate_nonempty("client ID", &draft.client_id)?;
         validate_nonempty("username", &draft.username)?;
         validate_positive_u64("access token lifetime", draft.access_token_lifetime_secs)?;
+        validate_positive_u64("refresh token lifetime", draft.refresh_token_lifetime_secs)?;
         self.validate_vault_path(&draft.vault_path).await?;
 
         if draft.client_secret.trim().is_empty() {
@@ -286,6 +289,7 @@ mod tests {
             client_id: "brain3-oauth2-client".into(),
             client_secret: String::new(),
             access_token_lifetime_secs: DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
+            refresh_token_lifetime_secs: DEFAULT_REFRESH_TOKEN_LIFETIME_SECS,
             username: "admin".into(),
             password: String::new(),
             tunnel_mode: TunnelModeDraft::CloudflareQuick,

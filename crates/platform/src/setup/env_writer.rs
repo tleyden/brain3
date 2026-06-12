@@ -46,6 +46,10 @@ fn build_overrides(
         "B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS",
         draft.access_token_lifetime_secs.to_string(),
     );
+    values.insert(
+        "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS",
+        draft.refresh_token_lifetime_secs.to_string(),
+    );
     values.insert("B3_USERNAME", draft.username.clone());
     values.insert("B3_PASSWORD", draft.password.clone());
     values.insert(

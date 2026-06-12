@@ -94,7 +94,7 @@ pub async fn oauth_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'stati
         "issuer": base_url,
         "authorization_endpoint": format!("{base_url}/oauth/authorize"),
         "token_endpoint": format!("{base_url}/oauth/token"),
-        "grant_types_supported": ["authorization_code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],
         "token_endpoint_auth_methods_supported": ["client_secret_post"],
@@ -223,7 +223,8 @@ pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
         grant_type: form.get("grant_type").cloned().unwrap_or_default(),
         client_id: form.get("client_id").cloned().unwrap_or_default(),
         client_secret: form.get("client_secret").cloned().unwrap_or_default(),
-        code: form.get("code").cloned().unwrap_or_default(),
+        code: form.get("code").cloned().filter(|s| !s.is_empty()),
+        refresh_token: form.get("refresh_token").cloned().filter(|s| !s.is_empty()),
         redirect_uri: form.get("redirect_uri").cloned().filter(|s| !s.is_empty()),
         code_verifier: form.get("code_verifier").cloned().filter(|s| !s.is_empty()),
     };
@@ -232,16 +233,20 @@ pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
         Ok(token_response) => {
             tracing::info!(
                 access_token_hint = %elide_secret(&token_response.access_token),
+                refresh_token_issued = token_response.refresh_token.is_some(),
                 token_type = %token_response.token_type,
                 expires_in = token_response.expires_in,
-                "OAuth token issued via authorization_code grant"
+                grant_type = %req.grant_type,
+                "OAuth token issued"
             );
-            Json(json!({
-                "access_token": token_response.access_token,
-                "token_type": token_response.token_type,
-                "expires_in": token_response.expires_in,
-            }))
-            .into_response()
+            let mut body = serde_json::Map::new();
+            body.insert("access_token".into(), token_response.access_token.into());
+            body.insert("token_type".into(), token_response.token_type.into());
+            body.insert("expires_in".into(), token_response.expires_in.into());
+            if let Some(refresh_token) = token_response.refresh_token {
+                body.insert("refresh_token".into(), refresh_token.into());
+            }
+            Json(serde_json::Value::Object(body)).into_response()
         }
         Err(e) => oauth_error_response(e),
     }

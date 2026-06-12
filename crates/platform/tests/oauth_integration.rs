@@ -13,7 +13,7 @@ use brain3_core::domain::model::{
     GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
-use brain3_core::ports::token_store::{AccessTokenData, TokenStore};
+use brain3_core::ports::token_store::{StoredTokenData, StoredTokenKind, TokenStore};
 
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::http::router::build_router;
@@ -120,6 +120,7 @@ impl Default for TestHarness {
                 client_id: CLIENT_ID.into(),
                 client_secret: CLIENT_SECRET.into(),
                 access_token_lifetime_secs: 3600,
+                refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
                 pkce_required: true,
                 username: LOGIN_USERNAME.into(),
                 password: LOGIN_PASSWORD.into(),
@@ -245,6 +246,23 @@ async fn login_and_get_access_token(server: &TestServer) -> String {
         .to_string()
 }
 
+async fn login_and_exchange_code(server: &TestServer) -> Value {
+    let code = login_and_get_code(server).await;
+    let resp = server
+        .post("/oauth/token")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("redirect_uri", REDIRECT_URI),
+            ("code", &code),
+            ("code_verifier", CODE_VERIFIER),
+        ])
+        .await;
+    resp.assert_status_ok();
+    resp.json()
+}
+
 // ===========================================================================
 // Tests ported from test_oauth_security.py
 // ===========================================================================
@@ -260,7 +278,7 @@ async fn oauth_metadata_only_advertises_preregistered_confidential_client_flow()
     assert!(body.get("registration_endpoint").is_none());
     assert_eq!(
         body["grant_types_supported"],
-        serde_json::json!(["authorization_code"])
+        serde_json::json!(["authorization_code", "refresh_token"])
     );
     assert_eq!(
         body["response_types_supported"],
@@ -344,24 +362,10 @@ async fn authorization_code_exchange_requires_client_secret() {
 async fn authorization_code_exchange_succeeds_with_exact_client_id_and_secret() {
     let server = TestHarness::default().build_server(MockMcpProxy::success());
 
-    let code = login_and_get_code(&server).await;
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-
-    resp.assert_status_ok();
-    let body: Value = resp.json();
+    let body = login_and_exchange_code(&server).await;
     assert_eq!(body["token_type"], "bearer");
     assert!(body["access_token"].is_string());
+    assert!(body["refresh_token"].is_string());
     assert!(body["expires_in"].is_number());
 }
 
@@ -438,6 +442,79 @@ async fn authorization_code_exchange_returns_configured_access_token_lifetime() 
     resp.assert_status_ok();
     let body: Value = resp.json();
     assert_eq!(body["expires_in"], 1234);
+}
+
+#[tokio::test]
+async fn authorization_code_exchange_returns_refresh_token_that_can_rotate_access() {
+    let server = TestHarness::default().build_server(MockMcpProxy::success());
+
+    let first_body = login_and_exchange_code(&server).await;
+    let first_access_token = first_body["access_token"]
+        .as_str()
+        .expect("access_token should be present")
+        .to_string();
+    let first_refresh_token = first_body["refresh_token"]
+        .as_str()
+        .expect("refresh_token should be present")
+        .to_string();
+
+    let refresh_resp = server
+        .post("/oauth/token")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("refresh_token", &first_refresh_token),
+        ])
+        .await;
+
+    refresh_resp.assert_status_ok();
+    let refresh_body: Value = refresh_resp.json();
+    let second_access_token = refresh_body["access_token"]
+        .as_str()
+        .expect("refreshed access_token should be present")
+        .to_string();
+    let second_refresh_token = refresh_body["refresh_token"]
+        .as_str()
+        .expect("rotated refresh_token should be present")
+        .to_string();
+
+    assert_ne!(first_access_token, second_access_token);
+    assert_ne!(first_refresh_token, second_refresh_token);
+    assert_eq!(refresh_body["token_type"], "bearer");
+    assert!(refresh_body["expires_in"].is_number());
+
+    let reused_refresh_resp = server
+        .post("/oauth/token")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("refresh_token", &first_refresh_token),
+        ])
+        .await;
+
+    assert_eq!(reused_refresh_resp.status_code(), 400);
+    let reused_refresh_body: Value = reused_refresh_resp.json();
+    assert_eq!(reused_refresh_body["error"], "invalid_grant");
+}
+
+#[tokio::test]
+async fn refresh_token_exchange_rejects_missing_refresh_token() {
+    let server = TestHarness::default().build_server(MockMcpProxy::success());
+
+    let resp = server
+        .post("/oauth/token")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+        ])
+        .await;
+
+    assert_eq!(resp.status_code(), 400);
+    let body: Value = resp.json();
+    assert_eq!(body["error"], "invalid_request");
 }
 
 #[tokio::test]
@@ -1125,11 +1202,12 @@ async fn mcp_rejects_expired_bearer_token() {
     let (server, token_store) =
         TestHarness::default().build_server_with_token_store(MockMcpProxy::should_not_be_called());
 
-    token_store
+        token_store
         .store(
             "expired-token".into(),
-            AccessTokenData {
+            StoredTokenData {
                 client_id: CLIENT_ID.into(),
+                kind: StoredTokenKind::Access,
                 expires_at: SystemTime::now() - Duration::from_secs(5),
             },
         )
@@ -1141,6 +1219,38 @@ async fn mcp_rejects_expired_bearer_token() {
         .add_header(
             axum::http::header::AUTHORIZATION,
             axum::http::HeaderValue::from_static("Bearer expired-token"),
+        )
+        .content_type("application/json")
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
+        }))
+        .await;
+
+    assert_eq!(resp.status_code(), 401);
+}
+
+#[tokio::test]
+async fn mcp_rejects_refresh_token_as_bearer() {
+    let (server, token_store) =
+        TestHarness::default().build_server_with_token_store(MockMcpProxy::should_not_be_called());
+
+    token_store
+        .store(
+            "refresh-token".into(),
+            StoredTokenData {
+                client_id: CLIENT_ID.into(),
+                kind: StoredTokenKind::Refresh,
+                expires_at: SystemTime::now() + Duration::from_secs(60),
+            },
+        )
+        .await
+        .expect("refresh token should be stored");
+
+    let resp = server
+        .post("/mcp")
+        .add_header(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer refresh-token"),
         )
         .content_type("application/json")
         .json(&serde_json::json!({

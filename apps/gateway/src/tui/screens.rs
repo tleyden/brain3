@@ -378,7 +378,7 @@ fn auth_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
     vec![
         muted_line(
-            "Client secret is generated automatically. Access tokens are issued per session.",
+            "Client secret is generated automatically. Access and refresh tokens are issued per session.",
         ),
         muted_line("Username, client ID, and password settings stay local to this machine."),
         blank_line(),
@@ -429,6 +429,11 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Access token lifetime (secs)",
         &state.access_token_lifetime_secs_input,
         state.ports_focus == PortsField::AccessTokenLifetimeSecs,
+    ));
+    lines.push(field_line(
+        "Refresh token lifetime (secs)",
+        &state.refresh_token_lifetime_secs_input,
+        state.ports_focus == PortsField::RefreshTokenLifetimeSecs,
     ));
 
     lines.push(blank_line());
@@ -543,6 +548,11 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Access token lifetime (secs)",
             &state.access_token_lifetime_secs_input,
             f == SummaryField::AccessTokenLifetimeSecs,
+        ),
+        field_line(
+            "Refresh token lifetime (secs)",
+            &state.refresh_token_lifetime_secs_input,
+            f == SummaryField::RefreshTokenLifetimeSecs,
         ),
         field_badge_line(
             "PKCE required",
@@ -1131,6 +1141,7 @@ mod tests {
                     client_id: "brain3-oauth2-client".into(),
                     client_secret: "secret".into(),
                     access_token_lifetime_secs: 3600,
+                    refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
                     username: "admin".into(),
                     password: String::new(),
                     tunnel_mode: TunnelModeDraft::CloudflareQuick,
@@ -1168,6 +1179,7 @@ mod tests {
                     client_id: "brain3-oauth2-client".into(),
                     client_secret: "secret".into(),
                     access_token_lifetime_secs: 3600,
+                    refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
                     pkce_required: true,
                     username: "admin".into(),
                     password: "password".into(),

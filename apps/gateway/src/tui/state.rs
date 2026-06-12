@@ -23,6 +23,7 @@ pub enum PortsField {
     ContainerHostPort,
     ContainerMcpPort,
     AccessTokenLifetimeSecs,
+    RefreshTokenLifetimeSecs,
     PkceRequired,
     EnforceHostnameCheck,
 }
@@ -50,6 +51,7 @@ pub enum SummaryField {
     ContainerHostPort,
     ContainerMcpPort,
     AccessTokenLifetimeSecs,
+    RefreshTokenLifetimeSecs,
     PkceRequired,
     HostnameCheck,
 }
@@ -79,6 +81,7 @@ pub struct FirstRunTuiState {
     pub container_host_port_input: String,
     pub container_mcp_port_input: String,
     pub access_token_lifetime_secs_input: String,
+    pub refresh_token_lifetime_secs_input: String,
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
     pub summary_focus: SummaryField,
@@ -100,6 +103,7 @@ impl FirstRunTuiState {
         let container_host_port_input = draft.container_host_port.to_string();
         let container_mcp_port_input = draft.container_mcp_port.to_string();
         let access_token_lifetime_secs_input = draft.access_token_lifetime_secs.to_string();
+        let refresh_token_lifetime_secs_input = draft.refresh_token_lifetime_secs.to_string();
 
         Self {
             host,
@@ -126,6 +130,7 @@ impl FirstRunTuiState {
             container_host_port_input,
             container_mcp_port_input,
             access_token_lifetime_secs_input,
+            refresh_token_lifetime_secs_input,
             dependency_focus,
             dependency_action_index: 0,
             summary_focus: SummaryField::VaultPath,
@@ -218,6 +223,9 @@ impl FirstRunTuiState {
         if let Ok(seconds) = self.access_token_lifetime_secs_input.trim().parse::<u64>() {
             self.draft.access_token_lifetime_secs = seconds;
         }
+        if let Ok(seconds) = self.refresh_token_lifetime_secs_input.trim().parse::<u64>() {
+            self.draft.refresh_token_lifetime_secs = seconds;
+        }
 
         FinalizeSetupRequest {
             draft: self.draft.clone(),
@@ -267,7 +275,8 @@ impl FirstRunTuiState {
             PortsField::GatewayPort => PortsField::ContainerHostPort,
             PortsField::ContainerHostPort => PortsField::ContainerMcpPort,
             PortsField::ContainerMcpPort => PortsField::AccessTokenLifetimeSecs,
-            PortsField::AccessTokenLifetimeSecs => PortsField::PkceRequired,
+            PortsField::AccessTokenLifetimeSecs => PortsField::RefreshTokenLifetimeSecs,
+            PortsField::RefreshTokenLifetimeSecs => PortsField::PkceRequired,
             PortsField::PkceRequired => PortsField::EnforceHostnameCheck,
             PortsField::EnforceHostnameCheck => PortsField::GatewayPort,
         };
@@ -279,7 +288,8 @@ impl FirstRunTuiState {
             PortsField::ContainerHostPort => PortsField::GatewayPort,
             PortsField::ContainerMcpPort => PortsField::ContainerHostPort,
             PortsField::AccessTokenLifetimeSecs => PortsField::ContainerMcpPort,
-            PortsField::PkceRequired => PortsField::AccessTokenLifetimeSecs,
+            PortsField::RefreshTokenLifetimeSecs => PortsField::AccessTokenLifetimeSecs,
+            PortsField::PkceRequired => PortsField::RefreshTokenLifetimeSecs,
             PortsField::EnforceHostnameCheck => PortsField::PkceRequired,
         };
     }
@@ -303,6 +313,7 @@ impl FirstRunTuiState {
                 | PortsField::ContainerHostPort
                 | PortsField::ContainerMcpPort
                 | PortsField::AccessTokenLifetimeSecs
+                | PortsField::RefreshTokenLifetimeSecs
         )
     }
 
@@ -322,7 +333,8 @@ impl FirstRunTuiState {
             SummaryField::GatewayPort => SummaryField::ContainerHostPort,
             SummaryField::ContainerHostPort => SummaryField::ContainerMcpPort,
             SummaryField::ContainerMcpPort => SummaryField::AccessTokenLifetimeSecs,
-            SummaryField::AccessTokenLifetimeSecs => SummaryField::PkceRequired,
+            SummaryField::AccessTokenLifetimeSecs => SummaryField::RefreshTokenLifetimeSecs,
+            SummaryField::RefreshTokenLifetimeSecs => SummaryField::PkceRequired,
             SummaryField::PkceRequired => SummaryField::HostnameCheck,
             SummaryField::HostnameCheck => SummaryField::VaultPath,
         };
@@ -345,7 +357,8 @@ impl FirstRunTuiState {
             SummaryField::ContainerHostPort => SummaryField::GatewayPort,
             SummaryField::ContainerMcpPort => SummaryField::ContainerHostPort,
             SummaryField::AccessTokenLifetimeSecs => SummaryField::ContainerMcpPort,
-            SummaryField::PkceRequired => SummaryField::AccessTokenLifetimeSecs,
+            SummaryField::RefreshTokenLifetimeSecs => SummaryField::AccessTokenLifetimeSecs,
+            SummaryField::PkceRequired => SummaryField::RefreshTokenLifetimeSecs,
             SummaryField::HostnameCheck => SummaryField::PkceRequired,
         };
     }
@@ -361,6 +374,7 @@ impl FirstRunTuiState {
                 | SummaryField::ContainerHostPort
                 | SummaryField::ContainerMcpPort
                 | SummaryField::AccessTokenLifetimeSecs
+                | SummaryField::RefreshTokenLifetimeSecs
         )
     }
 
@@ -371,6 +385,7 @@ impl FirstRunTuiState {
                 | SummaryField::ContainerHostPort
                 | SummaryField::ContainerMcpPort
                 | SummaryField::AccessTokenLifetimeSecs
+                | SummaryField::RefreshTokenLifetimeSecs
         )
     }
 
@@ -384,6 +399,9 @@ impl FirstRunTuiState {
             SummaryField::ContainerHostPort => self.container_host_port_input.push(ch),
             SummaryField::ContainerMcpPort => self.container_mcp_port_input.push(ch),
             SummaryField::AccessTokenLifetimeSecs => self.access_token_lifetime_secs_input.push(ch),
+            SummaryField::RefreshTokenLifetimeSecs => {
+                self.refresh_token_lifetime_secs_input.push(ch)
+            }
             _ => {}
         }
     }
@@ -413,6 +431,9 @@ impl FirstRunTuiState {
             }
             SummaryField::AccessTokenLifetimeSecs => {
                 self.access_token_lifetime_secs_input.pop();
+            }
+            SummaryField::RefreshTokenLifetimeSecs => {
+                self.refresh_token_lifetime_secs_input.pop();
             }
             _ => {}
         }
