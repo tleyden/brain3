@@ -134,7 +134,7 @@ class OAuthSecurityTests(unittest.TestCase):
                     "/oauth/authorize",
                     params={
                         "response_type": "code",
-                        "client_id": "oauth2-gateway-client",
+                        "client_id": "brain3-oauth2-client",
                         "redirect_uri": "https://chatgpt.com/connector/oauth/test",
                         "code_challenge": "X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE",
                         "code_challenge_method": "S256",
@@ -147,7 +147,7 @@ class OAuthSecurityTests(unittest.TestCase):
                     "/oauth/token",
                     data={
                         "grant_type": "authorization_code",
-                        "client_id": "oauth2-gateway-client",
+                        "client_id": "brain3-oauth2-client",
                         "redirect_uri": "https://chatgpt.com/connector/oauth/test",
                         "code": code,
                         "code_verifier": "test-verifier",
@@ -170,7 +170,7 @@ class OAuthSecurityTests(unittest.TestCase):
                     "/oauth/authorize",
                     params={
                         "response_type": "code",
-                        "client_id": "oauth2-gateway-client",
+                        "client_id": "brain3-oauth2-client",
                         "redirect_uri": "https://chatgpt.com/connector/oauth/test",
                         "code_challenge": "X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE",
                         "code_challenge_method": "S256",
@@ -183,7 +183,7 @@ class OAuthSecurityTests(unittest.TestCase):
                     "/oauth/token",
                     data={
                         "grant_type": "authorization_code",
-                        "client_id": "oauth2-gateway-client",
+                        "client_id": "brain3-oauth2-client",
                         "client_secret": "hardcoded-secret",
                         "redirect_uri": "https://chatgpt.com/connector/oauth/test",
                         "code": code,
@@ -349,7 +349,7 @@ Security model:
 
 ```dotenv
 # Required: preregistered OAuth client ID accepted by /oauth/authorize and /oauth/token
-OAUTH2_GATEWAY_CLIENT_ID=oauth2-gateway-client
+OAUTH2_GATEWAY_CLIENT_ID=brain3-oauth2-client
 
 # Required: preregistered OAuth client secret required by /oauth/token
 OAUTH2_GATEWAY_CLIENT_SECRET=

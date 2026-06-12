@@ -71,7 +71,7 @@
 - [ ] Default behavior in the use case:
   tunnel mode: quick tunnel
   username: `admin`
-  client ID: `oauth2-gateway-client`
+  client ID: `brain3-oauth2-client`
   runtime: `macos-container` on macOS, `docker` on Linux
   client secret: generated automatically
   access token: generated automatically and never user-editable in v1
