@@ -15,6 +15,12 @@ pub enum AuthField {
     Password,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DependencyDoctorFocus {
+    InstallAction,
+    Continue,
+}
+
 pub struct FirstRunTuiState {
     pub host: String,
     pub log_file: PathBuf,
@@ -33,11 +39,19 @@ pub struct FirstRunTuiState {
     pub client_id_input: String,
     pub password_input: String,
     pub auth_focus: AuthField,
+    pub dependency_focus: DependencyDoctorFocus,
+    pub dependency_action_index: usize,
 }
 
 impl FirstRunTuiState {
     pub fn new(host: String, log_file: PathBuf, preparation: SetupPreparation) -> Self {
         let draft = preparation.draft.clone();
+        let dependency_focus = if dependency_actions_for(&preparation.dependencies).is_empty() {
+            DependencyDoctorFocus::Continue
+        } else {
+            DependencyDoctorFocus::InstallAction
+        };
+
         Self {
             host,
             log_file,
@@ -56,6 +70,8 @@ impl FirstRunTuiState {
             error_message: None,
             info_message: None,
             auth_focus: AuthField::Username,
+            dependency_focus,
+            dependency_action_index: 0,
         }
     }
 
@@ -106,27 +122,12 @@ impl FirstRunTuiState {
     }
 
     pub fn dependency_actions(&self) -> Vec<InstallAction> {
-        let mut actions = Vec::new();
-
-        if let DependencyAvailability::InstallAvailable(action) =
-            self.preparation.dependencies.cloudflared
-        {
-            actions.push(action);
-        }
-
-        if let DependencyAvailability::InstallAvailable(action) =
-            self.preparation.dependencies.preferred_container_runtime
-        {
-            if !actions.contains(&action) {
-                actions.push(action);
-            }
-        }
-
-        actions
+        dependency_actions_for(&self.preparation.dependencies)
     }
 
     pub fn set_dependencies(&mut self, dependencies: brain3_core::domain::setup::DependencyStatus) {
         self.preparation.dependencies = dependencies;
+        self.sync_dependency_focus();
     }
 
     pub fn next_auth_focus(&mut self) {
@@ -141,6 +142,72 @@ impl FirstRunTuiState {
             }
             AuthField::Password => AuthField::Username,
         };
+    }
+
+    pub fn previous_auth_focus(&mut self) {
+        self.auth_focus = match self.auth_focus {
+            AuthField::Username => {
+                if self.generate_password {
+                    AuthField::ClientId
+                } else {
+                    AuthField::Password
+                }
+            }
+            AuthField::ClientId => AuthField::Username,
+            AuthField::Password => AuthField::ClientId,
+        };
+    }
+
+    pub fn toggle_dependency_focus(&mut self) {
+        if self.dependency_actions().is_empty() {
+            self.dependency_focus = DependencyDoctorFocus::Continue;
+            return;
+        }
+
+        self.dependency_focus = match self.dependency_focus {
+            DependencyDoctorFocus::InstallAction => DependencyDoctorFocus::Continue,
+            DependencyDoctorFocus::Continue => DependencyDoctorFocus::InstallAction,
+        };
+    }
+
+    pub fn next_dependency_action(&mut self) {
+        let action_count = self.dependency_actions().len();
+        if action_count == 0 {
+            self.dependency_focus = DependencyDoctorFocus::Continue;
+            return;
+        }
+
+        self.dependency_focus = DependencyDoctorFocus::InstallAction;
+        self.dependency_action_index = (self.dependency_action_index + 1) % action_count;
+    }
+
+    pub fn previous_dependency_action(&mut self) {
+        let action_count = self.dependency_actions().len();
+        if action_count == 0 {
+            self.dependency_focus = DependencyDoctorFocus::Continue;
+            return;
+        }
+
+        self.dependency_focus = DependencyDoctorFocus::InstallAction;
+        self.dependency_action_index = if self.dependency_action_index == 0 {
+            action_count - 1
+        } else {
+            self.dependency_action_index - 1
+        };
+    }
+
+    pub fn selected_dependency_action_index(&self) -> Option<usize> {
+        let action_count = self.dependency_actions().len();
+        if action_count == 0 {
+            None
+        } else {
+            Some(self.dependency_action_index.min(action_count - 1))
+        }
+    }
+
+    pub fn selected_dependency_action(&self) -> Option<InstallAction> {
+        self.selected_dependency_action_index()
+            .and_then(|index| self.dependency_actions().get(index).copied())
     }
 
     pub fn previous_step(&self) -> Option<SetupStep> {
@@ -164,6 +231,17 @@ impl FirstRunTuiState {
             None => GatewayServerStatus::NotStarted,
         }
     }
+
+    fn sync_dependency_focus(&mut self) {
+        let action_count = self.dependency_actions().len();
+        if action_count == 0 {
+            self.dependency_focus = DependencyDoctorFocus::Continue;
+            self.dependency_action_index = 0;
+            return;
+        }
+
+        self.dependency_action_index = self.dependency_action_index.min(action_count - 1);
+    }
 }
 
 pub fn install_action_label(action: InstallAction) -> &'static str {
@@ -172,4 +250,24 @@ pub fn install_action_label(action: InstallAction) -> &'static str {
         InstallAction::InstallDocker => "Install Docker",
         InstallAction::InstallMacOSContainer => "Install macOS container runtime",
     }
+}
+
+fn dependency_actions_for(
+    dependencies: &brain3_core::domain::setup::DependencyStatus,
+) -> Vec<InstallAction> {
+    let mut actions = Vec::new();
+
+    if let DependencyAvailability::InstallAvailable(action) = dependencies.cloudflared {
+        actions.push(action);
+    }
+
+    if let DependencyAvailability::InstallAvailable(action) =
+        dependencies.preferred_container_runtime
+    {
+        if !actions.contains(&action) {
+            actions.push(action);
+        }
+    }
+
+    actions
 }

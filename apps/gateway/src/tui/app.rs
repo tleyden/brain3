@@ -19,7 +19,7 @@ use crate::server;
 use crate::server::ConfiguredGatewaySession;
 
 use super::screens;
-use super::state::{AuthField, FirstRunTuiState};
+use super::state::{install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState};
 
 pub enum GatewayTuiLaunch {
     FirstRun,
@@ -110,16 +110,24 @@ async fn event_loop(
                 }
                 KeyCode::Enter => {
                     state.clear_messages();
-                    state.step = SetupStep::VaultPath;
+                    if matches!(state.dependency_focus, DependencyDoctorFocus::InstallAction) {
+                        if let Some(action) = state.selected_dependency_action() {
+                            run_install_action(state, Arc::clone(&setup_system), action).await;
+                        } else {
+                            state.step = SetupStep::VaultPath;
+                        }
+                    } else {
+                        state.step = SetupStep::VaultPath;
+                    }
                 }
                 KeyCode::Char('r') => {
                     refresh_dependencies(state, Arc::clone(&setup_system)).await;
                 }
-                KeyCode::Char(ch) if ch.is_ascii_digit() => {
-                    if let Some(index) = ch.to_digit(10).map(|value| value as usize) {
-                        run_install_action(state, Arc::clone(&setup_system), index).await;
-                    }
+                KeyCode::Tab | KeyCode::BackTab => {
+                    state.toggle_dependency_focus();
                 }
+                KeyCode::Up => state.previous_dependency_action(),
+                KeyCode::Down => state.next_dependency_action(),
                 _ => {}
             },
             SetupStep::VaultPath => match key.code {
@@ -147,8 +155,11 @@ async fn event_loop(
                     state.clear_messages();
                     state.step = SetupStep::Summary;
                 }
-                KeyCode::Tab => {
+                KeyCode::Tab | KeyCode::Down => {
                     state.next_auth_focus();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    state.previous_auth_focus();
                 }
                 KeyCode::Char('g') => {
                     state.generate_password = !state.generate_password;
@@ -241,23 +252,15 @@ async fn refresh_dependencies(
 async fn run_install_action(
     state: &mut FirstRunTuiState,
     setup_system: Arc<dyn SetupSystemPort>,
-    index: usize,
+    action: brain3_core::domain::setup::InstallAction,
 ) {
     state.clear_messages();
-    let Some(action) = state
-        .dependency_actions()
-        .get(index.saturating_sub(1))
-        .copied()
-    else {
-        state.error_message = Some("No install action mapped to that key.".into());
-        return;
-    };
-
-    state.info_message = Some(format!("Running {:?}...", action));
+    let action_label = install_action_label(action);
+    state.info_message = Some(format!("Running {action_label}..."));
     match setup_system.run_install_action(action).await {
         Ok(()) => {
             state.info_message = Some(format!(
-                "{action:?} completed. Refreshing dependency status."
+                "{action_label} completed. Refreshing dependency status."
             ));
             refresh_dependencies(state, setup_system).await;
         }

@@ -189,20 +189,14 @@ fn load_container_startup_config(
     let runtime = match runtime_str {
         "docker" => ContainerRuntime::Docker,
         "macos-container" => ContainerRuntime::MacOSContainer,
-        other => {
-            return Err(ConfigError::Invalid(format!(
-                "B3_CONTAINER_RUNTIME: unknown value '{other}'; expected 'docker' or 'macos-container'"
-            )))
-        }
+        other => return Err(ConfigError::Invalid(format!(
+            "B3_CONTAINER_RUNTIME: unknown value '{other}'; expected 'docker' or 'macos-container'"
+        ))),
     };
 
-    let vault_path_str =
-        require_nonempty_env("B3_VAULT_PATH", "when B3_CONTAINER_RUNTIME is set")?;
+    let vault_path_str = require_nonempty_env("B3_VAULT_PATH", "when B3_CONTAINER_RUNTIME is set")?;
 
-    let image = require_nonempty_env(
-        "B3_CONTAINER_IMAGE",
-        "when B3_CONTAINER_RUNTIME is set",
-    )?;
+    let image = require_nonempty_env("B3_CONTAINER_IMAGE", "when B3_CONTAINER_RUNTIME is set")?;
 
     let container_name = derive_container_name_from_image(&image)?;
 

@@ -84,8 +84,7 @@ pub async fn init_logging(default_level: &str) -> Result<GatewayLogging> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new(default_level)),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level)),
         )
         .with_target(true)
         .with_writer(GatewayMakeWriter {

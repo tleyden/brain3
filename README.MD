@@ -99,6 +99,8 @@ On first run, Brain3 launches an interactive setup wizard that walks you through
 
 On subsequent runs, Brain3 goes straight to the runtime status screen.
 
+If you want a stable hostname on your own Cloudflare-managed domain instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
+
 ### 3. Connect your AI app
 
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
@@ -193,13 +195,21 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 
 ### Named Cloudflare Tunnel on your domain
 
-Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control. Provision the tunnel once, then let Brain3 run it:
+Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control.
 
-1. Install `cloudflared` — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
-2. Log in: `cloudflared tunnel login`
-3. Create the tunnel and DNS route (one-time setup — see Cloudflare docs)
-4. In your `.env`, set `B3_CF_TUNNEL_NAME`, `B3_CF_DOMAIN`, and `B3_CF_TUNNEL_CONFIG_FILE` (path to the `.yml` config file written during setup)
-5. Start Brain3. It will start `cloudflared` automatically and log:
+Brain3's normal first-run setup configures the app and defaults to a Cloudflare quick tunnel. Named tunnel provisioning is a separate guided flow:
+
+1. Run `brain3` once and complete the normal interactive setup wizard.
+2. Install `cloudflared` if it is not already available — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+3. In `~/.brain3/.env`, set `B3_CF_TUNNEL_NAME` and `B3_CF_DOMAIN`. Set `B3_CF_TUNNEL_CONFIG_FILE` only if you want a non-default config path; otherwise Brain3 uses `.cloudflared/<tunnel-name>.yml`.
+4. Run the named tunnel provisioning wizard:
+
+```bash
+brain3 --cf-setup
+```
+
+5. The wizard verifies `cloudflared`, handles login if needed, creates or reuses the named tunnel, writes the config file, and configures the DNS route.
+6. Start Brain3 normally with `brain3`. It will start `cloudflared` automatically and log:
 
 ```
 INFO tunnel started url=https://brain3.yourdomain.com
@@ -238,9 +248,9 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
 | `B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
 | `B3_CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
-| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; Brain3 starts `cloudflared` automatically when set with `B3_CF_DOMAIN` |
+| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cf-setup` to provision it |
 | `B3_CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `B3_CF_TUNNEL_NAME`) |
-| `B3_CF_TUNNEL_CONFIG_FILE` | *(required if `B3_CF_TUNNEL_NAME` set)* | Path to the `cloudflared` config file written during tunnel provisioning |
+| `B3_CF_TUNNEL_CONFIG_FILE` | `.cloudflared/<tunnel-name>.yml` | Optional path to the `cloudflared` config file written during named tunnel provisioning |
 | `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
 | `B3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
 | `B3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
