@@ -144,7 +144,10 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {
     if let Err(retry_after) = state.rate_limiter.check(&headers) {
-        tracing::warn!(retry_after_secs = retry_after, "rate limit exceeded on /oauth/authorize POST");
+        tracing::warn!(
+            retry_after_secs = retry_after,
+            "rate limit exceeded on /oauth/authorize POST"
+        );
         return rate_limit_response(retry_after);
     }
 
@@ -209,7 +212,10 @@ pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {
     if let Err(retry_after) = state.rate_limiter.check(&headers) {
-        tracing::warn!(retry_after_secs = retry_after, "rate limit exceeded on /oauth/token");
+        tracing::warn!(
+            retry_after_secs = retry_after,
+            "rate limit exceeded on /oauth/token"
+        );
         return rate_limit_response(retry_after);
     }
 

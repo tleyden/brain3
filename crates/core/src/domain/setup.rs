@@ -44,7 +44,6 @@ pub struct SetupDraftConfig {
     pub gateway_port: u16,
     pub client_id: String,
     pub client_secret: String,
-    pub access_token: String,
     pub username: String,
     pub password: String,
     pub tunnel_mode: TunnelModeDraft,

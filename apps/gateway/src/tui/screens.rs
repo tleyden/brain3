@@ -139,7 +139,9 @@ fn progress_caption(step: SetupStep) -> &'static str {
         SetupStep::DependencyDoctor => "Confirm local dependencies and install anything missing.",
         SetupStep::VaultPath => "Choose the Obsidian-compatible vault Brain3 should expose.",
         SetupStep::Auth => "Review the generated login defaults and customize them if needed.",
-        SetupStep::PortsAndSettings => "Override ports and security settings if the defaults conflict.",
+        SetupStep::PortsAndSettings => {
+            "Override ports and security settings if the defaults conflict."
+        }
         SetupStep::Summary => "Confirm what Brain3 will write before startup begins.",
         SetupStep::ConnectionCard | SetupStep::RuntimeStatus => {
             "Brain3 is configured. Use the connection details or monitor runtime status."
@@ -375,7 +377,9 @@ fn auth_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     };
 
     vec![
-        muted_line("Client secret and access token are generated automatically."),
+        muted_line(
+            "Client secret is generated automatically. Access tokens are issued per session.",
+        ),
         muted_line("Username, client ID, and password settings stay local to this machine."),
         blank_line(),
         field_line(
@@ -439,7 +443,11 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         pkce_pointer,
         Span::styled(
             "PKCE required: ".to_string(),
-            if pkce_active { accent_style() } else { label_style() },
+            if pkce_active {
+                accent_style()
+            } else {
+                label_style()
+            },
         ),
         pkce_badge,
     ]));
@@ -459,7 +467,11 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         hostname_pointer,
         Span::styled(
             "Enforce hostname check: ".to_string(),
-            if hostname_active { accent_style() } else { label_style() },
+            if hostname_active {
+                accent_style()
+            } else {
+                label_style()
+            },
         ),
         hostname_badge,
     ]));
@@ -472,9 +484,21 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     let mut lines = vec![
         muted_line("Review and edit the config Brain3 will write before startup begins."),
         blank_line(),
-        field_line("Vault path", &state.vault_path_input, f == SummaryField::VaultPath),
-        field_line("Username", &state.username_input, f == SummaryField::Username),
-        field_line("Client ID", &state.client_id_input, f == SummaryField::ClientId),
+        field_line(
+            "Vault path",
+            &state.vault_path_input,
+            f == SummaryField::VaultPath,
+        ),
+        field_line(
+            "Username",
+            &state.username_input,
+            f == SummaryField::Username,
+        ),
+        field_line(
+            "Client ID",
+            &state.client_id_input,
+            f == SummaryField::ClientId,
+        ),
         field_badge_line(
             "Password mode",
             if state.generate_password {
@@ -495,7 +519,11 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     }
 
     lines.extend([
-        field_line("Gateway port", &state.gateway_port_input, f == SummaryField::GatewayPort),
+        field_line(
+            "Gateway port",
+            &state.gateway_port_input,
+            f == SummaryField::GatewayPort,
+        ),
         field_line(
             "Container host port",
             &state.container_host_port_input,
@@ -848,7 +876,11 @@ fn field_badge_line(label: &str, badge: Span<'static>, active: bool) -> Line<'st
     } else {
         Span::styled("  ", muted_style())
     };
-    let label_style = if active { accent_style() } else { label_style() };
+    let label_style = if active {
+        accent_style()
+    } else {
+        label_style()
+    };
     Line::from(vec![
         pointer,
         Span::styled(format!("{label}: "), label_style),
@@ -1088,7 +1120,6 @@ mod tests {
                     gateway_port: 8421,
                     client_id: "brain3-oauth2-client".into(),
                     client_secret: "secret".into(),
-                    access_token: "token".into(),
                     username: "admin".into(),
                     password: String::new(),
                     tunnel_mode: TunnelModeDraft::CloudflareQuick,
@@ -1121,10 +1152,10 @@ mod tests {
             Arc::new(GatewayConfig {
                 port: 8421,
                 host: "127.0.0.1".into(),
+                token_db_path: PathBuf::from("/tmp/brain3-home/tokens.db"),
                 oauth: OAuthConfig {
                     client_id: "brain3-oauth2-client".into(),
                     client_secret: "secret".into(),
-                    access_token: "token".into(),
                     pkce_required: true,
                     username: "admin".into(),
                     password: "password".into(),

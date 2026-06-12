@@ -372,13 +372,27 @@ impl FirstRunTuiState {
 
     pub fn summary_char_pop(&mut self) {
         match self.summary_focus {
-            SummaryField::VaultPath => { self.vault_path_input.pop(); }
-            SummaryField::Username => { self.username_input.pop(); }
-            SummaryField::ClientId => { self.client_id_input.pop(); }
-            SummaryField::PasswordValue => { self.password_input.pop(); }
-            SummaryField::GatewayPort => { self.gateway_port_input.pop(); }
-            SummaryField::ContainerHostPort => { self.container_host_port_input.pop(); }
-            SummaryField::ContainerMcpPort => { self.container_mcp_port_input.pop(); }
+            SummaryField::VaultPath => {
+                self.vault_path_input.pop();
+            }
+            SummaryField::Username => {
+                self.username_input.pop();
+            }
+            SummaryField::ClientId => {
+                self.client_id_input.pop();
+            }
+            SummaryField::PasswordValue => {
+                self.password_input.pop();
+            }
+            SummaryField::GatewayPort => {
+                self.gateway_port_input.pop();
+            }
+            SummaryField::ContainerHostPort => {
+                self.container_host_port_input.pop();
+            }
+            SummaryField::ContainerMcpPort => {
+                self.container_mcp_port_input.pop();
+            }
             _ => {}
         }
     }

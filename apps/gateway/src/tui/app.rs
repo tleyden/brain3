@@ -23,8 +23,8 @@ use crate::RuntimeOverrides;
 
 use super::screens;
 use super::state::{
-    install_action_label, validate_port_input, AuthField, DependencyDoctorFocus,
-    FirstRunTuiState, PortsField, RuntimeView,
+    install_action_label, validate_port_input, AuthField, DependencyDoctorFocus, FirstRunTuiState,
+    PortsField, RuntimeView,
 };
 
 pub enum GatewayTuiLaunch {
@@ -214,22 +214,18 @@ async fn event_loop(
                 }
                 KeyCode::Enter => {
                     state.clear_messages();
-                    if let Err(msg) = validate_port_input(
-                        &state.gateway_port_input,
-                        "Gateway port",
-                    ) {
+                    if let Err(msg) = validate_port_input(&state.gateway_port_input, "Gateway port")
+                    {
                         tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
-                    } else if let Err(msg) = validate_port_input(
-                        &state.container_host_port_input,
-                        "Container host port",
-                    ) {
+                    } else if let Err(msg) =
+                        validate_port_input(&state.container_host_port_input, "Container host port")
+                    {
                         tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
-                    } else if let Err(msg) = validate_port_input(
-                        &state.container_mcp_port_input,
-                        "Container MCP port",
-                    ) {
+                    } else if let Err(msg) =
+                        validate_port_input(&state.container_mcp_port_input, "Container MCP port")
+                    {
                         tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
                     } else {
@@ -247,9 +243,15 @@ async fn event_loop(
                 }
                 KeyCode::Backspace if state.ports_focus_is_text_field() => {
                     match state.ports_focus {
-                        PortsField::GatewayPort => { state.gateway_port_input.pop(); }
-                        PortsField::ContainerHostPort => { state.container_host_port_input.pop(); }
-                        PortsField::ContainerMcpPort => { state.container_mcp_port_input.pop(); }
+                        PortsField::GatewayPort => {
+                            state.gateway_port_input.pop();
+                        }
+                        PortsField::ContainerHostPort => {
+                            state.container_host_port_input.pop();
+                        }
+                        PortsField::ContainerMcpPort => {
+                            state.container_mcp_port_input.pop();
+                        }
                         _ => {}
                     }
                 }
@@ -277,9 +279,7 @@ async fn event_loop(
                 KeyCode::BackTab | KeyCode::Up => {
                     state.previous_summary_focus();
                 }
-                KeyCode::Char(' ') | KeyCode::Char('t')
-                    if !state.summary_focus_is_text_field() =>
-                {
+                KeyCode::Char(' ') | KeyCode::Char('t') if !state.summary_focus_is_text_field() => {
                     state.toggle_summary_field();
                 }
                 KeyCode::Backspace if state.summary_focus_is_text_field() => {

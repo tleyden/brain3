@@ -46,6 +46,7 @@ impl ConfigPort for EnvFileConfigAdapter {
 
         let expected_host = resolve_expected_host()?;
         let enforce_hostname = env_bool("B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
+        let token_db_path = resolve_token_db_path()?;
 
         let upstream_secret_file = PathBuf::from(env_var_or(
             "B3_OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
@@ -61,7 +62,6 @@ impl ConfigPort for EnvFileConfigAdapter {
 
         let mut missing = Vec::new();
         let client_secret = require_nonempty("B3_OAUTH2_GATEWAY_CLIENT_SECRET", &mut missing);
-        let access_token = require_nonempty("B3_OAUTH2_GATEWAY_ACCESS_TOKEN", &mut missing);
         let username = require_nonempty("B3_USERNAME", &mut missing);
         let password = require_nonempty("B3_PASSWORD", &mut missing);
         if !missing.is_empty() {
@@ -76,10 +76,10 @@ impl ConfigPort for EnvFileConfigAdapter {
         Ok(GatewayConfig {
             port,
             host: "127.0.0.1".to_string(),
+            token_db_path,
             oauth: OAuthConfig {
                 client_id: env_var_or("B3_OAUTH2_GATEWAY_CLIENT_ID", "brain3-oauth2-client"),
                 client_secret,
-                access_token,
                 pkce_required: env_bool("B3_OAUTH2_PKCE_REQUIRED", true),
                 username,
                 password,
@@ -103,6 +103,27 @@ impl ConfigPort for EnvFileConfigAdapter {
 
 fn env_var_or(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+fn resolve_token_db_path() -> Result<PathBuf, ConfigError> {
+    if let Some(path) = env::var_os("B3_TOKEN_DB_PATH").filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
+
+    if let Some(root) = env::var_os("B3_HOME").filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(root).join("tokens.db"));
+    }
+
+    let home = env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ConfigError::Missing(
+                "HOME environment variable is not set; cannot resolve default token database path"
+                    .into(),
+            )
+        })?;
+
+    Ok(PathBuf::from(home).join(".brain3").join("tokens.db"))
 }
 
 fn require_nonempty(name: &str, errors: &mut Vec<String>) -> String {

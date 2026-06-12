@@ -30,9 +30,6 @@ impl FirstRunSetupUseCase {
             client_secret: self
                 .port
                 .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?,
-            access_token: self
-                .port
-                .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?,
             username: DEFAULT_USERNAME.to_string(),
             password: String::new(),
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
@@ -86,11 +83,6 @@ impl FirstRunSetupUseCase {
 
         if draft.client_secret.trim().is_empty() {
             draft.client_secret = self
-                .port
-                .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?;
-        }
-        if draft.access_token.trim().is_empty() {
-            draft.access_token = self
                 .port
                 .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?;
         }
@@ -242,12 +234,8 @@ mod tests {
             _paths: &SetupPaths,
         ) -> Result<String, SetupError> {
             let rendered = format!(
-                "USERNAME={}\nCLIENT_ID={}\nSECRET={}\nTOKEN={}\nPASSWORD={}\n",
-                draft.username,
-                draft.client_id,
-                draft.client_secret,
-                draft.access_token,
-                draft.password
+                "USERNAME={}\nCLIENT_ID={}\nSECRET={}\nPASSWORD={}\n",
+                draft.username, draft.client_id, draft.client_secret, draft.password
             );
             self.state.lock().unwrap().rendered_env = Some(rendered.clone());
             Ok(rendered)
@@ -286,7 +274,6 @@ mod tests {
             gateway_port: 8421,
             client_id: "brain3-oauth2-client".into(),
             client_secret: String::new(),
-            access_token: String::new(),
             username: "admin".into(),
             password: String::new(),
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
@@ -397,9 +384,8 @@ mod tests {
             .expect("finalize should succeed");
 
         assert_eq!(result.draft.client_secret, "generated-secret-1");
-        assert_eq!(result.draft.access_token, "generated-secret-2");
         assert_eq!(result.draft.password, "generated-password-1");
-        assert_eq!(port.snapshot().generated_secret_count, 2);
+        assert_eq!(port.snapshot().generated_secret_count, 1);
         assert_eq!(port.snapshot().generated_password_count, 1);
     }
 
@@ -414,7 +400,6 @@ mod tests {
                 draft: SetupDraftConfig {
                     password: "chosen-password".into(),
                     client_secret: "chosen-secret".into(),
-                    access_token: "chosen-token".into(),
                     ..sample_draft(vault_path)
                 },
                 generate_password: false,

@@ -240,7 +240,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
 | `B3_OAUTH2_GATEWAY_CLIENT_ID` | `brain3-oauth2-client` | OAuth client ID accepted by Brain3 |
 | `B3_OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
-| `B3_OAUTH2_GATEWAY_ACCESS_TOKEN` | *(required)* | Bearer token returned after successful auth |
+| `B3_TOKEN_DB_PATH` | `~/.brain3/tokens.db` | SQLite database path for issued one-hour access tokens |
 | `B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | *(auto-derived from `B3_CONTAINER_HOST_PORT`)* | URL of the upstream MCP server (developers only) |
 | `B3_OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `/tmp/brain3-mcp-upstream-secret` | Path to the shared secret file |
 | `B3_OAUTH2_PKCE_REQUIRED` | `true` | Require PKCE for OAuth flow |

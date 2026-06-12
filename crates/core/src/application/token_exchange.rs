@@ -1,21 +1,29 @@
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use crate::domain::errors::OAuthError;
 use crate::domain::model::OAuthConfig;
 use crate::domain::oauth::{
-    constant_time_eq, verify_pkce, TokenRequest, TokenResponse, ACCESS_TOKEN_LIFETIME_SECS,
+    constant_time_eq, generate_secure_token, verify_pkce, TokenRequest, TokenResponse,
+    ACCESS_TOKEN_LIFETIME_SECS,
 };
 use crate::domain::redact::elide_secret;
 use crate::ports::auth_code_store::AuthCodeStore;
+use crate::ports::token_store::{AccessTokenData, TokenStore};
 
 pub struct TokenExchangeUseCase<S: AuthCodeStore> {
     config: Arc<OAuthConfig>,
     store: Arc<S>,
+    token_store: Arc<dyn TokenStore>,
 }
 
 impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
-    pub fn new(config: Arc<OAuthConfig>, store: Arc<S>) -> Self {
-        Self { config, store }
+    pub fn new(config: Arc<OAuthConfig>, store: Arc<S>, token_store: Arc<dyn TokenStore>) -> Self {
+        Self {
+            config,
+            store,
+            token_store,
+        }
     }
 
     pub async fn exchange(&self, req: &TokenRequest) -> Result<TokenResponse, OAuthError> {
@@ -126,13 +134,29 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
             }
         }
 
+        let access_token = generate_secure_token();
+        let expires_at = SystemTime::now() + Duration::from_secs(ACCESS_TOKEN_LIFETIME_SECS);
+        self.token_store
+            .store(
+                access_token.clone(),
+                AccessTokenData {
+                    client_id: req.client_id.clone(),
+                    expires_at,
+                },
+            )
+            .await
+            .map_err(|error| {
+                tracing::error!(%error, "token exchange failed to persist access token");
+                OAuthError::ServerError("failed to persist access token".into())
+            })?;
+
         tracing::info!(
             client_id = %req.client_id,
             "token exchange succeeded: access token issued"
         );
 
         Ok(TokenResponse {
-            access_token: self.config.access_token.clone(),
+            access_token,
             token_type: "bearer".into(),
             expires_in: ACCESS_TOKEN_LIFETIME_SECS,
         })

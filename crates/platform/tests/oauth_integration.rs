@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use axum_test::TestServer;
@@ -12,10 +13,12 @@ use brain3_core::domain::model::{
     GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
+use brain3_core::ports::token_store::{AccessTokenData, TokenStore};
 
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
+use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
 const CLIENT_ID: &str = "brain3-oauth2-client";
 const CLIENT_SECRET: &str = "hardcoded-secret";
@@ -24,7 +27,6 @@ const LOGIN_PASSWORD: &str = "password-123";
 const REDIRECT_URI: &str = "https://chatgpt.com/connector/oauth/test";
 const CODE_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const CODE_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
-const ACCESS_TOKEN: &str = "test-access-token";
 
 // ---------------------------------------------------------------------------
 // Mock MCP proxy adapter
@@ -117,7 +119,6 @@ impl Default for TestHarness {
             oauth: OAuthConfig {
                 client_id: CLIENT_ID.into(),
                 client_secret: CLIENT_SECRET.into(),
-                access_token: ACCESS_TOKEN.into(),
                 pkce_required: true,
                 username: LOGIN_USERNAME.into(),
                 password: LOGIN_PASSWORD.into(),
@@ -134,9 +135,18 @@ impl Default for TestHarness {
 
 impl TestHarness {
     fn build_server(self, proxy: MockMcpProxy) -> TestServer {
+        self.build_server_with_token_store(proxy).0
+    }
+
+    fn build_server_with_token_store(
+        self,
+        proxy: MockMcpProxy,
+    ) -> (TestServer, Arc<SqliteTokenStore>) {
         let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
         let oauth_config = Arc::new(self.oauth.clone());
         let proxy = Arc::new(proxy);
+        let token_store = Arc::new(SqliteTokenStore::in_memory().expect("in-memory token store"));
+        let token_store_port: Arc<dyn TokenStore> = token_store.clone();
 
         let authorize = Arc::new(AuthorizeUseCase::new(
             Arc::clone(&oauth_config),
@@ -145,18 +155,20 @@ impl TestHarness {
         let token_exchange = Arc::new(TokenExchangeUseCase::new(
             Arc::clone(&oauth_config),
             Arc::clone(&auth_code_store),
+            Arc::clone(&token_store_port),
         ));
         let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
             proxy,
             self.mcp_upstream_url,
             self.mcp_upstream_secret,
-            self.oauth.access_token.clone(),
+            token_store_port,
             self.hostname_validation.clone(),
         ));
 
         let config = Arc::new(GatewayConfig {
             port: 0,
             host: "127.0.0.1".into(),
+            token_db_path: "/tmp/brain3-test-tokens.db".into(),
             oauth: self.oauth,
             mcp_reverse_proxy: MCPReverseProxyConfig {
                 mcp_upstream_url: "http://127.0.0.1:8420".into(),
@@ -176,7 +188,7 @@ impl TestHarness {
         };
 
         let router = build_router(state);
-        TestServer::new(router).unwrap()
+        (TestServer::new(router).unwrap(), token_store)
     }
 }
 
@@ -209,6 +221,27 @@ async fn login_and_get_code(server: &TestServer) -> String {
     let resp = server.post("/oauth/authorize").form(&form).await;
     let location = resp.header("location").to_str().unwrap().to_string();
     extract_code_from_location(&location)
+}
+
+async fn login_and_get_access_token(server: &TestServer) -> String {
+    let code = login_and_get_code(server).await;
+    let resp = server
+        .post("/oauth/token")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("redirect_uri", REDIRECT_URI),
+            ("code", &code),
+            ("code_verifier", CODE_VERIFIER),
+        ])
+        .await;
+    resp.assert_status_ok();
+    let body: Value = resp.json();
+    body["access_token"]
+        .as_str()
+        .expect("access_token should be a string")
+        .to_string()
 }
 
 // ===========================================================================
@@ -329,6 +362,51 @@ async fn authorization_code_exchange_succeeds_with_exact_client_id_and_secret() 
     assert_eq!(body["token_type"], "bearer");
     assert!(body["access_token"].is_string());
     assert!(body["expires_in"].is_number());
+}
+
+#[tokio::test]
+async fn authorization_code_exchange_issues_fresh_access_token_per_exchange() {
+    let server = TestHarness::default().build_server(MockMcpProxy::success());
+
+    let first_code = login_and_get_code(&server).await;
+    let first_resp = server
+        .post("/oauth/token")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("redirect_uri", REDIRECT_URI),
+            ("code", &first_code),
+            ("code_verifier", CODE_VERIFIER),
+        ])
+        .await;
+    first_resp.assert_status_ok();
+    let first_body: Value = first_resp.json();
+    let first_token = first_body["access_token"]
+        .as_str()
+        .expect("access_token should be a string")
+        .to_string();
+
+    let second_code = login_and_get_code(&server).await;
+    let second_resp = server
+        .post("/oauth/token")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("redirect_uri", REDIRECT_URI),
+            ("code", &second_code),
+            ("code_verifier", CODE_VERIFIER),
+        ])
+        .await;
+    second_resp.assert_status_ok();
+    let second_body: Value = second_resp.json();
+    let second_token = second_body["access_token"]
+        .as_str()
+        .expect("access_token should be a string")
+        .to_string();
+
+    assert_ne!(first_token, second_token);
 }
 
 #[tokio::test]
@@ -592,6 +670,7 @@ async fn mcp_proxy_allows_matching_named_tunnel_host() {
         ..TestHarness::default()
     };
     let server = harness.build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp")
@@ -601,7 +680,7 @@ async fn mcp_proxy_allows_matching_named_tunnel_host() {
         )
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .add_header(
             "x-brain3-upstream-secret",
@@ -661,6 +740,7 @@ async fn mcp_proxy_rejects_mismatched_named_tunnel_host() {
         ..TestHarness::default()
     };
     let server = harness.build_server(MockMcpProxy::should_not_be_called());
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp")
@@ -670,7 +750,7 @@ async fn mcp_proxy_rejects_mismatched_named_tunnel_host() {
         )
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .content_type("application/json")
         .json(&serde_json::json!({
@@ -694,6 +774,7 @@ async fn mcp_proxy_allows_matching_direct_public_origin_host() {
         ..TestHarness::default()
     };
     let server = harness.build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp")
@@ -703,7 +784,7 @@ async fn mcp_proxy_allows_matching_direct_public_origin_host() {
         )
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .content_type("application/json")
         .json(&serde_json::json!({
@@ -726,6 +807,7 @@ async fn mcp_proxy_rejects_mismatched_direct_public_origin_host() {
         ..TestHarness::default()
     };
     let server = harness.build_server(MockMcpProxy::should_not_be_called());
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp")
@@ -735,7 +817,7 @@ async fn mcp_proxy_rejects_mismatched_direct_public_origin_host() {
         )
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .content_type("application/json")
         .json(&serde_json::json!({
@@ -759,6 +841,7 @@ async fn mcp_proxy_allows_mismatched_host_when_validation_disabled() {
         ..TestHarness::default()
     };
     let server = harness.build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp")
@@ -768,7 +851,7 @@ async fn mcp_proxy_allows_mismatched_host_when_validation_disabled() {
         )
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .content_type("application/json")
         .json(&serde_json::json!({
@@ -784,12 +867,13 @@ async fn mcp_proxy_allows_mismatched_host_when_validation_disabled() {
 #[tokio::test]
 async fn mcp_proxy_returns_502_when_upstream_is_unreachable() {
     let server = TestHarness::default().build_server(MockMcpProxy::unreachable());
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp")
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .content_type("application/json")
         .json(&serde_json::json!({
@@ -1006,6 +1090,37 @@ async fn mcp_rejects_bearer_token_with_wrong_value() {
 }
 
 #[tokio::test]
+async fn mcp_rejects_expired_bearer_token() {
+    let (server, token_store) =
+        TestHarness::default().build_server_with_token_store(MockMcpProxy::should_not_be_called());
+
+    token_store
+        .store(
+            "expired-token".into(),
+            AccessTokenData {
+                client_id: CLIENT_ID.into(),
+                expires_at: SystemTime::now() - Duration::from_secs(5),
+            },
+        )
+        .await
+        .expect("expired token should be stored");
+
+    let resp = server
+        .post("/mcp")
+        .add_header(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer expired-token"),
+        )
+        .content_type("application/json")
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
+        }))
+        .await;
+
+    assert_eq!(resp.status_code(), 401);
+}
+
+#[tokio::test]
 async fn mcp_rejects_non_bearer_auth_scheme() {
     let server = TestHarness::default().build_server(MockMcpProxy::should_not_be_called());
 
@@ -1013,7 +1128,7 @@ async fn mcp_rejects_non_bearer_auth_scheme() {
         .post("/mcp")
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Basic {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_static("Basic placeholder-token"),
         )
         .content_type("application/json")
         .json(&serde_json::json!({
@@ -1029,12 +1144,13 @@ async fn mcp_proxy_strips_client_upstream_secret_header() {
     let captured = Arc::new(std::sync::Mutex::new(None));
     let server =
         TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp")
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .add_header(
             "x-brain3-upstream-secret",
@@ -1147,12 +1263,13 @@ async fn mcp_proxy_forwards_subpath_to_upstream() {
     let captured = Arc::new(std::sync::Mutex::new(None));
     let server =
         TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp/sse")
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .content_type("application/json")
         .json(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}))
@@ -1168,12 +1285,13 @@ async fn mcp_proxy_strips_authorization_header_from_upstream_request() {
     let captured = Arc::new(std::sync::Mutex::new(None));
     let server =
         TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let access_token = login_and_get_access_token(&server).await;
 
     let resp = server
         .post("/mcp")
         .add_header(
             axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {ACCESS_TOKEN}")).unwrap(),
+            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
         )
         .content_type("application/json")
         .json(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}))

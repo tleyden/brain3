@@ -10,9 +10,9 @@ pub fn log_startup_config(config: &GatewayConfig) {
 
     tracing::info!(
         port = config.port,
+        token_db_path = %config.token_db_path.display(),
         client_id = %config.oauth.client_id,
         client_secret = mask(&config.oauth.client_secret),
-        access_token = mask(&config.oauth.access_token),
         username = %config.oauth.username,
         password = mask(&config.oauth.password),
         pkce_required = config.oauth.pkce_required,
