@@ -56,6 +56,10 @@ pub async fn run_gateway_tui(
                 runtime_overrides.clone(),
             )
             .await?;
+            tracing::debug!(
+                server_url = ?session.display_url,
+                "building connection card for configured launch"
+            );
             FirstRunTuiState::new_runtime(
                 host.to_string(),
                 log_file.clone(),
@@ -355,6 +359,7 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
 
     if let Some(display_url) = session.display_url {
         let summary = state.summary.as_ref().expect("summary should be present");
+        tracing::debug!(server_url = %display_url, "building connection card after first-run wizard");
         let connection_card =
             use_case.build_connection_card(display_url, state.log_file.clone(), summary);
         state.connection_card = Some(connection_card);

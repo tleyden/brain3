@@ -169,7 +169,14 @@ pub async fn spawn_configured_gateway_session(
             runtime.upstream_secret.clone(),
         )
         .await?;
-        let display_url = runtime.display_url(server.local_url());
+        let local_url = server.local_url().to_string();
+        let display_url = runtime.display_url(&local_url);
+        tracing::debug!(
+            tunnel_public_url = ?runtime.public_url,
+            local_url = %local_url,
+            display_url = %display_url,
+            "resolved display URL for connection card (tunnel URL wins over local if present)"
+        );
         (Some(server), Some(display_url))
     } else {
         (None, None)

@@ -1,3 +1,4 @@
+pub mod assets;
 pub mod health;
 pub mod mcp_handlers;
 pub mod oauth_handlers;

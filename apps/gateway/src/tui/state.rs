@@ -95,13 +95,38 @@ impl FirstRunTuiState {
         runtime: RuntimeBootstrap,
         server: Option<GatewayServerHandle>,
     ) -> Self {
-        let connection_card = display_url.map(|server_url| ConnectionCard {
-            server_url,
-            client_id: runtime.config.oauth.client_id.clone(),
-            client_secret: runtime.config.oauth.client_secret.clone(),
-            username: runtime.config.oauth.username.clone(),
-            password: runtime.config.oauth.password.clone(),
-            log_file: log_file.clone(),
+        let connection_card = display_url.map(|server_url| {
+            let oauth = &runtime.config.oauth;
+            tracing::trace!(
+                server_url = %server_url,
+                runtime_client_id = %oauth.client_id,
+                runtime_username = %oauth.username,
+                preparation_client_id = %preparation.draft.client_id,
+                preparation_username = %preparation.draft.username,
+                "building connection card: credentials source is runtime config (loaded from disk \
+                 by spawn_configured_gateway_session), not preparation draft (loaded earlier by \
+                 prepare())"
+            );
+            if oauth.client_id != preparation.draft.client_id
+                || oauth.username != preparation.draft.username
+            {
+                tracing::warn!(
+                    runtime_client_id = %oauth.client_id,
+                    runtime_username = %oauth.username,
+                    preparation_client_id = %preparation.draft.client_id,
+                    preparation_username = %preparation.draft.username,
+                    "connection card credentials differ from preparation draft — env file may \
+                     have changed between prepare() and spawn_configured_gateway_session()"
+                );
+            }
+            ConnectionCard {
+                server_url,
+                client_id: oauth.client_id.clone(),
+                client_secret: oauth.client_secret.clone(),
+                username: oauth.username.clone(),
+                password: oauth.password.clone(),
+                log_file: log_file.clone(),
+            }
         });
         let mut state = Self::new(host, log_file, preparation);
         state.connection_card = connection_card;
