@@ -20,7 +20,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build
+      - name: Build release
+        if: github.event_name == 'push'
         run: cargo build --release
 
       - name: Test
