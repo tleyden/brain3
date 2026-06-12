@@ -1,5 +1,5 @@
 
-<img width="800" alt="Image" src="docs/screenshots/hero.png" />
+<img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.svg" />
 
 ## Why This Exists
 
