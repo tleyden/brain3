@@ -51,7 +51,7 @@ jobs:
       - name: Smoke test container startup
         run: |
           set -euo pipefail
-          docker build -t brain3-mcp-vault-tools:ci-smoke ./brain3-mcp-vault-tools
+          docker build -f ./brain3-mcp-vault-tools/Containerfile -t brain3-mcp-vault-tools:ci-smoke ./brain3-mcp-vault-tools
           VAULT_DIR="$(mktemp -d)"
           SECRET_DIR="$(mktemp -d)"
           printf 'test-shared-secret\n' > "${SECRET_DIR}/upstream_secret"
