@@ -299,7 +299,7 @@ mod tests {
 
     fn sample_defaults() -> SetupDefaults {
         SetupDefaults {
-            default_container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.3".into(),
+            default_container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.4".into(),
         }
     }
 
