@@ -455,16 +455,17 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             ("[q]", "Quit"),
         ]),
         SetupStep::Summary => vec![
-            primary_action_line(
-                "Press Enter to write config and start. (it will take 5s, just press once)",
-            ),
-            enter_action_line("Write config and start"),
-            hint_line(vec![("[Esc]", "Back"), ("[q]", "Quit")]),
+            primary_action_line("Ready to launch Brain3."),
+            muted_line("⚠ The UI will \"stick\" for 5s, but it's starting. Known issue."),
+            hint_line(vec![
+                ("[Esc]", "Back"),
+                ("[q]", "Quit"),
+                ("[Enter]", "Save Config and Start"),
+            ]),
         ],
         SetupStep::ConnectionCard => vec![
-            primary_action_line("Press Enter to open runtime status."),
-            enter_action_line("Open runtime status"),
-            hint_line(vec![("[q]", "Quit")]),
+            primary_action_line("Open runtime status when you're ready."),
+            hint_line(vec![("[q]", "Quit"), ("[Enter]", "Open runtime status")]),
         ],
         SetupStep::RuntimeStatus => match state.previous_step() {
             Some(SetupStep::ConnectionCard) => vec![
@@ -480,10 +481,12 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 }
 
 fn continue_action_lines(extra_hints: Vec<(&str, &str)>) -> Vec<Line<'static>> {
+    let mut hints = extra_hints;
+    hints.push(("[Enter]", "Continue"));
+
     vec![
-        primary_action_line("Press Enter to continue."),
-        enter_action_line("Enter to continue"),
-        hint_line(extra_hints),
+        primary_action_line("Continue when you're ready."),
+        hint_line(hints),
     ]
 }
 
@@ -500,14 +503,16 @@ fn dependency_action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
                 .map(install_action_label)
                 .unwrap_or("Install selected dependency");
             vec![
-                primary_action_line(format!("Press Enter to run: {action_label}.")),
-                enter_action_line(format!("Run: {action_label}")),
+                primary_action_line(format!(
+                    "Run the selected action when you're ready: {action_label}."
+                )),
                 hint_line(vec![
                     ("[Tab]", "Focus continue"),
                     ("[Up/Down]", "Select action"),
                     ("[r]", "Refresh"),
                     ("[Esc]", "Back"),
                     ("[q]", "Quit"),
+                    ("[Enter]", "Run selected action"),
                 ]),
             ]
         }
@@ -574,13 +579,6 @@ fn hint_line(hints: Vec<(&str, &str)>) -> Line<'static> {
         spans.push(Span::styled(format!(" {description}"), muted_style()));
     }
     Line::from(spans)
-}
-
-fn enter_action_line(text: impl Into<String>) -> Line<'static> {
-    Line::from(vec![
-        Span::styled("[Enter] ", accent_style()),
-        Span::styled(text.into(), muted_style()),
-    ])
 }
 
 fn primary_action_line(text: impl Into<String>) -> Line<'static> {
