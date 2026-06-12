@@ -176,6 +176,7 @@ impl FirstRunTuiState {
 
         if let Some(runtime) = &state.runtime {
             if let Some(summary) = runtime.primary_failure_summary() {
+                tracing::error!(summary, "runtime reported primary failure on state init");
                 state.error_message = Some(summary.to_string());
             } else {
                 state.info_message = Some("Brain3 is running.".into());

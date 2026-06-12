@@ -218,16 +218,19 @@ async fn event_loop(
                         &state.gateway_port_input,
                         "Gateway port",
                     ) {
+                        tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
                     } else if let Err(msg) = validate_port_input(
                         &state.container_host_port_input,
                         "Container host port",
                     ) {
+                        tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
                     } else if let Err(msg) = validate_port_input(
                         &state.container_mcp_port_input,
                         "Container MCP port",
                     ) {
+                        tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
                     } else {
                         state.step = SetupStep::Summary;
@@ -349,6 +352,7 @@ async fn advance_from_vault_path(state: &mut FirstRunTuiState, use_case: &FirstR
             state.step = SetupStep::Auth;
         }
         Err(error) => {
+            tracing::error!(error = %error, "vault path validation failed");
             state.error_message = Some(error.to_string());
         }
     }
@@ -365,6 +369,7 @@ async fn refresh_dependencies(
             state.info_message = Some("Dependency status refreshed.".into());
         }
         Err(error) => {
+            tracing::error!(error = %error, "failed to collect dependency status");
             state.error_message = Some(error.to_string());
             state.info_message = None;
         }
@@ -387,6 +392,7 @@ async fn run_install_action(
             refresh_dependencies(state, setup_system).await;
         }
         Err(error) => {
+            tracing::error!(error = %error, action = %action_label, "install action failed");
             state.error_message = Some(error.to_string());
             state.info_message = None;
         }
@@ -406,6 +412,7 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
     {
         Ok(summary) => summary,
         Err(error) => {
+            tracing::error!(error = %error, "failed to finalize setup");
             state.error_message = Some(error.to_string());
             state.info_message = None;
             return;
@@ -445,6 +452,7 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
 
     if let Some(runtime) = &state.runtime {
         if let Some(failure) = runtime.primary_failure_summary() {
+            tracing::error!(failure, "runtime reported primary failure");
             state.error_message = Some(failure.to_string());
             state.info_message = None;
             state.step = SetupStep::RuntimeStatus;
