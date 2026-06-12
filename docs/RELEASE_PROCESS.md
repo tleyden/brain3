@@ -25,12 +25,12 @@ gh secret list --repo tleyden/brain3
 
 ## 1. Prepare release notes from a GitHub milestone
 
-Create a milestone in advance (e.g. `v0.1.5`) and assign issues and PRs to it as you work.
+Create a milestone in advance (e.g. `v0.1.6`) and assign issues and PRs to it as you work.
 
 When ready to release, generate a notes draft from the closed milestone issues:
 
 ```bash
-VERSION=v0.1.5
+VERSION=v0.1.6
 
 gh issue list \
   --milestone "$VERSION" \
@@ -55,7 +55,7 @@ Edit `/tmp/release-notes.md` to add a short summary paragraph at the top.
 ## 2. Tag and push
 
 ```bash
-VERSION=v0.1.5
+VERSION=v0.1.6
 
 git tag -a "$VERSION" -m "Release $VERSION"
 git push origin "$VERSION"
@@ -81,7 +81,7 @@ gh run watch
 Once the workflow completes, edit the release to replace the auto-generated notes with your draft:
 
 ```bash
-VERSION=v0.1.5
+VERSION=v0.1.6
 
 gh release edit "$VERSION" \
   --notes-file /tmp/release-notes.md
@@ -96,7 +96,7 @@ gh release view "$VERSION" --web
 ## 4. Verify the release
 
 ```bash
-VERSION=v0.1.5
+VERSION=v0.1.6
 
 # List attached assets
 gh release view "$VERSION"
@@ -145,7 +145,7 @@ Cross-compiling all four targets locally is complex — if you need all platform
 bash scripts/upload-to-s3.sh <bucket-name>
 
 # Or specify a custom version label
-bash scripts/upload-to-s3.sh <bucket-name> v0.1.5-rc1
+bash scripts/upload-to-s3.sh <bucket-name> v0.1.6-rc1
 
 # Or point at a directory containing pre-built tarballs
 bash scripts/upload-to-s3.sh <bucket-name> dev /path/to/tarballs

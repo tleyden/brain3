@@ -38,3 +38,7 @@ Based on the provided sources, here is a summary of best practices for Rust deve
 - **Optimize for Testability:** Because the domain relies on traits (ports), you can easily plug in mock adapters to test business logic in complete isolation from the real world.
 - **Start with Large Domain Boundaries:** When starting, prefer a single, large domain rather than many small ones. This simplifies atomicity and allows domain boundaries to be refined organically based on actual usage patterns.
 - **Expose a Clear Public API:** Inbound adapters (like an HTTP router) should only interact with the Service API, which acts as the primary point of entry for the application's business logic.
+
+## Updating new release
+
+- Do not update anything in docs folder, or any .MD files.  Just update these files: Cargo.toml, main.rs, release.rs, screens.rs, pyproject.toml, test_server_startup.py, uv.lock, first_run_setup.rs.  

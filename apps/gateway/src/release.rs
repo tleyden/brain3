@@ -50,7 +50,7 @@ mod tests {
             &official_latest_container_image()
         ));
         assert!(!is_official_latest_container_image(
-            "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.5"
+            "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.6"
         ));
     }
 }
