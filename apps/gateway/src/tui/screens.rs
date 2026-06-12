@@ -19,10 +19,10 @@ pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),
-            Constraint::Length(4),
+            Constraint::Length(6),
             Constraint::Min(10),
             Constraint::Length(3),
-            Constraint::Length(4),
+            Constraint::Length(5),
         ])
         .split(area);
 
@@ -103,6 +103,8 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             Span::styled(progress_caption(state.step).to_string(), muted_style()),
         ]),
         Line::from(stage_spans),
+        blank_line(),
+        muted_line("Navigation Controls At Bottom Of Screen"),
     ]
 }
 
@@ -260,6 +262,7 @@ fn vault_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     vec![
         muted_line("Enter the absolute path to your Obsidian-compatible vault."),
         muted_line("Brain3 will mount this path when it starts the local MCP container."),
+        muted_line("Start typing now. No extra key is required."),
         blank_line(),
         field_line("Vault path", &state.vault_path_input, true),
     ]
@@ -436,44 +439,37 @@ fn status_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
 fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     match state.step {
-        SetupStep::Welcome => vec![
-            primary_action_line("Press Enter to continue."),
-            hint_line(vec![("[q]", "Quit")]),
-        ],
+        SetupStep::Welcome => continue_action_lines(vec![("[q]", "Quit")]),
         SetupStep::DependencyDoctor => dependency_action_lines(state),
-        SetupStep::VaultPath => vec![
-            primary_action_line("Press Enter to continue."),
-            hint_line(vec![
-                ("[Type]", "Edit path"),
-                ("[Backspace]", "Delete"),
-                ("[Esc]", "Back"),
-                ("[q]", "Quit"),
-            ]),
-        ],
-        SetupStep::Auth => vec![
-            primary_action_line("Press Enter to continue."),
-            hint_line(vec![
-                ("[Tab/Up/Down]", "Move"),
-                ("[Type]", "Edit field"),
-                ("[g]", "Custom password"),
-                ("[Esc]", "Back"),
-                ("[q]", "Quit"),
-            ]),
-        ],
+        SetupStep::VaultPath => continue_action_lines(vec![
+            ("[Type]", "Edit path"),
+            ("[Backspace]", "Delete"),
+            ("[Esc]", "Back"),
+            ("[q]", "Quit"),
+        ]),
+        SetupStep::Auth => continue_action_lines(vec![
+            ("[Tab/Up/Down]", "Move"),
+            ("[Type]", "Edit field"),
+            ("[g]", "Custom password"),
+            ("[Esc]", "Back"),
+            ("[q]", "Quit"),
+        ]),
         SetupStep::Summary => vec![
             primary_action_line(
                 "Press Enter to write config and start. (it will take 5s, just press once)",
             ),
+            enter_action_line("Write config and start"),
             hint_line(vec![("[Esc]", "Back"), ("[q]", "Quit")]),
         ],
         SetupStep::ConnectionCard => vec![
             primary_action_line("Press Enter to open runtime status."),
+            enter_action_line("Open runtime status"),
             hint_line(vec![("[q]", "Quit")]),
         ],
         SetupStep::RuntimeStatus => match state.previous_step() {
             Some(SetupStep::ConnectionCard) => vec![
                 primary_action_line("Press c to view MCP config settings again."),
-                hint_line(vec![("[q]", "Quit")]),
+                hint_line(vec![("[c]", "MCP config settings"), ("[q]", "Quit")]),
             ],
             _ => vec![
                 primary_action_line("Brain3 is running."),
@@ -483,13 +479,18 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     }
 }
 
+fn continue_action_lines(extra_hints: Vec<(&str, &str)>) -> Vec<Line<'static>> {
+    vec![
+        primary_action_line("Press Enter to continue."),
+        enter_action_line("Enter to continue"),
+        hint_line(extra_hints),
+    ]
+}
+
 fn dependency_action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     let actions = state.dependency_actions();
     if actions.is_empty() {
-        return vec![
-            primary_action_line("Press Enter to continue."),
-            hint_line(vec![("[r]", "Refresh"), ("[Esc]", "Back"), ("[q]", "Quit")]),
-        ];
+        return continue_action_lines(vec![("[r]", "Refresh"), ("[Esc]", "Back"), ("[q]", "Quit")]);
     }
 
     match state.dependency_focus {
@@ -500,6 +501,7 @@ fn dependency_action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
                 .unwrap_or("Install selected dependency");
             vec![
                 primary_action_line(format!("Press Enter to run: {action_label}.")),
+                enter_action_line(format!("Run: {action_label}")),
                 hint_line(vec![
                     ("[Tab]", "Focus continue"),
                     ("[Up/Down]", "Select action"),
@@ -509,15 +511,12 @@ fn dependency_action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
                 ]),
             ]
         }
-        DependencyDoctorFocus::Continue => vec![
-            primary_action_line("Press Enter to continue."),
-            hint_line(vec![
-                ("[Tab]", "Focus install actions"),
-                ("[r]", "Refresh"),
-                ("[Esc]", "Back"),
-                ("[q]", "Quit"),
-            ]),
-        ],
+        DependencyDoctorFocus::Continue => continue_action_lines(vec![
+            ("[Tab]", "Focus install actions"),
+            ("[r]", "Refresh"),
+            ("[Esc]", "Back"),
+            ("[q]", "Quit"),
+        ]),
     }
 }
 
@@ -544,16 +543,24 @@ fn field_line(label: &str, value: &str, active: bool) -> Line<'static> {
     } else {
         label_style()
     };
-    let value_style = if active {
-        value_style().add_modifier(Modifier::UNDERLINED)
+    let (display_value, value_style) = if active && value.is_empty() {
+        (
+            "[start typing here]".to_string(),
+            accent_style().add_modifier(Modifier::UNDERLINED),
+        )
+    } else if active {
+        (
+            value.to_string(),
+            value_style().add_modifier(Modifier::UNDERLINED),
+        )
     } else {
-        value_style()
+        (value.to_string(), value_style())
     };
 
     Line::from(vec![
         pointer,
         Span::styled(format!("{label}: "), label_style),
-        Span::styled(value.to_string(), value_style),
+        Span::styled(display_value, value_style),
     ])
 }
 
@@ -567,6 +574,13 @@ fn hint_line(hints: Vec<(&str, &str)>) -> Line<'static> {
         spans.push(Span::styled(format!(" {description}"), muted_style()));
     }
     Line::from(spans)
+}
+
+fn enter_action_line(text: impl Into<String>) -> Line<'static> {
+    Line::from(vec![
+        Span::styled("[Enter] ", accent_style()),
+        Span::styled(text.into(), muted_style()),
+    ])
 }
 
 fn primary_action_line(text: impl Into<String>) -> Line<'static> {

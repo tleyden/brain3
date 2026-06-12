@@ -189,9 +189,11 @@ fn load_container_startup_config(
     let runtime = match runtime_str {
         "docker" => ContainerRuntime::Docker,
         "macos-container" => ContainerRuntime::MacOSContainer,
-        other => return Err(ConfigError::Invalid(format!(
+        other => {
+            return Err(ConfigError::Invalid(format!(
             "B3_CONTAINER_RUNTIME: unknown value '{other}'; expected 'docker' or 'macos-container'"
-        ))),
+        )))
+        }
     };
 
     let vault_path_str = require_nonempty_env("B3_VAULT_PATH", "when B3_CONTAINER_RUNTIME is set")?;
