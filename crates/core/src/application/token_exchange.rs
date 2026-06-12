@@ -5,7 +5,6 @@ use crate::domain::errors::OAuthError;
 use crate::domain::model::OAuthConfig;
 use crate::domain::oauth::{
     constant_time_eq, generate_secure_token, verify_pkce, TokenRequest, TokenResponse,
-    ACCESS_TOKEN_LIFETIME_SECS,
 };
 use crate::domain::redact::elide_secret;
 use crate::ports::auth_code_store::AuthCodeStore;
@@ -135,7 +134,8 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
         }
 
         let access_token = generate_secure_token();
-        let expires_at = SystemTime::now() + Duration::from_secs(ACCESS_TOKEN_LIFETIME_SECS);
+        let expires_in = self.config.access_token_lifetime_secs;
+        let expires_at = SystemTime::now() + Duration::from_secs(expires_in);
         self.token_store
             .store(
                 access_token.clone(),
@@ -158,7 +158,7 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
         Ok(TokenResponse {
             access_token,
             token_type: "bearer".into(),
-            expires_in: ACCESS_TOKEN_LIFETIME_SECS,
+            expires_in,
         })
     }
 }

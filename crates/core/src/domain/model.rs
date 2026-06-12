@@ -16,6 +16,7 @@ pub struct GatewayConfig {
 pub struct OAuthConfig {
     pub client_id: String,
     pub client_secret: String,
+    pub access_token_lifetime_secs: u64,
     pub pkce_required: bool,
     pub username: String,
     pub password: String,

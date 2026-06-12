@@ -8,7 +8,7 @@ use subtle::ConstantTimeEq;
 use super::errors::OAuthError;
 
 pub const AUTH_CODE_LIFETIME: Duration = Duration::from_secs(300);
-pub const ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
+pub const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 
 #[derive(Debug, Clone)]
 pub struct AuthCodeData {

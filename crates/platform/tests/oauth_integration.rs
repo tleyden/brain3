@@ -119,6 +119,7 @@ impl Default for TestHarness {
             oauth: OAuthConfig {
                 client_id: CLIENT_ID.into(),
                 client_secret: CLIENT_SECRET.into(),
+                access_token_lifetime_secs: 3600,
                 pkce_required: true,
                 username: LOGIN_USERNAME.into(),
                 password: LOGIN_PASSWORD.into(),
@@ -407,6 +408,36 @@ async fn authorization_code_exchange_issues_fresh_access_token_per_exchange() {
         .to_string();
 
     assert_ne!(first_token, second_token);
+}
+
+#[tokio::test]
+async fn authorization_code_exchange_returns_configured_access_token_lifetime() {
+    let harness = TestHarness {
+        oauth: OAuthConfig {
+            access_token_lifetime_secs: 1234,
+            ..TestHarness::default().oauth
+        },
+        ..TestHarness::default()
+    };
+    let server = harness.build_server(MockMcpProxy::success());
+
+    let code = login_and_get_code(&server).await;
+
+    let resp = server
+        .post("/oauth/token")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("redirect_uri", REDIRECT_URI),
+            ("code", &code),
+            ("code_verifier", CODE_VERIFIER),
+        ])
+        .await;
+
+    resp.assert_status_ok();
+    let body: Value = resp.json();
+    assert_eq!(body["expires_in"], 1234);
 }
 
 #[tokio::test]

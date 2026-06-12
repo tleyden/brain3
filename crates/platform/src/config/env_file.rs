@@ -6,6 +6,7 @@ use brain3_core::domain::model::{
     ContainerRuntime, ContainerStartupConfig, GatewayConfig, HostnameValidationConfig,
     MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
 };
+use brain3_core::domain::oauth::DEFAULT_ACCESS_TOKEN_LIFETIME_SECS;
 use brain3_core::ports::config::ConfigPort;
 
 pub struct EnvFileConfigAdapter {
@@ -43,6 +44,17 @@ impl ConfigPort for EnvFileConfigAdapter {
         let port = env_var_or("B3_OAUTH2_GATEWAY_PORT", "8421")
             .parse::<u16>()
             .map_err(|e| ConfigError::Invalid(format!("B3_OAUTH2_GATEWAY_PORT: {e}")))?;
+        let access_token_lifetime_secs = env_var_or(
+            "B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS",
+            &DEFAULT_ACCESS_TOKEN_LIFETIME_SECS.to_string(),
+        )
+        .parse::<u64>()
+        .map_err(|e| ConfigError::Invalid(format!("B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS: {e}")))?;
+        if access_token_lifetime_secs == 0 {
+            return Err(ConfigError::Invalid(
+                "B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS must be greater than 0".into(),
+            ));
+        }
 
         let expected_host = resolve_expected_host()?;
         let enforce_hostname = env_bool("B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
@@ -80,6 +92,7 @@ impl ConfigPort for EnvFileConfigAdapter {
             oauth: OAuthConfig {
                 client_id: env_var_or("B3_OAUTH2_GATEWAY_CLIENT_ID", "brain3-oauth2-client"),
                 client_secret,
+                access_token_lifetime_secs,
                 pkce_required: env_bool("B3_OAUTH2_PKCE_REQUIRED", true),
                 username,
                 password,

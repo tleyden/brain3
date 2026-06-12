@@ -22,6 +22,7 @@ pub enum PortsField {
     GatewayPort,
     ContainerHostPort,
     ContainerMcpPort,
+    AccessTokenLifetimeSecs,
     PkceRequired,
     EnforceHostnameCheck,
 }
@@ -48,6 +49,7 @@ pub enum SummaryField {
     GatewayPort,
     ContainerHostPort,
     ContainerMcpPort,
+    AccessTokenLifetimeSecs,
     PkceRequired,
     HostnameCheck,
 }
@@ -76,6 +78,7 @@ pub struct FirstRunTuiState {
     pub gateway_port_input: String,
     pub container_host_port_input: String,
     pub container_mcp_port_input: String,
+    pub access_token_lifetime_secs_input: String,
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
     pub summary_focus: SummaryField,
@@ -96,6 +99,7 @@ impl FirstRunTuiState {
         let gateway_port_input = draft.gateway_port.to_string();
         let container_host_port_input = draft.container_host_port.to_string();
         let container_mcp_port_input = draft.container_mcp_port.to_string();
+        let access_token_lifetime_secs_input = draft.access_token_lifetime_secs.to_string();
 
         Self {
             host,
@@ -121,6 +125,7 @@ impl FirstRunTuiState {
             gateway_port_input,
             container_host_port_input,
             container_mcp_port_input,
+            access_token_lifetime_secs_input,
             dependency_focus,
             dependency_action_index: 0,
             summary_focus: SummaryField::VaultPath,
@@ -210,6 +215,9 @@ impl FirstRunTuiState {
         if let Ok(port) = self.container_mcp_port_input.trim().parse::<u16>() {
             self.draft.container_mcp_port = port;
         }
+        if let Ok(seconds) = self.access_token_lifetime_secs_input.trim().parse::<u64>() {
+            self.draft.access_token_lifetime_secs = seconds;
+        }
 
         FinalizeSetupRequest {
             draft: self.draft.clone(),
@@ -258,7 +266,8 @@ impl FirstRunTuiState {
         self.ports_focus = match self.ports_focus {
             PortsField::GatewayPort => PortsField::ContainerHostPort,
             PortsField::ContainerHostPort => PortsField::ContainerMcpPort,
-            PortsField::ContainerMcpPort => PortsField::PkceRequired,
+            PortsField::ContainerMcpPort => PortsField::AccessTokenLifetimeSecs,
+            PortsField::AccessTokenLifetimeSecs => PortsField::PkceRequired,
             PortsField::PkceRequired => PortsField::EnforceHostnameCheck,
             PortsField::EnforceHostnameCheck => PortsField::GatewayPort,
         };
@@ -269,7 +278,8 @@ impl FirstRunTuiState {
             PortsField::GatewayPort => PortsField::EnforceHostnameCheck,
             PortsField::ContainerHostPort => PortsField::GatewayPort,
             PortsField::ContainerMcpPort => PortsField::ContainerHostPort,
-            PortsField::PkceRequired => PortsField::ContainerMcpPort,
+            PortsField::AccessTokenLifetimeSecs => PortsField::ContainerMcpPort,
+            PortsField::PkceRequired => PortsField::AccessTokenLifetimeSecs,
             PortsField::EnforceHostnameCheck => PortsField::PkceRequired,
         };
     }
@@ -289,7 +299,10 @@ impl FirstRunTuiState {
     pub fn ports_focus_is_text_field(&self) -> bool {
         matches!(
             self.ports_focus,
-            PortsField::GatewayPort | PortsField::ContainerHostPort | PortsField::ContainerMcpPort
+            PortsField::GatewayPort
+                | PortsField::ContainerHostPort
+                | PortsField::ContainerMcpPort
+                | PortsField::AccessTokenLifetimeSecs
         )
     }
 
@@ -308,7 +321,8 @@ impl FirstRunTuiState {
             SummaryField::PasswordValue => SummaryField::GatewayPort,
             SummaryField::GatewayPort => SummaryField::ContainerHostPort,
             SummaryField::ContainerHostPort => SummaryField::ContainerMcpPort,
-            SummaryField::ContainerMcpPort => SummaryField::PkceRequired,
+            SummaryField::ContainerMcpPort => SummaryField::AccessTokenLifetimeSecs,
+            SummaryField::AccessTokenLifetimeSecs => SummaryField::PkceRequired,
             SummaryField::PkceRequired => SummaryField::HostnameCheck,
             SummaryField::HostnameCheck => SummaryField::VaultPath,
         };
@@ -330,7 +344,8 @@ impl FirstRunTuiState {
             }
             SummaryField::ContainerHostPort => SummaryField::GatewayPort,
             SummaryField::ContainerMcpPort => SummaryField::ContainerHostPort,
-            SummaryField::PkceRequired => SummaryField::ContainerMcpPort,
+            SummaryField::AccessTokenLifetimeSecs => SummaryField::ContainerMcpPort,
+            SummaryField::PkceRequired => SummaryField::AccessTokenLifetimeSecs,
             SummaryField::HostnameCheck => SummaryField::PkceRequired,
         };
     }
@@ -345,6 +360,7 @@ impl FirstRunTuiState {
                 | SummaryField::GatewayPort
                 | SummaryField::ContainerHostPort
                 | SummaryField::ContainerMcpPort
+                | SummaryField::AccessTokenLifetimeSecs
         )
     }
 
@@ -354,6 +370,7 @@ impl FirstRunTuiState {
             SummaryField::GatewayPort
                 | SummaryField::ContainerHostPort
                 | SummaryField::ContainerMcpPort
+                | SummaryField::AccessTokenLifetimeSecs
         )
     }
 
@@ -366,6 +383,7 @@ impl FirstRunTuiState {
             SummaryField::GatewayPort => self.gateway_port_input.push(ch),
             SummaryField::ContainerHostPort => self.container_host_port_input.push(ch),
             SummaryField::ContainerMcpPort => self.container_mcp_port_input.push(ch),
+            SummaryField::AccessTokenLifetimeSecs => self.access_token_lifetime_secs_input.push(ch),
             _ => {}
         }
     }
@@ -392,6 +410,9 @@ impl FirstRunTuiState {
             }
             SummaryField::ContainerMcpPort => {
                 self.container_mcp_port_input.pop();
+            }
+            SummaryField::AccessTokenLifetimeSecs => {
+                self.access_token_lifetime_secs_input.pop();
             }
             _ => {}
         }
@@ -544,6 +565,18 @@ pub fn validate_port_input(input: &str, label: &str) -> Result<u16, String> {
         Ok(0) => Err(format!("{label} must be greater than 0")),
         Ok(port) => Ok(port),
         Err(_) => Err(format!("{label} must be a valid port number (1-65535)")),
+    }
+}
+
+pub fn validate_positive_u64_input(input: &str, label: &str) -> Result<u64, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(format!("{label} must not be empty"));
+    }
+    match trimmed.parse::<u64>() {
+        Ok(0) => Err(format!("{label} must be greater than 0")),
+        Ok(value) => Ok(value),
+        Err(_) => Err(format!("{label} must be a valid positive integer")),
     }
 }
 

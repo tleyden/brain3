@@ -23,8 +23,8 @@ use crate::RuntimeOverrides;
 
 use super::screens;
 use super::state::{
-    install_action_label, validate_port_input, AuthField, DependencyDoctorFocus, FirstRunTuiState,
-    PortsField, RuntimeView,
+    install_action_label, validate_port_input, validate_positive_u64_input, AuthField,
+    DependencyDoctorFocus, FirstRunTuiState, PortsField, RuntimeView,
 };
 
 pub enum GatewayTuiLaunch {
@@ -228,6 +228,12 @@ async fn event_loop(
                     {
                         tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
+                    } else if let Err(msg) = validate_positive_u64_input(
+                        &state.access_token_lifetime_secs_input,
+                        "Access token lifetime",
+                    ) {
+                        tracing::debug!(msg, "lifetime validation failed");
+                        state.error_message = Some(msg);
                     } else {
                         state.step = SetupStep::Summary;
                     }
@@ -252,6 +258,9 @@ async fn event_loop(
                         PortsField::ContainerMcpPort => {
                             state.container_mcp_port_input.pop();
                         }
+                        PortsField::AccessTokenLifetimeSecs => {
+                            state.access_token_lifetime_secs_input.pop();
+                        }
                         _ => {}
                     }
                 }
@@ -260,6 +269,9 @@ async fn event_loop(
                         PortsField::GatewayPort => state.gateway_port_input.push(ch),
                         PortsField::ContainerHostPort => state.container_host_port_input.push(ch),
                         PortsField::ContainerMcpPort => state.container_mcp_port_input.push(ch),
+                        PortsField::AccessTokenLifetimeSecs => {
+                            state.access_token_lifetime_secs_input.push(ch)
+                        }
                         _ => {}
                     }
                 }

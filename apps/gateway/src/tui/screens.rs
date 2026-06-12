@@ -425,6 +425,11 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         &state.container_mcp_port_input,
         state.ports_focus == PortsField::ContainerMcpPort,
     ));
+    lines.push(field_line(
+        "Access token lifetime (secs)",
+        &state.access_token_lifetime_secs_input,
+        state.ports_focus == PortsField::AccessTokenLifetimeSecs,
+    ));
 
     lines.push(blank_line());
 
@@ -533,6 +538,11 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Container MCP port",
             &state.container_mcp_port_input,
             f == SummaryField::ContainerMcpPort,
+        ),
+        field_line(
+            "Access token lifetime (secs)",
+            &state.access_token_lifetime_secs_input,
+            f == SummaryField::AccessTokenLifetimeSecs,
         ),
         field_badge_line(
             "PKCE required",
@@ -1120,6 +1130,7 @@ mod tests {
                     gateway_port: 8421,
                     client_id: "brain3-oauth2-client".into(),
                     client_secret: "secret".into(),
+                    access_token_lifetime_secs: 3600,
                     username: "admin".into(),
                     password: String::new(),
                     tunnel_mode: TunnelModeDraft::CloudflareQuick,
@@ -1156,6 +1167,7 @@ mod tests {
                 oauth: OAuthConfig {
                     client_id: "brain3-oauth2-client".into(),
                     client_secret: "secret".into(),
+                    access_token_lifetime_secs: 3600,
                     pkce_required: true,
                     username: "admin".into(),
                     password: "password".into(),

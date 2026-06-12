@@ -4,9 +4,9 @@ use crate::domain::errors::SetupError;
 use crate::domain::model::ContainerRuntime;
 use crate::domain::setup::{
     ConnectionCard, FinalizeSetupRequest, SetupDefaults, SetupDraftConfig, SetupPreparation,
-    SetupSummary, TunnelModeDraft, DEFAULT_CLIENT_ID, DEFAULT_CONTAINER_HOST_PORT,
-    DEFAULT_CONTAINER_MCP_PORT, DEFAULT_GATEWAY_PORT, DEFAULT_GENERATED_PASSWORD_LENGTH,
-    DEFAULT_GENERATED_SECRET_BYTES, DEFAULT_USERNAME,
+    SetupSummary, TunnelModeDraft, DEFAULT_ACCESS_TOKEN_LIFETIME_SECS, DEFAULT_CLIENT_ID,
+    DEFAULT_CONTAINER_HOST_PORT, DEFAULT_CONTAINER_MCP_PORT, DEFAULT_GATEWAY_PORT,
+    DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES, DEFAULT_USERNAME,
 };
 use crate::ports::setup_system::SetupSystemPort;
 
@@ -30,6 +30,7 @@ impl FirstRunSetupUseCase {
             client_secret: self
                 .port
                 .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?,
+            access_token_lifetime_secs: DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
             username: DEFAULT_USERNAME.to_string(),
             password: String::new(),
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
@@ -79,6 +80,7 @@ impl FirstRunSetupUseCase {
 
         validate_nonempty("client ID", &draft.client_id)?;
         validate_nonempty("username", &draft.username)?;
+        validate_positive_u64("access token lifetime", draft.access_token_lifetime_secs)?;
         self.validate_vault_path(&draft.vault_path).await?;
 
         if draft.client_secret.trim().is_empty() {
@@ -137,6 +139,15 @@ fn default_container_runtime(
 fn validate_nonempty(label: &str, value: &str) -> Result<(), SetupError> {
     if value.trim().is_empty() {
         return Err(SetupError::Invalid(format!("{label} must not be empty")));
+    }
+    Ok(())
+}
+
+fn validate_positive_u64(label: &str, value: u64) -> Result<(), SetupError> {
+    if value == 0 {
+        return Err(SetupError::Invalid(format!(
+            "{label} must be greater than 0"
+        )));
     }
     Ok(())
 }
@@ -274,6 +285,7 @@ mod tests {
             gateway_port: 8421,
             client_id: "brain3-oauth2-client".into(),
             client_secret: String::new(),
+            access_token_lifetime_secs: DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
             username: "admin".into(),
             password: String::new(),
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
