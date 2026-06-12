@@ -37,7 +37,7 @@ pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
     f.render_widget(progress, chunks[1]);
 
     let body = Paragraph::new(body_lines(state))
-        .block(panel_block("Details"))
+        .block(panel_block(body_panel_title(state.step)))
         .wrap(Wrap { trim: false });
     f.render_widget(body, chunks[2]);
 
@@ -117,6 +117,14 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::Summary => "Summary",
         SetupStep::ConnectionCard => "MCP Config Settings",
         SetupStep::RuntimeStatus => "Runtime Status",
+    }
+}
+
+fn body_panel_title(step: SetupStep) -> &'static str {
+    match step {
+        SetupStep::ConnectionCard => "MCP Config",
+        SetupStep::RuntimeStatus => "Runtime Status",
+        _ => "Details",
     }
 }
 
@@ -262,7 +270,6 @@ fn vault_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     vec![
         muted_line("Enter the absolute path to your Obsidian-compatible vault."),
         muted_line("Brain3 will mount this path when it starts the local MCP container."),
-        muted_line("Start typing now. No extra key is required."),
         blank_line(),
         field_line("Vault path", &state.vault_path_input, true),
     ]
@@ -353,7 +360,10 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Brain3 is configured and running.",
             success_style(),
         )),
-        muted_line("Use these values in your AI app when it asks for MCP connection details."),
+        Line::from(Span::styled(
+            "MCP Connection Details for AI app - See README for instructions",
+            accent_style(),
+        )),
         blank_line(),
         key_value_line("Server URL", format!("{}/mcp", card.server_url)),
         key_value_line("Client ID", card.client_id.clone()),
@@ -365,7 +375,15 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 }
 
 fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
+    let mut lines = vec![muted_line(
+        "This screen shows live runtime status for Brain3.",
+    )];
+
+    if state.connection_card.is_some() {
+        lines.push(muted_line("Press c to switch back to MCP config settings."));
+    }
+
+    lines.push(blank_line());
 
     if let Some(runtime) = &state.runtime {
         lines.push(key_badge_line(
