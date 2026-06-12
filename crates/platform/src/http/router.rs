@@ -8,6 +8,7 @@ use tower_http::trace::TraceLayer;
 use brain3_core::ports::auth_code_store::AuthCodeStore;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
+use super::assets::{login_logo, login_stylesheet};
 use super::health::health;
 use super::mcp_handlers::{mcp_reverse_proxy, protected_resource_metadata};
 use super::oauth_handlers::{
@@ -38,6 +39,8 @@ pub fn build_router<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
             "/oauth/authorize",
             get(oauth_authorize_get::<S, P>).post(oauth_authorize_post::<S, P>),
         )
+        .route("/oauth/login.css", get(login_stylesheet))
+        .route("/oauth/brain3-lockup-light.svg", get(login_logo))
         .route("/oauth/token", post(oauth_token::<S, P>))
         .route(
             "/.well-known/oauth-protected-resource/mcp",
