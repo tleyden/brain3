@@ -54,8 +54,7 @@ impl LogLevel {
     about = "OAuth2 gateway for MCP servers",
     long_about = release::HELP_ABOUT,
     version = release::APP_VERSION,
-    long_version = release::APP_VERSION,
-    after_help = release::HELP_AFTER
+    long_version = release::APP_VERSION
 )]
 struct Args {
     #[arg(long, default_value = DEFAULT_HOST)]

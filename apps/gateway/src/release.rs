@@ -5,14 +5,7 @@ pub const HELP_ABOUT: &str = concat!(
     env!("CARGO_PKG_VERSION"),
     "\nOAuth2 gateway for MCP servers"
 );
-pub const HELP_AFTER: &str = concat!(
-    "Examples:\n",
-    "  brain3 --container-tag latest\n",
-    "  brain3 --container-tag pr-123\n",
-    "  brain3 --container-tag v",
-    env!("CARGO_PKG_VERSION"),
-    "\n"
-);
+
 pub const MCP_IMAGE_REPO: &str = "ghcr.io/tleyden/brain3-mcp-vault-tools";
 
 pub fn default_container_image() -> String {
