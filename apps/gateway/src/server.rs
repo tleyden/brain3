@@ -21,6 +21,8 @@ use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
 
+use crate::{apply_runtime_overrides, RuntimeOverrides};
+
 pub struct ConfiguredGatewaySession {
     pub runtime: RuntimeBootstrap,
     pub server: GatewayServerHandle,
@@ -151,12 +153,13 @@ pub async fn spawn_gateway_server(
 pub async fn spawn_configured_gateway_session(
     host: &str,
     launch_plan: RuntimeLaunchPlan,
+    runtime_overrides: RuntimeOverrides,
 ) -> Result<ConfiguredGatewaySession> {
-    let config = Arc::new(
-        EnvFileConfigAdapter::new(Some(launch_plan.env_file.clone()))
-            .load()
-            .context("failed to load configuration")?,
-    );
+    let mut config = EnvFileConfigAdapter::new(Some(launch_plan.env_file.clone()))
+        .load()
+        .context("failed to load configuration")?;
+    apply_runtime_overrides(&mut config, &runtime_overrides)?;
+    let config = Arc::new(config);
     let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
     let server = spawn_gateway_server(
         host,

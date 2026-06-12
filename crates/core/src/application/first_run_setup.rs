@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::domain::errors::SetupError;
 use crate::domain::model::ContainerRuntime;
 use crate::domain::setup::{
-    ConnectionCard, FinalizeSetupRequest, SetupDraftConfig, SetupPreparation, SetupSummary,
-    TunnelModeDraft, DEFAULT_CLIENT_ID, DEFAULT_CONTAINER_HOST_PORT, DEFAULT_CONTAINER_IMAGE,
+    ConnectionCard, FinalizeSetupRequest, SetupDefaults, SetupDraftConfig, SetupPreparation,
+    SetupSummary, TunnelModeDraft, DEFAULT_CLIENT_ID, DEFAULT_CONTAINER_HOST_PORT,
     DEFAULT_CONTAINER_MCP_PORT, DEFAULT_GATEWAY_PORT, DEFAULT_GENERATED_PASSWORD_LENGTH,
     DEFAULT_GENERATED_SECRET_BYTES, DEFAULT_USERNAME,
 };
@@ -12,11 +12,12 @@ use crate::ports::setup_system::SetupSystemPort;
 
 pub struct FirstRunSetupUseCase {
     port: Arc<dyn SetupSystemPort>,
+    defaults: SetupDefaults,
 }
 
 impl FirstRunSetupUseCase {
-    pub fn new(port: Arc<dyn SetupSystemPort>) -> Self {
-        Self { port }
+    pub fn new(port: Arc<dyn SetupSystemPort>, defaults: SetupDefaults) -> Self {
+        Self { port, defaults }
     }
 
     pub async fn prepare(&self) -> Result<SetupPreparation, SetupError> {
@@ -37,7 +38,7 @@ impl FirstRunSetupUseCase {
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
             container_runtime: default_container_runtime(self.port.operating_system()),
             vault_path: std::path::PathBuf::new(),
-            container_image: DEFAULT_CONTAINER_IMAGE.to_string(),
+            container_image: self.defaults.default_container_image.clone(),
             container_host_port: DEFAULT_CONTAINER_HOST_PORT,
             container_mcp_port: DEFAULT_CONTAINER_MCP_PORT,
             direct_public_origin_hostname: None,
@@ -155,7 +156,8 @@ mod tests {
     use crate::domain::model::ContainerRuntime;
     use crate::domain::setup::{
         ConnectionCard, DependencyAvailability, DependencyStatus, FinalizeSetupRequest,
-        PackageManager, SetupDraftConfig, SetupOperatingSystem, SetupPaths, TunnelModeDraft,
+        PackageManager, SetupDefaults, SetupDraftConfig, SetupOperatingSystem, SetupPaths,
+        TunnelModeDraft,
     };
     use crate::ports::setup_system::SetupSystemPort;
 
@@ -295,10 +297,16 @@ mod tests {
         }
     }
 
+    fn sample_defaults() -> SetupDefaults {
+        SetupDefaults {
+            default_container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.3".into(),
+        }
+    }
+
     #[tokio::test]
     async fn finalize_rejects_relative_vault_paths() {
         let port = Arc::new(MockSetupSystemPort::new(vec![]));
-        let use_case = FirstRunSetupUseCase::new(port);
+        let use_case = FirstRunSetupUseCase::new(port, sample_defaults());
 
         let error = use_case
             .finalize(FinalizeSetupRequest {
@@ -317,7 +325,7 @@ mod tests {
     #[tokio::test]
     async fn validate_vault_path_rejects_missing_absolute_path() {
         let port = Arc::new(MockSetupSystemPort::new(vec![]));
-        let use_case = FirstRunSetupUseCase::new(port);
+        let use_case = FirstRunSetupUseCase::new(port, sample_defaults());
 
         let error = use_case
             .validate_vault_path(Path::new("/Users/test/missing-vault"))
@@ -334,7 +342,7 @@ mod tests {
     async fn validate_vault_path_accepts_existing_absolute_path() {
         let vault_path = PathBuf::from("/Users/test/vault");
         let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
-        let use_case = FirstRunSetupUseCase::new(port);
+        let use_case = FirstRunSetupUseCase::new(port, sample_defaults());
 
         use_case
             .validate_vault_path(&vault_path)
@@ -345,7 +353,7 @@ mod tests {
     #[tokio::test]
     async fn prepare_uses_brain3_oauth2_client_as_default_client_id() {
         let port = Arc::new(MockSetupSystemPort::new(vec![]));
-        let use_case = FirstRunSetupUseCase::new(port);
+        let use_case = FirstRunSetupUseCase::new(port, sample_defaults());
 
         let preparation = use_case.prepare().await.expect("prepare should succeed");
 
@@ -353,10 +361,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn prepare_uses_injected_default_container_image() {
+        let port = Arc::new(MockSetupSystemPort::new(vec![]));
+        let use_case = FirstRunSetupUseCase::new(
+            port,
+            SetupDefaults {
+                default_container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v9.9.9".into(),
+            },
+        );
+
+        let preparation = use_case.prepare().await.expect("prepare should succeed");
+
+        assert_eq!(
+            preparation.draft.container_image,
+            "ghcr.io/tleyden/brain3-mcp-vault-tools:v9.9.9"
+        );
+    }
+
+    #[tokio::test]
     async fn finalize_generates_missing_secrets_and_password() {
         let vault_path = PathBuf::from("/Users/test/vault");
         let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
-        let use_case = FirstRunSetupUseCase::new(port.clone());
+        let use_case = FirstRunSetupUseCase::new(port.clone(), sample_defaults());
 
         let result = use_case
             .finalize(FinalizeSetupRequest {
@@ -377,7 +403,7 @@ mod tests {
     async fn finalize_writes_env_and_builds_connection_card() {
         let vault_path = PathBuf::from("/Users/test/vault");
         let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
-        let use_case = FirstRunSetupUseCase::new(port.clone());
+        let use_case = FirstRunSetupUseCase::new(port.clone(), sample_defaults());
 
         let summary = use_case
             .finalize(FinalizeSetupRequest {

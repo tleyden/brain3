@@ -9,6 +9,7 @@ use brain3_core::domain::setup::{
 };
 use brain3_platform::runtime::StartupStatus;
 
+use crate::release;
 use crate::server::GatewayServerStatus;
 
 use super::runtime_logs::RuntimeLogsState;
@@ -54,7 +55,7 @@ pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
 
 fn header_line(state: &FirstRunTuiState) -> Line<'static> {
     Line::from(vec![
-        Span::styled("Brain3 Gateway", heading_style()),
+        Span::styled(release::APP_VERSION_DISPLAY, heading_style()),
         Span::styled("  •  ", muted_style()),
         Span::styled(screen_title(state.step).to_string(), value_style()),
     ])
@@ -857,4 +858,64 @@ fn muted_style() -> Style {
 
 fn border_style() -> Style {
     Style::default().fg(Color::DarkGray)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use brain3_core::domain::model::ContainerRuntime;
+    use brain3_core::domain::setup::{
+        DependencyAvailability, DependencyStatus, PackageManager, SetupDraftConfig,
+        SetupOperatingSystem, SetupPaths, SetupPreparation, TunnelModeDraft,
+    };
+
+    use super::*;
+
+    #[test]
+    fn header_mentions_brain3_version() {
+        let state = sample_state();
+        let text = header_line(&state).to_string();
+
+        assert!(text.contains("Brain3 v"));
+        assert!(text.contains(release::APP_VERSION));
+    }
+
+    fn sample_state() -> FirstRunTuiState {
+        FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3.log"),
+            SetupPreparation {
+                paths: SetupPaths::new(
+                    PathBuf::from("/tmp/brain3-home"),
+                    PathBuf::from("/tmp/brain3-home/.env"),
+                    PathBuf::from("/tmp/brain3-home/cloudflared"),
+                ),
+                draft: SetupDraftConfig {
+                    gateway_port: 8421,
+                    client_id: "brain3-oauth2-client".into(),
+                    client_secret: "secret".into(),
+                    access_token: "token".into(),
+                    username: "admin".into(),
+                    password: String::new(),
+                    tunnel_mode: TunnelModeDraft::CloudflareQuick,
+                    container_runtime: ContainerRuntime::MacOSContainer,
+                    vault_path: PathBuf::from("/tmp/vault"),
+                    container_image: release::default_container_image(),
+                    container_host_port: 8420,
+                    container_mcp_port: 8420,
+                    direct_public_origin_hostname: None,
+                },
+                dependencies: DependencyStatus {
+                    operating_system: SetupOperatingSystem::MacOS,
+                    package_manager: Some(PackageManager::Homebrew),
+                    cloudflared: DependencyAvailability::Installed,
+                    preferred_container_runtime: DependencyAvailability::Installed,
+                    docker_installed: true,
+                    macos_container_installed: Some(true),
+                    homebrew_installed: Some(true),
+                },
+            },
+        )
+    }
 }

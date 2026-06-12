@@ -97,6 +97,17 @@ On first run, Brain3 launches an interactive setup wizard that walks you through
 
 On subsequent runs, Brain3 goes straight to the runtime status screen.
 
+Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. The registry still publishes `:latest`, but Brain3 does not select it automatically for new installs.
+
+If you need a different published MCP image for a single launch or while creating a brand-new config, use `--container-tag`:
+
+```bash
+brain3 --container-tag latest
+brain3 --container-tag pr-123
+```
+
+On an already configured install, `--container-tag` overrides the MCP container image for that launch only. During first-run setup, the selected tag becomes the image written into the new config.
+
 If you want a stable hostname on your own Cloudflare-managed domain instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
 
 ### 3. Connect your AI app
@@ -252,7 +263,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
 | `B3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
 | `B3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
-| `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` |
+| `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`. New installs default to the Brain3 release-matched tag; `:latest` is still published but must be chosen explicitly. |
 | `B3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 
 ## MD Vault MCP Tools
