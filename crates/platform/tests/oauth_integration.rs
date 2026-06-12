@@ -402,12 +402,10 @@ async fn authorize_shows_login_form_with_credential_guidance() {
 
     resp.assert_status_ok();
     let text = resp.text();
-    assert!(text.contains("Sign in to continue connecting your AI app"));
+    assert!(text.contains("ChatGPT, Claude, or another AI app is requesting access"));
     assert!(text.contains("B3_USERNAME"));
     assert!(text.contains("B3_PASSWORD"));
     assert!(text.contains(".env"));
-    assert!(text.contains("ChatGPT"));
-    assert!(text.contains("Claude"));
 }
 
 #[tokio::test]
@@ -495,7 +493,7 @@ async fn authorize_allows_missing_code_challenge_when_pkce_is_not_required() {
 
     resp.assert_status_ok();
     let text = resp.text();
-    assert!(text.contains("Sign in to continue connecting your AI app"));
+    assert!(text.contains("ChatGPT, Claude, or another AI app is requesting access"));
 }
 
 #[tokio::test]
@@ -1081,7 +1079,7 @@ async fn full_oauth_flow_authorize_through_token() {
         .add_query_param("code_challenge_method", "S256")
         .await;
     resp.assert_status_ok();
-    assert!(resp.text().contains("Sign in"));
+    assert!(resp.text().contains("Sign In"));
 
     // Step 2: POST authorize with credentials → redirect with code
     let code = login_and_get_code(&server).await;
