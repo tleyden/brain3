@@ -16,6 +16,7 @@ use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::config::ConfigPort;
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
+use brain3_platform::http::rate_limit::OAuthRateLimiter;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
@@ -222,6 +223,7 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
         token_exchange,
         proxy_mcp,
         config,
+        rate_limiter: Arc::new(OAuthRateLimiter::new()),
     };
 
     build_router(app_state)

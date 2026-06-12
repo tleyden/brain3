@@ -29,6 +29,21 @@ fn resolve_base_url(headers: &HeaderMap) -> String {
     format!("{proto}://{host}")
 }
 
+fn rate_limit_response(retry_after_secs: u64) -> Response {
+    (
+        StatusCode::TOO_MANY_REQUESTS,
+        [(
+            axum::http::header::RETRY_AFTER,
+            retry_after_secs.to_string(),
+        )],
+        Json(serde_json::json!({
+            "error": "rate_limit_exceeded",
+            "error_description": "Too many attempts. Try again later."
+        })),
+    )
+        .into_response()
+}
+
 fn oauth_error_response(err: OAuthError) -> Response {
     let status =
         StatusCode::from_u16(err.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
@@ -125,8 +140,14 @@ pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + '
 
 pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
     State(state): State<AppState<S, P>>,
+    headers: HeaderMap,
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {
+    if let Err(retry_after) = state.rate_limiter.check(&headers) {
+        tracing::warn!(retry_after_secs = retry_after, "rate limit exceeded on /oauth/authorize POST");
+        return rate_limit_response(retry_after);
+    }
+
     let req = parse_authorize_request(&form);
 
     if let Err(e) = state.authorize.validate(&req) {
@@ -184,8 +205,14 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
 
 pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
     State(state): State<AppState<S, P>>,
+    headers: HeaderMap,
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {
+    if let Err(retry_after) = state.rate_limiter.check(&headers) {
+        tracing::warn!(retry_after_secs = retry_after, "rate limit exceeded on /oauth/token");
+        return rate_limit_response(retry_after);
+    }
+
     let req = TokenRequest {
         grant_type: form.get("grant_type").cloned().unwrap_or_default(),
         client_id: form.get("client_id").cloned().unwrap_or_default(),
