@@ -15,9 +15,9 @@ impl EnsureContainerUseCase {
 
     pub async fn ensure(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
         if !self.port.image_exists(&config.image).await? {
-            tracing::info!(
+            tracing::warn!(
                 image = %config.image,
-                "container image not found locally; pulling from registry"
+                "container image not found locally; will pull from registry"
             );
             self.port.pull_image(&config.image).await?;
 
