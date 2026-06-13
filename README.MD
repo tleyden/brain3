@@ -7,17 +7,18 @@ I built this as my second "agent native" AI app, after building a personal flash
 
 I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  I also found [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) which provided an inspiring starting point, but I wanted a container based security-first architecture.
 
-Brain3 lets you use any AI that supports the MCP standard protocol for connectors, such as Claude, ChatGPT, and Jan.ai (open source which supports local models).  It will work on their web, desktop and mobile apps, and you can even use the built-in voice dictation features.  This makes your interactions with your markdown vault quick and effortless, especially on mobile.
+Brain3 lets you use any AI that supports the MCP standard protocol for connectors, such as Claude, ChatGPT, and Jan.ai.  It will work on their web, desktop and mobile apps, and you can even use the built-in voice dictation features.  This makes your interactions with your markdown vault quick and effortless, especially on mobile.
 
-Your markdown vault data stays 100% local and private.  This project is 100% designed with security and privacy in mind, and uses container technology to reduce the attack surface.  There is an [AI security audit](docs/security_audit.md) available, which will be done regularly on releases. 
-
-Brain3 only runs in the command line as a Terminal UI (TUI) for now, and has only been tested on MacOS and Linux.  Eventually it will be available as a standalone desktop app for less technical users.
+Brain3 only runs in the command line as a Terminal UI (TUI) for now, but it will be available as a standalone desktop menu bar app for less technical users.
 
 ## Features
 
 - Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
+- Your markdown vault data stays 100% local and private
+- Designed with security and privacy in mind, and uses container technology to reduce the attack surface
+- Includes an [AI security audit](docs/security_audit.md) available, which will be done regularly on releases.
 - Obsidian-compatible, but Obsidian not required
-- TUI app for setup
+- Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
 - **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
 
 ## Screenshots (w/ Claude Mobile)
@@ -31,11 +32,12 @@ Brain3 only runs in the command line as a Terminal UI (TUI) for now, and has onl
 
 ## Privacy and Security
 
-- Your data stays 100% local and private - the AI assistant only sees a part of your vault based on your prompts
-- Designed with security and privacy in mind, using container-based isolation and a free Cloudflare tunnel
+- Data isolation controls - the AI assistant only sees a part of your vault based on your prompts
+- Container-based filesystem and network isolation
+- Secure Cloudflare tunnels with TLS
 - OAuth2.1 with PKCE is used to authenticate with the AI provider
 - Host process written in Rust to avoid several classes of vulnerabilities
-- Container process uses the battle-tested FastMCP server framework
+- The MCP server running in the container uses the battle-tested FastMCP server framework
 - More details below in [Privacy & Security Details](#privacy--security-details)
 
 ## Requirements
