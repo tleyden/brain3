@@ -114,7 +114,7 @@ sudo apt-get install cloudflared
 
 </details>
 
-### 1. Install the latest release
+### Quick Start Step 1: Install the latest release
 
 ```bash
 curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.6/install.sh | sh
@@ -122,7 +122,7 @@ curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.6/install.sh | sh
 
 This installs `brain3` from the `v0.1.6` release.
 
-### 2. Start Brain3
+### Quick Start Step 2: Start Brain3
 
 ```bash
 brain3
@@ -134,7 +134,7 @@ On subsequent runs, Brain3 goes straight to the runtime status screen.
 
 If you want a stable hostname on your own Cloudflare-managed domain instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
 
-### 3. Connect your AI app
+### Quick Start Step 3: Connect your AI app
 
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
@@ -191,7 +191,7 @@ Refer to your AI application's documentation for client-specific setup instructi
 
 Once connected, you can ask your AI to search, organize, summarize, and edit your notes directly through Brain3.
 
-### 4. Interact with Brain3 via your AI assistant
+### Quick Start Step 4 (Final Step): Interact with Brain3 via your AI assistant
 
 Example prompt:
 `List all the files in my Brain3 vault.`
@@ -200,10 +200,10 @@ Expected result:
 Brain3 should list the files in your vault.
 
 
-## Advanced Configuration
+## Advanced Configuration Options
 
 <details>
-<summary><img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain</summary>
+<summary><img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain (recommended)</summary>
 
 Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control.
 
@@ -212,16 +212,17 @@ Named tunnels are also known to be more reliable and less likely to suffer rate 
 Brain3's normal first-run setup configures the app and defaults to a Cloudflare quick tunnel. Named tunnel provisioning is a separate guided flow:
 
 1. Run `brain3` once and complete the normal interactive setup wizard.
-2. Install `cloudflared` if it is not already available — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
-3. In `~/.brain3/.env`, set `B3_CF_TUNNEL_NAME` and `B3_CF_DOMAIN`. Set `B3_CF_TUNNEL_CONFIG_FILE` only if you want a non-default config path; otherwise Brain3 uses `.cloudflared/<tunnel-name>.yml`.
-4. Run the named tunnel provisioning wizard:
+2. Create a free Cloudflare account at [cloudflare.com](https://cloudflare.com
+3. Install `cloudflared` if it is not already available — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
+4. In `~/.brain3/.env`, set `B3_CF_TUNNEL_NAME` and `B3_CF_DOMAIN`. Set `B3_CF_TUNNEL_CONFIG_FILE` only if you want a non-default config path; otherwise Brain3 uses `.cloudflared/<tunnel-name>.yml`.
+5. Run the named tunnel provisioning wizard:
 
 ```bash
 brain3 --cf-setup
 ```
 
-5. The wizard verifies `cloudflared`, handles login if needed, creates or reuses the named tunnel, writes the config file, and configures the DNS route.
-6. Start Brain3 normally with `brain3`. It will start `cloudflared` automatically and log:
+6. The wizard verifies `cloudflared`, handles login if needed, creates or reuses the named tunnel, writes the config file, and configures the DNS route.
+7. Start Brain3 normally with `brain3`. It will start `cloudflared` automatically and log:
 
 ```
 INFO tunnel started url=https://brain3.yourdomain.com
