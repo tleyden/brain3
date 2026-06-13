@@ -1,11 +1,9 @@
 
 <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 
-Brain3 let's you interact with your markdown vault ("second brain") through Claude and ChatGPT.
+Brain3 let's you interact with your local markdown vault ("second brain") through Claude and ChatGPT - see screenshots below from Claude Mobile interacting via chat, and it also works with the built-in voice dictation features.
 
-I built this as my second "agent native" AI app, after building a personal flashcard app for learning languages (and loving it), I realized that I really wanted to access my Obsidian markdown vault in the seame way.  
-
-I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  I also found [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) which provided an inspiring starting point, but I wanted a container based security-first architecture.
+After building a personal flashcard app for learning languages as an agent native AI plugin (and loving it), I realized that I really wanted to access my Obsidian markdown vault in the same way.  
 
 Brain3 lets you use any AI that supports the MCP standard protocol for connectors, such as Claude, ChatGPT, and Jan.ai.  It will work on their web, desktop and mobile apps, and you can even use the built-in voice dictation features.  This makes your interactions with your markdown vault quick and effortless, especially on mobile.
 
@@ -353,6 +351,11 @@ Brain3 launches the setup wizard on first run and goes straight to the runtime s
 * LLMWiki features
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
+
+## Credits 
+
+* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as the MCP server starting point.
+
 
 ## License 
 
