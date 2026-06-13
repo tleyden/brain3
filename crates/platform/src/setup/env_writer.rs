@@ -66,6 +66,10 @@ fn build_overrides(
         "B3_CONTAINER_MCP_PORT",
         draft.container_mcp_port.to_string(),
     );
+    values.insert(
+        "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION",
+        draft.container_network_isolated.to_string(),
+    );
     values.insert("B3_OAUTH2_PKCE_REQUIRED", draft.pkce_required.to_string());
     values.insert(
         "B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK",

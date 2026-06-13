@@ -22,6 +22,11 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         dev_mode,
         "ensuring MCP container is running"
     );
+    tracing::info!(
+        container = %startup.container_name,
+        network_isolated = startup.network_isolated,
+        "resolved MCP container network isolation mode"
+    );
 
     let port: Arc<dyn ContainerPort> = match startup.runtime {
         ContainerRuntime::Docker => Arc::new(DockerContainerAdapter),
@@ -79,7 +84,7 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
     let config = ContainerConfig {
         image: startup.image.clone(),
         name: startup.container_name.clone(),
-        network_isolated: true,
+        network_isolated: startup.network_isolated,
         port_mappings: vec![PortMapping {
             host_address: "127.0.0.1".into(),
             host_port: startup.host_port,

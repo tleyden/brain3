@@ -407,6 +407,7 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     let mut lines = vec![
         muted_line("Override ports if the defaults conflict with other services on this machine."),
         muted_line("Toggle security settings only if your client requires it."),
+        muted_line("Disable internal-only networking only as a compatibility fallback."),
         blank_line(),
     ];
 
@@ -462,29 +463,30 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         pkce_badge,
     ]));
 
-    let hostname_active = state.ports_focus == PortsField::EnforceHostnameCheck;
-    let hostname_badge = if state.draft.enforce_hostname_check {
-        badge_span("Enabled", Color::Green)
-    } else {
-        badge_span("Disabled", Color::Yellow)
-    };
-    let hostname_pointer = if hostname_active {
-        Span::styled("▶ ", accent_style())
-    } else {
-        Span::styled("  ", muted_style())
-    };
-    lines.push(Line::from(vec![
-        hostname_pointer,
-        Span::styled(
-            "Enforce hostname check: ".to_string(),
-            if hostname_active {
-                accent_style()
-            } else {
-                label_style()
-            },
-        ),
-        hostname_badge,
-    ]));
+    lines.push(field_badge_line(
+        "Enforce hostname check",
+        if state.draft.enforce_hostname_check {
+            badge_span("Enabled", Color::Green)
+        } else {
+            badge_span("Disabled", Color::Yellow)
+        },
+        state.ports_focus == PortsField::EnforceHostnameCheck,
+    ));
+    lines.push(field_badge_line(
+        "Internal-only container networking",
+        if state.draft.container_network_isolated {
+            badge_span("Enabled", Color::Green)
+        } else {
+            badge_span("Disabled", Color::Yellow)
+        },
+        state.ports_focus == PortsField::ContainerNetworkIsolation,
+    ));
+    lines.push(muted_line(
+        "Enabled removes the MCP container's default outbound route for maximum isolation.",
+    ));
+    lines.push(muted_line(
+        "Disabled uses the runtime's normal bridge/default network for VPS compatibility.",
+    ));
 
     lines
 }
@@ -571,6 +573,15 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
                 badge_span("Disabled", Color::Yellow)
             },
             f == SummaryField::HostnameCheck,
+        ),
+        field_badge_line(
+            "Internal-only container networking",
+            if state.draft.container_network_isolated {
+                badge_span("Enabled", Color::Green)
+            } else {
+                badge_span("Disabled", Color::Yellow)
+            },
+            f == SummaryField::ContainerNetworkIsolation,
         ),
         key_value_line(
             "Container runtime",
@@ -1150,6 +1161,7 @@ mod tests {
                     container_image: release::default_container_image(),
                     container_host_port: 8420,
                     container_mcp_port: 8420,
+                    container_network_isolated: true,
                     pkce_required: true,
                     enforce_hostname_check: true,
                     direct_public_origin_hostname: None,
@@ -1200,6 +1212,7 @@ mod tests {
                     upstream_secret_dir: PathBuf::from("/tmp"),
                     host_port: 8420,
                     container_port: 8420,
+                    network_isolated: true,
                     dev_mount_source: None,
                 }),
                 tunnel: None,
