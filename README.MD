@@ -362,7 +362,7 @@ Brain3 launches the setup wizard on first run and goes straight to the runtime s
 
 ## Credits 
 
-* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as the MCP server starting point.
+* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as actual code used in the MCP server itself as a starting point.
 
 
 ## License 
