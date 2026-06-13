@@ -286,33 +286,9 @@ Once connected, your AI app has access to these vault tools:
 
 ## Developers / Contributors
 
-### Running tests
-
-```bash
-cargo test
-```
-
-### Building
-
-```bash
-cargo build --release
-```
-
-## Build from Source (Developers)
-
 ### Prerequisites
 
 Refer to the [Quick Start](#quick-start) prerequisites above.
-
-### Install a PR build
-
-PR install scripts are published at `https://brain3.s3.amazonaws.com/pr/<PR_NUMBER>/install.sh` while the PR is open.
-
-```bash
-curl -sSfL https://brain3.s3.amazonaws.com/pr/123/install.sh | sh
-```
-
-Replace `123` with the pull request number.
 
 ### Clone and build from source
 
@@ -323,6 +299,22 @@ cargo build --release
 ```
 
 The binary is at `./target/release/brain3`.
+
+### Running tests
+
+```bash
+cargo test
+```
+
+### Install a PR build
+
+PR install scripts are published at `https://brain3.s3.amazonaws.com/pr/<PR_NUMBER>/install.sh` while the PR is open.
+
+```bash
+curl -sSfL https://brain3.s3.amazonaws.com/pr/123/install.sh | sh
+```
+
+Replace `123` with the pull request number.
 
 ### Start Brain3
 
