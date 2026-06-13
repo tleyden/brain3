@@ -9,9 +9,9 @@ I built this in order to access my Obsidian markdown vault via the Claude mobile
 
 It is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for 3rd-party connectors, such as:
 
-* Claude (web/desktop/mobile)
-* ChatGPT (web/desktop/mobile)
-* Jan.ai (dekstop) - supports local models such as Gemma4.  
+* <img height="20" src="docs/logos/claude.svg" alt="Claude"> Claude (web/desktop/mobile)
+* <img height="20" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT (web/desktop/mobile)
+* <img height="20" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai (dekstop) - supports local models such as Gemma4.  
 
 Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will also be available as a standalone desktop menu bar app.  See the [roadmap](#roadmap) below for more details.
 
@@ -355,8 +355,9 @@ Brain3 launches the setup wizard on first run and goes straight to the runtime s
 
 ## Roadmap
 
-* Improve search
-* LLMWiki features
+* Create a documentation website
+* Improve search accuracy
+* Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
 
