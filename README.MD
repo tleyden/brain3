@@ -17,11 +17,10 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 
 ## Features
 
-- Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
 - Your markdown vault data stays 100% local and private
-- Designed with security and privacy in mind, and uses container technology to reduce the attack surface
+- Designed with security and privacy in mind, and uses Docker and Native MacOS container technology to reduce the attack surface
 - Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) available, which will be done regularly on releases.
-- Remotely accessible via MCP with OAuth 2.1, and therefore works across web, desktop and mobile AI assistant apps.
+- Remotely accessible via MCP with OAuth 2.1, which enables access from web, desktop and mobile AI assistant apps.
 - Compatible with voice dictation for AI assistants that support it, such as Claude and ChatGPT.
 - Obsidian-compatible (but Obsidian not required)
 - Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
