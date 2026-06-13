@@ -46,6 +46,7 @@ pub enum ContainerRuntime {
 pub struct ContainerConfig {
     pub image: String,
     pub name: String,
+    pub network_isolated: bool,
     pub port_mappings: Vec<PortMapping>,
     pub env_vars: Vec<(String, String)>,
     pub bind_mounts: Vec<BindMount>,

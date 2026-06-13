@@ -62,9 +62,7 @@ impl ConfigPort for EnvFileConfigAdapter {
             &DEFAULT_REFRESH_TOKEN_LIFETIME_SECS.to_string(),
         )
         .parse::<u64>()
-        .map_err(|e| {
-            ConfigError::Invalid(format!("B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS: {e}"))
-        })?;
+        .map_err(|e| ConfigError::Invalid(format!("B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS: {e}")))?;
         if refresh_token_lifetime_secs == 0 {
             return Err(ConfigError::Invalid(
                 "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS must be greater than 0".into(),
