@@ -202,7 +202,8 @@ Brain3 should list the files in your vault.
 
 ## Advanced Configuration
 
-### <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain
+<details>
+<summary><img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain</summary>
 
 Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control.
 
@@ -226,7 +227,10 @@ brain3 --cf-setup
 INFO tunnel started url=https://brain3.yourdomain.com
 ```
 
-### Direct public origin
+</details>
+
+<details>
+<summary>Tunneling alternative: Direct public origin</summary>
 
 This is an alternative to a Cloudflare Tunnel if tunnels are not practical in your environment. It is less preferred because it involves exposing ports more directly, so only use it when a Cloudflare Tunnel is not a workable option.
 
@@ -240,11 +244,14 @@ brain3.yourdomain.com {
 }
 ```
 
+</details>
+
 ## Configuration Reference
 
 All configuration is via environment variables, loaded from a `.env` file.
 
-### Brain3 App
+<details>
+<summary>Brain3 Environment Variables</summary>
 
 | Variable | Default | Description |
 |---|---|---|
@@ -269,7 +276,32 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`. New installs default to the Brain3 release-matched tag; `:latest` is still published but must be chosen explicitly. |
 | `B3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 
-### MCP container image selection
+</details>
+
+
+<details>
+<summary>MD Vault MCP Tools</summary>
+
+Once connected, your AI app has access to these vault tools:
+
+| Tool | Description |
+|---|---|
+| `vault_read` | Read a file or line range. Returns a content hash for safe patching. |
+| `vault_create_overwrite_file` | Create a new note or replace an existing one entirely. |
+| `vault_apply_unified_diff` | Apply a unified diff to an existing file. Preferred for precise edits. |
+| `vault_batch_frontmatter_update` | Update YAML frontmatter fields across one or more files. |
+| `vault_search` | Full-text search across the vault. |
+| `vault_search_frontmatter` | Search by frontmatter field values. |
+| `vault_list` | List files and directories in the vault. |
+| `vault_move` | Move or rename a file. |
+| `vault_delete` | Delete a file. |
+
+</details>
+
+## Developers / Contributors
+
+<details>
+<summary>MCP container image selection</summary>
 
 Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. The registry still publishes `:latest`, but Brain3 does not select it automatically for new installs.
 
@@ -286,23 +318,7 @@ On an already configured install, `--container-tag` overrides the MCP container 
 
 The runtime status screen now reports whether the container is actually `Ready` or `Failed` after startup verification. If the container exits early, Brain3 shows the failure summary and log path instead of incorrectly reporting a successful start.
 
-## MD Vault MCP Tools
-
-Once connected, your AI app has access to these vault tools:
-
-| Tool | Description |
-|---|---|
-| `vault_read` | Read a file or line range. Returns a content hash for safe patching. |
-| `vault_create_overwrite_file` | Create a new note or replace an existing one entirely. |
-| `vault_apply_unified_diff` | Apply a unified diff to an existing file. Preferred for precise edits. |
-| `vault_batch_frontmatter_update` | Update YAML frontmatter fields across one or more files. |
-| `vault_search` | Full-text search across the vault. |
-| `vault_search_frontmatter` | Search by frontmatter field values. |
-| `vault_list` | List files and directories in the vault. |
-| `vault_move` | Move or rename a file. |
-| `vault_delete` | Delete a file. |
-
-## Developers / Contributors
+</details>
 
 ### Prerequisites
 
