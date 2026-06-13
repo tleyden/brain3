@@ -36,15 +36,6 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 <td colspan="2" align="center">Chatting w/ Brain3 MCP and showing tool calls</td>
 </tr></table>
 
-## Privacy and Security
-
-- 🔒 Data isolation controls - the AI assistant only sees a part of your vault based on your prompts
-- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem and network isolation
-- <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS
-- <img height="16" src="docs/logos/oauth.svg" alt="OAuth"> OAuth2.1 with PKCE is used to authenticate with the AI provider
-- 🦀 Host process written in Rust to avoid several classes of vulnerabilities
-- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
-- More details below in [Privacy & Security Details](#privacy--security-details)
 
 ## Requirements
 
@@ -52,6 +43,36 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 * <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Cloudflare Tunnel - but no account needed, and it's a one-liner install.
 * AI Assistant (e.g. <img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT, <img height="16" src="docs/logos/claude.svg" alt="Claude"> Claude, etc) 
 * 🏠 If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to how OpenClaw works (got mac mini?).
+
+<details>
+<summary>🔒 Privacy & Security Details</summary>
+
+- 🛡️ Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) available, which will be done regularly on releases.
+- 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
+- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem and network isolation; no other host directories are mounted unless you enable dev mode
+- <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS; `cloudflared` creates outbound-only connections so Brain3 does not need a publicly routable IP
+- <img height="16" src="docs/logos/oauth.svg" alt="OAuth"> OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens — no open registration (DCR/CIMD disabled)
+- 🦀 Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities
+- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
+- You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
+
+### Trusted 3rd Parties
+
+- ⚠️ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
+
+### Authentication & Authorization
+
+- Client secret is required at token exchange (`client_secret_post`).
+- Auth codes are single-use and expire after 5 minutes.
+
+### Request Integrity
+
+- Bearer-token validation on all `/mcp` routes.
+- Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured.
+- Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
+- Constant-time comparison for all secret and token checks.
+
+</details>
 
 ## Quick Start
 
@@ -178,13 +199,11 @@ Example prompt:
 Expected result:
 Brain3 should list the files in your vault.
 
-## Privacy & Security Details
-
-See [docs/privacy_and_security_details.md](docs/privacy_and_security_details.md).
 
 ## Advanced Configuration
 
-### <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain
+<details>
+<summary><img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain</summary>
 
 Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control.
 
@@ -208,7 +227,10 @@ brain3 --cf-setup
 INFO tunnel started url=https://brain3.yourdomain.com
 ```
 
-### Direct public origin
+</details>
+
+<details>
+<summary>Tunneling alternative: Direct public origin</summary>
 
 This is an alternative to a Cloudflare Tunnel if tunnels are not practical in your environment. It is less preferred because it involves exposing ports more directly, so only use it when a Cloudflare Tunnel is not a workable option.
 
@@ -222,11 +244,14 @@ brain3.yourdomain.com {
 }
 ```
 
+</details>
+
 ## Configuration Reference
 
 All configuration is via environment variables, loaded from a `.env` file.
 
-### Brain3 App
+<details>
+<summary>Brain3 Environment Variables</summary>
 
 | Variable | Default | Description |
 |---|---|---|
@@ -251,24 +276,11 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`. New installs default to the Brain3 release-matched tag; `:latest` is still published but must be chosen explicitly. |
 | `B3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 
-### MCP container image selection
+</details>
 
-Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. The registry still publishes `:latest`, but Brain3 does not select it automatically for new installs.
 
-If an older Brain3 config still contains the exact official `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` image, Brain3 now treats that as a legacy default and remaps it to the current release-matched tag for that run. Use `--container-tag latest` if you explicitly want to stay on `:latest`.
-
-If you need a different published MCP image for a single launch or while creating a brand-new config, use `--container-tag`:
-
-```bash
-brain3 --container-tag latest
-brain3 --container-tag pr-123
-```
-
-On an already configured install, `--container-tag` overrides the MCP container image for that launch only. During first-run setup, the selected tag becomes the image written into the new config.
-
-The runtime status screen now reports whether the container is actually `Ready` or `Failed` after startup verification. If the container exits early, Brain3 shows the failure summary and log path instead of incorrectly reporting a successful start.
-
-## MD Vault MCP Tools
+<details>
+<summary>MD Vault MCP Tools</summary>
 
 Once connected, your AI app has access to these vault tools:
 
@@ -283,6 +295,8 @@ Once connected, your AI app has access to these vault tools:
 | `vault_list` | List files and directories in the vault. |
 | `vault_move` | Move or rename a file. |
 | `vault_delete` | Delete a file. |
+
+</details>
 
 ## Developers / Contributors
 
@@ -323,6 +337,24 @@ Replace `123` with the pull request number.
 ```
 
 Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) fo r the full flow.
+
+<details>
+<summary>MCP container image selection</summary>
+
+Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version.
+
+If you need a different published MCP image for a single launch or while creating a brand-new config, use `--container-tag`:
+
+```bash
+brain3 --container-tag latest
+brain3 --container-tag pr-123
+```
+
+On an already configured install, `--container-tag` overrides the MCP container image for that launch only. During first-run setup, the selected tag becomes the image written into the new config.
+
+The runtime status screen now reports whether the container is actually `Ready` or `Failed` after startup verification. If the container exits early, Brain3 shows the failure summary and log path instead of incorrectly reporting a successful start.
+
+</details>
 
 ## Roadmap
 
