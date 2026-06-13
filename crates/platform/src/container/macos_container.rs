@@ -7,16 +7,18 @@ use super::MCP_NETWORK_NAME;
 
 pub struct MacOsContainerAdapter;
 
-async fn ensure_internal_network(name: &str) -> Result<(), ContainerError> {
-    match run_command("container", &["network", "create", "--internal", name]).await {
-        Ok(_) => Ok(()),
-        Err(ContainerError::CommandFailed { ref stderr, .. })
-            if stderr.contains("already exists") =>
-        {
-            Ok(())
-        }
-        Err(e) => Err(e),
+async fn recreate_internal_network(name: &str) -> Result<(), ContainerError> {
+    if command_succeeds("container", &["network", "inspect", name]).await? {
+        tracing::info!(
+            network = name,
+            "removing existing MCP network before recreation"
+        );
+        run_command("container", &["network", "rm", name]).await?;
     }
+
+    tracing::info!(network = name, "creating fresh internal MCP network");
+    run_command("container", &["network", "create", "--internal", name]).await?;
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -47,6 +49,20 @@ impl ContainerPort for MacOsContainerAdapter {
     async fn logs_tail(&self, id: &ContainerId, lines: usize) -> Result<String, ContainerError> {
         let lines = lines.to_string();
         run_command("container", &["logs", "--tail", &lines, &id.0]).await
+    }
+
+    async fn prepare_network_isolation(&self) -> Result<bool, ContainerError> {
+        match recreate_internal_network(MCP_NETWORK_NAME).await {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    network = MCP_NETWORK_NAME,
+                    "network recreation failed; starting MCP container without outbound restrictions"
+                );
+                Ok(false)
+            }
+        }
     }
 
     async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
@@ -88,22 +104,8 @@ impl ContainerPort for MacOsContainerAdapter {
             args.push(wd.clone());
         }
         if config.network_isolated {
-            tracing::info!(
-                network = MCP_NETWORK_NAME,
-                "applying internal network isolation to MCP container"
-            );
-            match ensure_internal_network(MCP_NETWORK_NAME).await {
-                Ok(()) => {
-                    args.push("--network".into());
-                    args.push(MCP_NETWORK_NAME.into());
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "⚠ Network isolation unavailable — MCP container will start without outbound restrictions"
-                    );
-                }
-            }
+            args.push("--network".into());
+            args.push(MCP_NETWORK_NAME.into());
         }
         args.push(config.image.clone());
         for c in &config.command {
