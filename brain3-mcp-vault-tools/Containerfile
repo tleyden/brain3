@@ -18,6 +18,4 @@ RUN uv sync --locked --no-dev --no-editable
 
 ENV PATH="/opt/brain3-mcp-vault-tools/.venv/bin:${PATH}"
 
-EXPOSE 8420
-
 CMD ["brain3-mcp-vault-tools"]
