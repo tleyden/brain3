@@ -1,18 +1,23 @@
 
 <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 
-## Why This Exists
+Brain3 let's you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or whatever you use as your preferred AI assistant.
 
-I wanted a simple way to interact with my Obsidian markdown vault ("second brain") through Claude and ChatGPT, including their desktop and mobile apps.
+I built this because I realized that I really wanted to access my Obsidian markdown vault via the Claude mobile app using both text and voice.  I found it to be a very seamless way to interact with your second brain: for example, as you discover new ideas and knowledge with your AI assistant, you can quickly save that to your vault without leaving the app.
 
-I looked into OpenClaw and Hermes, but they both felt like overkill for my needs.  [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, but I wanted a container based security-first architecture. 
+I designed it specifcally to use open standards and let you use *any* AI that supports the Model Context Protocol (MCP) standard for connectors, such as Claude, ChatGPT, and even Jan.ai, which supports local models.  Since it's a remotely accessible MCP with OAuth 2.1, you can configure it via their GUI and it will work across web, desktop and mobile.  You can even use the built-in voice dictation features, which makes your interactions with your markdown vault quick and effortless, especially on mobile.
+
+Brain3 runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will be available as a standalone desktop menu bar app for less technical users.
 
 ## Features
 
 - Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
+- Your markdown vault data stays 100% local and private
+- Designed with security and privacy in mind, and uses container technology to reduce the attack surface
+- Includes an [AI security audit](docs/security_audit.md) available, which will be done regularly on releases.
 - Obsidian-compatible, but Obsidian not required
-- TUI app for setup
-- **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) to ensure that the quality bar stays high.
+- Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
+- **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
 
 ## Screenshots (w/ Claude Mobile)
 
@@ -25,11 +30,12 @@ I looked into OpenClaw and Hermes, but they both felt like overkill for my needs
 
 ## Privacy and Security
 
-- Your data stays 100% local and private - the AI assistant only sees a part of your vault based on your prompts
-- Designed with security and privacy in mind, using container-based isolation and a free Cloudflare tunnel
+- Data isolation controls - the AI assistant only sees a part of your vault based on your prompts
+- Container-based filesystem and network isolation
+- Secure Cloudflare tunnels with TLS
 - OAuth2.1 with PKCE is used to authenticate with the AI provider
 - Host process written in Rust to avoid several classes of vulnerabilities
-- Container process uses the battle-tested FastMCP server framework
+- The MCP server running in the container uses the battle-tested FastMCP server framework
 - More details below in [Privacy & Security Details](#privacy--security-details)
 
 ## Requirements
@@ -345,6 +351,11 @@ Brain3 launches the setup wizard on first run and goes straight to the runtime s
 * LLMWiki features
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
+
+## Credits 
+
+* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as the MCP server starting point.
+
 
 ## License 
 
