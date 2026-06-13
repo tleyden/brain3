@@ -39,10 +39,10 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 
 - 🔒 Data isolation controls - the AI assistant only sees a part of your vault based on your prompts
 - <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem and network isolation
-- Secure Cloudflare tunnels with TLS
-- OAuth2.1 with PKCE is used to authenticate with the AI provider
+- <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS
+- <img height="16" src="docs/logos/oauth.svg" alt="OAuth"> OAuth2.1 with PKCE is used to authenticate with the AI provider
 - 🦀 Host process written in Rust to avoid several classes of vulnerabilities
-- The MCP server running in the container uses the battle-tested FastMCP server framework
+- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
 - More details below in [Privacy & Security Details](#privacy--security-details)
 
 ## Requirements
@@ -50,7 +50,7 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 * OS: MacOS, Linux - Windows would work in theory, but I don't have a testing machine.
 * Cloudflare Tunnel - but no account needed, and it's a one-liner install.
 * AI Assistant (e.g. ChatGPT, Claude, etc) 
-* If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to openclaw.
+* If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to how OpenClaw works (got mac mini?).
 
 ## Quick Start
 
