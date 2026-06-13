@@ -301,11 +301,15 @@ Once connected, your AI app has access to these vault tools:
 
 ## Developers / Contributors
 
-### Install Prerequisites
+<details>
+<summary><strong>Install Prerequisites</strong></summary>
 
 Refer to the [Quick Start](#quick-start) prerequisites above.
 
-### Clone and build from source
+</details>
+
+<details>
+<summary><strong>Clone and build from source</strong></summary>
 
 ```bash
 git clone https://github.com/tleyden/brain3.git
@@ -313,21 +317,30 @@ cd brain3
 cargo build --release
 ```
 
-### Start Brain3
+</details>
+
+<details>
+<summary><strong>Start Brain3</strong></summary>
 
 ```bash
 ./target/release/brain3
 ```
 
-Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) fo r the full flow.
+Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) for the full flow.
 
-### Running tests
+</details>
+
+<details>
+<summary><strong>Running tests</strong></summary>
 
 ```bash
 cargo test
 ```
 
-### Install a PR build
+</details>
+
+<details>
+<summary><strong>Install a PR build</strong></summary>
 
 PR install scripts are published at `https://brain3.s3.amazonaws.com/pr/<PR_NUMBER>/install.sh` while the PR is open.
 
@@ -336,6 +349,8 @@ curl -sSfL https://brain3.s3.amazonaws.com/pr/123/install.sh | sh
 ```
 
 Replace `123` with the pull request number.
+
+</details>
 
 <details>
 <summary>MCP container image selection</summary>
