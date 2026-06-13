@@ -1,13 +1,13 @@
 
 <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 
-Brain3 let's you interact with your local markdown vault ("second brain") through Claude and ChatGPT - see screenshots below from Claude Mobile interacting via chat, and it also works with the built-in voice dictation features.
+Brain3 let's you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or whatever you use as your preferred AI assistant.
 
-After building a personal flashcard app for learning languages as an agent native AI plugin (and loving it), I realized that I really wanted to access my Obsidian markdown vault in the same way.  
+I built this because I realized that I really wanted to access my Obsidian markdown vault via the Claude mobile app using both text and voice.  I found it to be a very seamless way to interact with your second brain: for example, as you discover new ideas and knowledge with your AI assistant, you can quickly save that to your vault without leaving the app.
 
-Brain3 lets you use any AI that supports the MCP standard protocol for connectors, such as Claude, ChatGPT, and Jan.ai.  It will work on their web, desktop and mobile apps, and you can even use the built-in voice dictation features.  This makes your interactions with your markdown vault quick and effortless, especially on mobile.
+I designed it specifcally to use open standards and let you use *any* AI that supports the Model Context Protocol (MCP) standard for connectors, such as Claude, ChatGPT, and even Jan.ai, which supports local models.  Since it's a remotely accessible MCP with OAuth 2.1, you can configure it via their GUI and it will work across web, desktop and mobile.  You can even use the built-in voice dictation features, which makes your interactions with your markdown vault quick and effortless, especially on mobile.
 
-Brain3 only runs in the command line as a Terminal UI (TUI) for now, but it will be available as a standalone desktop menu bar app for less technical users.
+Brain3 runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will be available as a standalone desktop menu bar app for less technical users.
 
 ## Features
 
