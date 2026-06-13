@@ -393,43 +393,61 @@ The MCP container is started with no `--network` argument. Docker's default beha
 
 The vault is mounted read-write (finding 3.3). A supply-chain compromise of a Python dependency inside the container image — or RCE via a maliciously crafted vault file or MCP tool call — gives an attacker a read-write handle on your entire knowledge base **and** an unrestricted outbound channel to exfiltrate it silently.
 
-**Recommendation — Docker:**
+**Recommendation — Docker and macOS containers:**
 
-Create a named Docker network with the `--internal` flag, which removes the default route so containers cannot reach external hosts. Port mappings from the Docker host are handled by kernel-level iptables rules that operate independently of the container's routing table, so `127.0.0.1:8420 → container:8420` continues to work normally.
+The domain model expresses *intent* rather than mechanism:
 
 ```rust
-// ContainerConfig addition (crates/core/src/domain/model.rs)
-pub network: Option<String>,   // e.g. "brain3-mcp-net"
+// ContainerConfig (crates/core/src/domain/model.rs)
+pub network_isolated: bool,
 ```
 
+Each adapter translates this into the appropriate runtime command. Both Docker and macOS use the same conceptual approach: create an internal named network, then attach the container to it.
+
+**Docker adapter** (`crates/platform/src/container/docker.rs`):
+
+Create the network once (idempotent) and pass `--network`:
+
 ```rust
-// DockerContainerAdapter::run (crates/platform/src/container/docker.rs)
-if let Some(ref net) = config.network {
-    args.push("--network".into());
-    args.push(net.clone());
+// Private helper — never on the ContainerPort trait
+async fn ensure_internal_network(name: &str) -> Result<(), ContainerError> {
+    // treat "already exists" as success
 }
 ```
 
-Brain3 should create the network on first run if absent:
-
+In `run()`, when `config.network_isolated`:
 ```bash
 docker network create --internal brain3-mcp-net
+docker run --network brain3-mcp-net ...
 ```
 
-Or equivalently from Rust before calling `container run`:
+Port mappings (`-p 127.0.0.1:8420:8420`) continue to work — Docker's iptables port-forward rules operate at the kernel level, independently of the container's routing table.
 
-```rust
-run_command("docker", &["network", "create", "--internal", "brain3-mcp-net"]).await
-    .or_else(|_| Ok(())); // idempotent — "already exists" is not an error
-```
+**macOS containers adapter** (`crates/platform/src/container/macos_container.rs`):
 
-**macOS containers:** Apple's `container` CLI (as of June 2026) does not expose a `--network internal` equivalent or custom bridge networks. Mitigation on macOS is to add a PF firewall rule blocking outbound connections from the container's vnet interface. Document this gap until the `container` CLI gains network policy support.
+Apple's `container` CLI introduced `container network create` (including `--internal`) in macOS 26. The same pattern as Docker should be attempted:
 
-**Verification after implementation:**
 ```bash
-docker exec brain3-mcp-vault-tools curl --max-time 3 https://example.com
-# Expected: connection attempt times out or is refused
+container network create --internal brain3-mcp-net
+container run --network brain3-mcp-net ...
 ```
+
+Three upstream issues are relevant to understanding the current state of this feature on Apple containers:
+
+- **[Issue #1037 — Host connectivity with `--network none`](https://github.com/apple/container/issues/1037):** `--network none` is too restrictive — it removes all network interfaces and breaks port publishing, which Brain3 requires. Do not use `--network none`; use an `--internal` named network instead.
+- **[Discussion #1170 — macOS 26 network isolation](https://github.com/apple/container/discussions/1170):** An Apple maintainer explicitly describes the `container network create --internal` pattern as the supported approach for isolated workloads. This closely mirrors Docker's model and is the basis for attempting it in the macOS adapter.
+- **[Issue #1320 — Prevent host access on internal networks](https://github.com/apple/container/issues/1320):** Confirms that `container network create --internal` already blocks external internet routing. A host gateway IP remains reachable (the reporter considers this a security gap; for Brain3 this is acceptable and expected — the gateway must be able to reach the container). Open question is whether port publishing (`-p`) works alongside `--internal`; this needs empirical verification on macOS 26 before shipping.
+
+**Verification after implementation (both runtimes):**
+```bash
+# From inside the container — should fail
+docker exec brain3-mcp-vault-tools curl --max-time 3 https://example.com
+
+# From the host — should succeed
+curl http://127.0.0.1:8420/health
+```
+
+If port publishing does not work with `--internal` on the installed macOS version, the startup health check will surface a container failure. In that case, a PF firewall rule blocking outbound from the container's vnet interface is the fallback until Apple resolves the compatibility gap.
 
 ---
 
@@ -693,7 +711,7 @@ The following security features are implemented in v0.1.6 but not mentioned in t
 
 ## Prioritized Remediation Order
 
-1. **Block MCP container outbound internet** (3.7) — HIGH severity; one Docker network change eliminates the vault exfiltration vector entirely. Also resolves 3.8 as a side-effect. macOS: add PF rule as interim mitigation until `container` CLI gains network policy support.
+1. **Block MCP container outbound internet** (3.7) — HIGH severity; one network configuration change eliminates the vault exfiltration vector for both Docker and macOS (Apple introduced `container network create --internal` in macOS 26 — see Discussion #1170). Also resolves 3.8 as a side-effect. If port publishing with an internal network turns out to be broken on a given macOS version (Issue #1037), the startup health check will surface it and a PF firewall rule is the fallback.
 2. **Fix `resolve_base_url` to use configured hostname** (1.3) — prevents host header injection across OAuth metadata and MCP protected-resource metadata.
 3. **Allowlist `redirect_uri`** (1.4) — blocks open redirects and code interception; straightforward config addition.
 4. **Move upstream secret out of `/tmp`** (3.4) — easy default path change plus symlink guard.
