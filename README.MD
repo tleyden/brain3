@@ -1,23 +1,30 @@
 
 <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 
-Brain3 let's you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or whatever you use as your preferred AI assistant.
+Brain3 let's you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
 
-I built this because I realized that I really wanted to access my Obsidian markdown vault via the Claude mobile app using both text and voice.  I found it to be a very seamless way to interact with your second brain: for example, as you discover new ideas and knowledge with your AI assistant, you can quickly save that to your vault without leaving the app.
+**Why This Exists**
 
-I designed it specifcally to use open standards and let you use *any* AI that supports the Model Context Protocol (MCP) standard for connectors, such as Claude, ChatGPT, and even Jan.ai, which supports local models.  Since it's a remotely accessible MCP with OAuth 2.1, you can configure it via their GUI and it will work across web, desktop and mobile.  You can even use the built-in voice dictation features, which makes your interactions with your markdown vault quick and effortless, especially on mobile.
+I built this in order to access my Obsidian markdown vault via the Claude mobile app using both text and voice, which provides a powerful and seamless interface. For example, as you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.**
 
-Brain3 runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will be available as a standalone desktop menu bar app for less technical users.
+It is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for 3rd-party connectors, such as:
+
+* <img height="20" src="docs/logos/claude.svg" alt="Claude"> Claude (🌐/🖥️/📱)
+* <img height="20" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT (🌐/🖥️/📱)
+* <img height="20" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai (🖥️) - supports local models such as Gemma4.  
+
+Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will also be available as a standalone desktop menu bar app.  See the [roadmap](#roadmap) below for more details.
 
 ## Features
 
-- Interact with a directory of local files with your favorite AI app from Desktop, Mobile and Web. (read, summarize, create, edit)
-- Your markdown vault data stays 100% local and private
-- Designed with security and privacy in mind, and uses container technology to reduce the attack surface
-- Includes an [AI security audit](docs/security_audit.md) available, which will be done regularly on releases.
-- Obsidian-compatible, but Obsidian not required
-- Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
-- **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
+- 🔐 Your markdown vault data stays 100% local and private
+- Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native MacOS container technology](https://github.com/apple/container) to reduce the attack surface
+- 🛡️ Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) available, which will be done regularly on releases.
+- 🔌 Remotely accessible via MCP with OAuth 2.1, which enables access from web, desktop and mobile AI assistant apps.
+- 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
+- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian-compatible (but Obsidian not required)
+- <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
+- 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
 
 ## Screenshots (w/ Claude Mobile)
 
@@ -30,12 +37,12 @@ Brain3 runs locally or on your cloud Virtual Private Server (VPS) in the command
 
 ## Privacy and Security
 
-- Data isolation controls - the AI assistant only sees a part of your vault based on your prompts
-- Container-based filesystem and network isolation
-- Secure Cloudflare tunnels with TLS
-- OAuth2.1 with PKCE is used to authenticate with the AI provider
-- Host process written in Rust to avoid several classes of vulnerabilities
-- The MCP server running in the container uses the battle-tested FastMCP server framework
+- 🔒 Data isolation controls - the AI assistant only sees a part of your vault based on your prompts
+- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem and network isolation
+- <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS
+- <img height="16" src="docs/logos/oauth.svg" alt="OAuth"> OAuth2.1 with PKCE is used to authenticate with the AI provider
+- 🦀 Host process written in Rust to avoid several classes of vulnerabilities
+- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
 - More details below in [Privacy & Security Details](#privacy--security-details)
 
 ## Requirements
@@ -43,7 +50,7 @@ Brain3 runs locally or on your cloud Virtual Private Server (VPS) in the command
 * OS: MacOS, Linux - Windows would work in theory, but I don't have a testing machine.
 * Cloudflare Tunnel - but no account needed, and it's a one-liner install.
 * AI Assistant (e.g. ChatGPT, Claude, etc) 
-* If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to openclaw.
+* If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to how OpenClaw works (got mac mini?).
 
 ## Quick Start
 
@@ -183,8 +190,8 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 
 ### Authentication & Authorization
 
-- Preregistered clients only. Solely the client configured via `B3_OAUTH2_GATEWAY_CLIENT_ID` and `B3_OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic Client Registration (DCR) and Client ID Metadata Document (CIMD) are disabled.
-- Client secret required at token exchange (`client_secret_post`).
+- Only the client you configure via `B3_OAUTH2_GATEWAY_CLIENT_ID` and `B3_OAUTH2_GATEWAY_CLIENT_SECRET` can get tokens — no open registration (DCR/CIMD are disabled).
+- Client secret is required at token exchange (`client_secret_post`).
 - PKCE (`S256`) enforced by default to prevent authorization-code interception.
 - Auth codes are single-use and expire after 5 minutes.
 
@@ -347,14 +354,15 @@ Brain3 launches the setup wizard on first run and goes straight to the runtime s
 
 ## Roadmap
 
-* Improve search
-* LLMWiki features
+* Create a documentation website
+* Improve search accuracy
+* Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
 
 ## Credits 
 
-* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as the MCP server starting point.
+* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as actual code used in the MCP server itself as a starting point.
 
 
 ## License 
