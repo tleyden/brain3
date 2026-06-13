@@ -288,6 +288,7 @@ mod tests {
         ContainerConfig {
             image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
             name: "brain3-mcp-vault-tools".into(),
+            network_isolated: false,
             port_mappings: vec![],
             env_vars: vec![],
             bind_mounts: vec![],

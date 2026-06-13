@@ -3,8 +3,21 @@ use brain3_core::domain::model::ContainerConfig;
 use brain3_core::ports::container::{ContainerId, ContainerPort};
 
 use super::process::{command_succeeds, run_command};
+use super::MCP_NETWORK_NAME;
 
 pub struct MacOsContainerAdapter;
+
+async fn ensure_internal_network(name: &str) -> Result<(), ContainerError> {
+    match run_command("container", &["network", "create", "--internal", name]).await {
+        Ok(_) => Ok(()),
+        Err(ContainerError::CommandFailed { ref stderr, .. })
+            if stderr.contains("already exists") =>
+        {
+            Ok(())
+        }
+        Err(e) => Err(e),
+    }
+}
 
 #[async_trait::async_trait]
 impl ContainerPort for MacOsContainerAdapter {
@@ -73,6 +86,24 @@ impl ContainerPort for MacOsContainerAdapter {
         if let Some(ref wd) = config.workdir {
             args.push("--workdir".into());
             args.push(wd.clone());
+        }
+        if config.network_isolated {
+            tracing::info!(
+                network = MCP_NETWORK_NAME,
+                "applying internal network isolation to MCP container"
+            );
+            match ensure_internal_network(MCP_NETWORK_NAME).await {
+                Ok(()) => {
+                    args.push("--network".into());
+                    args.push(MCP_NETWORK_NAME.into());
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "⚠ Network isolation unavailable — MCP container will start without outbound restrictions"
+                    );
+                }
+            }
         }
         args.push(config.image.clone());
         for c in &config.command {
