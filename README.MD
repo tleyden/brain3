@@ -37,11 +37,11 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 
 ## Privacy and Security
 
-- Data isolation controls - the AI assistant only sees a part of your vault based on your prompts
-- Container-based filesystem and network isolation
+- 🔒 Data isolation controls - the AI assistant only sees a part of your vault based on your prompts
+- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem and network isolation
 - Secure Cloudflare tunnels with TLS
 - OAuth2.1 with PKCE is used to authenticate with the AI provider
-- Host process written in Rust to avoid several classes of vulnerabilities
+- 🦀 Host process written in Rust to avoid several classes of vulnerabilities
 - The MCP server running in the container uses the battle-tested FastMCP server framework
 - More details below in [Privacy & Security Details](#privacy--security-details)
 
