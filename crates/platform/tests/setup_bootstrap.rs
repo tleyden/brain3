@@ -43,6 +43,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
         container_host_port: 8420,
         container_mcp_port: 8420,
+        container_network_isolated: true,
         pkce_required: true,
         enforce_hostname_check: true,
         direct_public_origin_hostname: None,
@@ -63,6 +64,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(
         rendered.contains("B3_CONTAINER_IMAGE=\"ghcr.io/tleyden/brain3-mcp-vault-tools:latest\"")
     );
+    assert!(rendered.contains("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=\"true\""));
 }
 
 #[tokio::test]

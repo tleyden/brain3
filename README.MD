@@ -49,7 +49,7 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 
 - 🛡️ Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) available, which will be done regularly on releases.
 - 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
-- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem and network isolation; no other host directories are mounted unless you enable dev mode
+- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem isolation plus internal-only networking by default; no other host directories are mounted unless you enable dev mode
 - <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS; `cloudflared` creates outbound-only connections so Brain3 does not need a publicly routable IP
 - <img height="16" src="docs/logos/oauth.svg" alt="OAuth"> OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens — no open registration (DCR/CIMD disabled)
 - 🦀 Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities
@@ -276,6 +276,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
 | `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`. New installs default to the Brain3 release-matched tag; `:latest` is still published but must be chosen explicitly. |
 | `B3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
+| `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` | `true` | Keep the managed MCP container on an internal-only network with no default outbound route. Set to `false` only as a compatibility fallback if Docker/macOS internal networking is broken on your VPS or runtime. |
 
 </details>
 
