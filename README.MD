@@ -5,7 +5,9 @@ Brain3 let's you interact with your local markdown vault (aka "second brain") th
 
 **Why This Exists**
 
-I built this in order to access my Obsidian markdown vault via the Claude mobile app using both text and voice, which provides a powerful and seamless interface. For example, as you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.**
+I built this so I could access my Obsidian markdown vault via the Claude Mobile app via text chat and voice dictation. 
+
+The interface feels quite powerful and seamless. For example, as you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.**
 
 It is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for 3rd-party connectors, such as:
 
