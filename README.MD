@@ -190,8 +190,8 @@ Brain3 keeps your data on the local machine where it runs; your vault is never u
 
 ### Authentication & Authorization
 
-- Preregistered clients only. Solely the client configured via `B3_OAUTH2_GATEWAY_CLIENT_ID` and `B3_OAUTH2_GATEWAY_CLIENT_SECRET` can obtain tokens. Dynamic Client Registration (DCR) and Client ID Metadata Document (CIMD) are disabled.
-- Client secret required at token exchange (`client_secret_post`).
+- Only the client you configure via `B3_OAUTH2_GATEWAY_CLIENT_ID` and `B3_OAUTH2_GATEWAY_CLIENT_SECRET` can get tokens — no open registration (DCR/CIMD are disabled).
+- Client secret is required at token exchange (`client_secret_post`).
 - PKCE (`S256`) enforced by default to prevent authorization-code interception.
 - Auth codes are single-use and expire after 5 minutes.
 
