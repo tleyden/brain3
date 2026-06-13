@@ -1,5 +1,6 @@
 # Privacy & Security Details
 
+- 🛡️ Includes an [AI security audit](security_audit_claude_sonnet_4_6.md) available, which will be done regularly on releases.
 - 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
 - <img height="16" src="logos/docker.svg" alt="Docker"> <img height="16" src="logos/apple.svg" alt="Apple"> Container-based filesystem and network isolation; no other host directories are mounted unless you enable dev mode
 - <img height="16" src="logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS; `cloudflared` creates outbound-only connections so Brain3 does not need a publicly routable IP
@@ -8,7 +9,7 @@
 - <img height="16" src="logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
 - You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
 
-## Architecture
+## Trusted 3rd Parties
 
 - ⚠ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
 
