@@ -1,13 +1,19 @@
 
 <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 
-Brain3 let's you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or whatever you use as your preferred AI assistant.
+Brain3 let's you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
 
-I built this because I realized that I really wanted to access my Obsidian markdown vault via the Claude mobile app using both text and voice.  I found it to be a very seamless way to interact with your second brain: for example, as you discover new ideas and knowledge with your AI assistant, you can quickly save that to your vault without leaving the app.
+**Why This Exists**
 
-I designed it specifcally to use open standards and let you use *any* AI that supports the Model Context Protocol (MCP) standard for connectors, such as Claude, ChatGPT, and even Jan.ai, which supports local models.  Since it's a remotely accessible MCP with OAuth 2.1, you can configure it via their GUI and it will work across web, desktop and mobile.  You can even use the built-in voice dictation features, which makes your interactions with your markdown vault quick and effortless, especially on mobile.
+I built this in order to access my Obsidian markdown vault via the Claude mobile app using both text and voice, which provides a powerful and seamless interface. For example, as you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.**
 
-Brain3 runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will be available as a standalone desktop menu bar app for less technical users.
+It is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for 3rd-party connectors, such as:
+
+* Claude (web/desktop/mobile)
+* ChatGPT (web/desktop/mobile)
+* Jan.ai (dekstop) - supports local models such as Gemma4.  
+
+Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will be available as a standalone desktop menu bar app for less technical users.
 
 ## Features
 
@@ -15,7 +21,9 @@ Brain3 runs locally or on your cloud Virtual Private Server (VPS) in the command
 - Your markdown vault data stays 100% local and private
 - Designed with security and privacy in mind, and uses container technology to reduce the attack surface
 - Includes an [AI security audit](docs/security_audit.md) available, which will be done regularly on releases.
-- Obsidian-compatible, but Obsidian not required
+- Remotely accessible via MCP with OAuth 2.1, and therefore works across web, desktop and mobile AI assistant apps.
+- Compatible with voice dictation for AI assistants that support it, such as Claude and ChatGPT.
+- Obsidian-compatible (but Obsidian not required)
 - Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
 - **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
 
