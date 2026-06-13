@@ -21,7 +21,7 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 - Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native MacOS container technology](https://github.com/apple/container) to reduce the attack surface
 - 🛡️ Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) available, which will be done regularly on releases.
 - 🔌 Remotely accessible via MCP with OAuth 2.1, which enables access from web, desktop and mobile AI assistant apps.
-- 🎙️ Compatible with voice dictation for AI assistants that support it, such as Claude and ChatGPT.
+- 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
 - <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian-compatible (but Obsidian not required)
 - <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
 - 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
