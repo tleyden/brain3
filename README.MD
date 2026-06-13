@@ -300,26 +300,6 @@ Once connected, your AI app has access to these vault tools:
 
 ## Developers / Contributors
 
-<details>
-<summary>MCP container image selection</summary>
-
-Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. The registry still publishes `:latest`, but Brain3 does not select it automatically for new installs.
-
-If an older Brain3 config still contains the exact official `ghcr.io/tleyden/brain3-mcp-vault-tools:latest` image, Brain3 now treats that as a legacy default and remaps it to the current release-matched tag for that run. Use `--container-tag latest` if you explicitly want to stay on `:latest`.
-
-If you need a different published MCP image for a single launch or while creating a brand-new config, use `--container-tag`:
-
-```bash
-brain3 --container-tag latest
-brain3 --container-tag pr-123
-```
-
-On an already configured install, `--container-tag` overrides the MCP container image for that launch only. During first-run setup, the selected tag becomes the image written into the new config.
-
-The runtime status screen now reports whether the container is actually `Ready` or `Failed` after startup verification. If the container exits early, Brain3 shows the failure summary and log path instead of incorrectly reporting a successful start.
-
-</details>
-
 ### Prerequisites
 
 Refer to the [Quick Start](#quick-start) prerequisites above.
@@ -357,6 +337,24 @@ Replace `123` with the pull request number.
 ```
 
 Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) fo r the full flow.
+
+<details>
+<summary>MCP container image selection</summary>
+
+Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version.
+
+If you need a different published MCP image for a single launch or while creating a brand-new config, use `--container-tag`:
+
+```bash
+brain3 --container-tag latest
+brain3 --container-tag pr-123
+```
+
+On an already configured install, `--container-tag` overrides the MCP container image for that launch only. During first-run setup, the selected tag becomes the image written into the new config.
+
+The runtime status screen now reports whether the container is actually `Ready` or `Failed` after startup verification. If the container exits early, Brain3 shows the failure summary and log path instead of incorrectly reporting a successful start.
+
+</details>
 
 ## Roadmap
 
