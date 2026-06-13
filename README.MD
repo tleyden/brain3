@@ -1,11 +1,11 @@
 
 <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 
-Brain3 let's you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
+Brain3 lets you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
 
 **Why This Exists**
 
-I built this so I could access my Obsidian markdown vault via the Claude Mobile app via text chat and voice dictation. 
+I built this so I could access my Obsidian markdown vault from the Claude mobile app, via text chat and voice dictation.
 
 The interface feels quite powerful and seamless. For example, as you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.**
 
