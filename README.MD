@@ -13,7 +13,7 @@ It is designed to support open standards and is compatible with **any AI assista
 * ChatGPT (web/desktop/mobile)
 * Jan.ai (dekstop) - supports local models such as Gemma4.  
 
-Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will be available as a standalone desktop menu bar app for less technical users.
+Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will also be available as a standalone desktop menu bar app.  See the roadmap below for more details.
 
 ## Features
 
