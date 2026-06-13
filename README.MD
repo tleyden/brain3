@@ -184,7 +184,7 @@ See [docs/privacy_and_security_details.md](docs/privacy_and_security_details.md)
 
 ## Advanced Configuration
 
-### Named Cloudflare Tunnel on your domain
+### <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain
 
 Recommended if you want a stable hostname like `brain3.yourdomain.com`. This requires a Cloudflare account and a custom domain you control.
 
@@ -284,7 +284,7 @@ Once connected, your AI app has access to these vault tools:
 | `vault_move` | Move or rename a file. |
 | `vault_delete` | Delete a file. |
 
-## Development
+## Developers / Contributors
 
 ### Running tests
 
