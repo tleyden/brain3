@@ -11,6 +11,8 @@
 
 Two HIGH-severity findings from the prior audit (v0.1.5) have been resolved in v0.1.6: the static non-expiring access token model has been replaced with per-session, short-lived tokens backed by SQLite, and per-IP rate limiting has been added to all credential-bearing OAuth endpoints. The core authentication architecture is now meaningfully stronger.
 
+This audit adds one new **HIGH-severity** finding: the MCP container has unrestricted outbound internet access (finding 3.7). The vault is mounted read-write into a container that can reach any internet host, meaning a compromised container (e.g. via a supply-chain attack on a Python dependency) can exfiltrate vault data silently. Disabling outbound is a one-time Docker network configuration change and should be prioritised ahead of all other open findings.
+
 The remaining open surface is mostly medium-severity hardening gaps. The most impactful remaining issues are: the `resolve_base_url` host header injection (finding 1.3), `redirect_uri` not being allowlisted (finding 1.4), the upstream shared secret defaulting to a predictable `/tmp` path (finding 3.4), and the install script lacking checksum verification (finding 5.1).
 
 All README security claims were validated against the current code. One claim — "Constant-time comparison for all secret and token checks" — is partially overstated due to an early-exit on length mismatch in `constant_time_eq` (finding 1.6). Suggested README improvements are listed in the [README Validation](#readme-validation--suggested-updates) section.
@@ -26,6 +28,72 @@ The static `.env`-loaded access token is gone. `token_exchange.rs` now calls `ge
 ### ✅ RESOLVED — 1.2: No Rate Limiting on Auth Endpoints
 
 `crates/platform/src/http/rate_limit.rs` introduces an `OAuthRateLimiter` backed by the `governor` crate. It enforces 20 burst attempts per IP with one token replenished every 45 seconds (~20/15 min). Applied to `POST /oauth/authorize` (line 146, `oauth_handlers.rs`) and `POST /oauth/token` (line 214, `oauth_handlers.rs`). Client IP is extracted preferentially from `CF-Connecting-IP` (the authoritative Cloudflare header), with `X-Forwarded-For` as a fallback. Responses include a `Retry-After` header.
+
+---
+
+## Threat Model
+
+### Architecture & Trust Boundaries
+
+```mermaid
+graph TD
+    subgraph Internet["🌐 Internet (Untrusted)"]
+        AI["AI Client\n(Claude / ChatGPT)"]
+        Attacker["⚠️ Threat Actor"]
+    end
+
+    subgraph CFEdge["☁️ Cloudflare Edge (Trusted 3rd Party — see §2)"]
+        CFTLS["TLS Termination & Proxy"]
+    end
+
+    subgraph HostMachine["🖥️ Host Machine"]
+        CFD["cloudflared\n(outbound-only tunnel)"]
+
+        subgraph GatewayProcess["Brain3 Rust Gateway — 127.0.0.1:8421"]
+            OAuth2["OAuth2.1 Handler\nrate-limited · PKCE · single client"]
+            ProxyMCP["MCP Reverse Proxy\ntoken validation · upstream secret"]
+        end
+
+        subgraph Container["MCP Container — 127.0.0.1:8420 (host-side)"]
+            FastMCP["FastMCP Python Server\n(brain3-mcp-vault-tools)"]
+        end
+
+        VaultFS["📁 Vault\n(host filesystem)"]
+        SecretFile["🔑 Upstream Secret\n(host filesystem)"]
+    end
+
+    AI -- "HTTPS via Cloudflare" --> CFTLS
+    Attacker -. "OAuth endpoint attacks\nhost-header injection\ntoken brute-force" .-> CFTLS
+    CFTLS -- "HTTP via outbound tunnel" --> CFD
+    CFD -- "loopback 127.0.0.1:8421" --> GatewayProcess
+    OAuth2 -- "validates credentials / issues tokens" --> ProxyMCP
+    ProxyMCP -- "loopback 127.0.0.1:8420\n+ upstream-secret header" --> FastMCP
+    FastMCP -- "bind mount rw" --> VaultFS
+    FastMCP -- "bind mount ro" --> SecretFile
+    FastMCP -. "⚠️ UNBLOCKED outbound internet\n(finding 3.7 — HIGH)" .-> Internet
+    Attacker -. "supply-chain attack\non Python deps or install.sh" .-> FastMCP
+    Attacker -. "local privilege escalation\nPATH hijack · /tmp symlink" .-> HostMachine
+```
+
+### Threat Actors
+
+| Actor | Access Point | Goal |
+|---|---|---|
+| Remote unauthenticated attacker | Cloudflare tunnel endpoint (internet) | Steal vault data, obtain OAuth tokens, enumerate server |
+| Compromised AI platform | OAuth / MCP endpoints | Inject malicious tool calls, exfiltrate vault via MCP |
+| Supply-chain attacker | Python dependency in MCP container image | RCE inside container → outbound data exfiltration |
+| Local user (shared host) | Host filesystem (`/tmp`, `~/.cloudflared/`) | Read upstream secret, symlink attack, PATH hijack |
+
+### Assets
+
+| Asset | Sensitivity | Location |
+|---|---|---|
+| Vault markdown files | HIGH — personal knowledge base | Host filesystem (bind-mounted rw into container) |
+| OAuth client secret | HIGH — grants token issuance | `~/.brain3/.env` (`0600`) |
+| Brain3 password | HIGH — gate to OAuth login | `~/.brain3/.env` (`0600`) |
+| Upstream shared secret | MEDIUM — gates direct MCP access | Host filesystem (default `/tmp`) |
+| OAuth access/refresh tokens | MEDIUM — session credentials | SQLite `~/.brain3/brain3.db` |
+| Cloudflare tunnel credentials | MEDIUM — controls tunnel routing | `~/.cloudflared/<tunnel-id>.json` |
 
 ---
 
@@ -309,6 +377,92 @@ The `ContainerConfig` does not set any seccomp profile, AppArmor label, or capab
 
 ---
 
+### 3.7 🔴 HIGH — MCP Container Has Unrestricted Outbound Internet Access
+
+**File:** `crates/platform/src/container/docker.rs` (no `--network` flag in `run`), `crates/platform/src/container/startup.rs`
+
+The MCP container is started with no `--network` argument. Docker's default behaviour attaches the container to the built-in `bridge` network (`docker0`), which has a default gateway to the host's upstream network interface. The container therefore has full outbound internet access.
+
+**What the container actually needs:**
+
+| Needed? | Direction | Endpoint |
+|---|---|---|
+| ✅ Yes | Inbound | Accept connections from `127.0.0.1:8420` (gateway proxy) |
+| ✅ Yes | Filesystem | Read `/vault` (read-write) and `/run/brain3` (read-only) via bind mounts |
+| ❌ No | Outbound | Any external internet destination |
+
+The vault is mounted read-write (finding 3.3). A supply-chain compromise of a Python dependency inside the container image — or RCE via a maliciously crafted vault file or MCP tool call — gives an attacker a read-write handle on your entire knowledge base **and** an unrestricted outbound channel to exfiltrate it silently.
+
+**Recommendation — Docker and macOS containers:**
+
+The domain model expresses *intent* rather than mechanism:
+
+```rust
+// ContainerConfig (crates/core/src/domain/model.rs)
+pub network_isolated: bool,
+```
+
+Each adapter translates this into the appropriate runtime command. Both Docker and macOS use the same conceptual approach: create an internal named network, then attach the container to it.
+
+**Docker adapter** (`crates/platform/src/container/docker.rs`):
+
+Create the network once (idempotent) and pass `--network`:
+
+```rust
+// Private helper — never on the ContainerPort trait
+async fn ensure_internal_network(name: &str) -> Result<(), ContainerError> {
+    // treat "already exists" as success
+}
+```
+
+In `run()`, when `config.network_isolated`:
+```bash
+docker network create --internal brain3-mcp-net
+docker run --network brain3-mcp-net ...
+```
+
+Port mappings (`-p 127.0.0.1:8420:8420`) continue to work — Docker's iptables port-forward rules operate at the kernel level, independently of the container's routing table.
+
+**macOS containers adapter** (`crates/platform/src/container/macos_container.rs`):
+
+Apple's `container` CLI introduced `container network create` (including `--internal`) in macOS 26. The same pattern as Docker should be attempted:
+
+```bash
+container network create --internal brain3-mcp-net
+container run --network brain3-mcp-net ...
+```
+
+Three upstream issues are relevant to understanding the current state of this feature on Apple containers:
+
+- **[Issue #1037 — Host connectivity with `--network none`](https://github.com/apple/container/issues/1037):** `--network none` is too restrictive — it removes all network interfaces and breaks port publishing, which Brain3 requires. Do not use `--network none`; use an `--internal` named network instead.
+- **[Discussion #1170 — macOS 26 network isolation](https://github.com/apple/container/discussions/1170):** An Apple maintainer explicitly describes the `container network create --internal` pattern as the supported approach for isolated workloads. This closely mirrors Docker's model and is the basis for attempting it in the macOS adapter.
+- **[Issue #1320 — Prevent host access on internal networks](https://github.com/apple/container/issues/1320):** Confirms that `container network create --internal` already blocks external internet routing. A host gateway IP remains reachable (the reporter considers this a security gap; for Brain3 this is acceptable and expected — the gateway must be able to reach the container). Open question is whether port publishing (`-p`) works alongside `--internal`; this needs empirical verification on macOS 26 before shipping.
+
+**Verification after implementation (both runtimes):**
+```bash
+# From inside the container — should fail
+docker exec brain3-mcp-vault-tools curl --max-time 3 https://example.com
+
+# From the host — should succeed
+curl http://127.0.0.1:8420/health
+```
+
+If port publishing does not work with `--internal` on the installed macOS version, the startup health check will surface a container failure. In that case, a PF firewall rule blocking outbound from the container's vnet interface is the fallback until Apple resolves the compatibility gap.
+
+---
+
+### 3.8 🟡 MEDIUM — MCP Container Shares Default Bridge with All Other Docker Containers
+
+**File:** `crates/platform/src/container/docker.rs`
+
+Without a `--network` argument, Docker places the MCP container on the `docker0` default bridge. Every other container on the host that also uses the default bridge can reach the MCP container **directly at its container IP** (e.g. `172.17.0.x:8420`), bypassing the `127.0.0.1` host-side port binding entirely. The `127.0.0.1` binding restricts access from the *host network stack* but not from *peer containers on the same bridge*.
+
+In practice this means a second compromised Docker container (e.g. a development container, a database sidecar) can probe or communicate with the MCP server without going through the OAuth-authenticated Brain3 gateway. The upstream shared secret provides a last-resort check, but defence in depth requires network-level isolation too.
+
+**Recommendation:** Implementing finding 3.7 (dedicated `--internal` network) also resolves this finding — a named network is a separate bridge and other containers cannot join it unless explicitly configured to do so. No additional code change is required beyond 3.7.
+
+---
+
 ## 4. Default Credentials and Secrets — Audit
 
 ### 4.1 ✅ GOOD — No Hardcoded Default Passwords
@@ -497,7 +651,7 @@ All security claims in the README were verified against the current codebase. Re
 | Upstream shared secret rejects direct bypass | ✅ Accurate | `x-brain3-upstream-secret` header is injected and the container checks it |
 | Constant-time comparison for all checks | ⚠️ Partially accurate | `constant_time_eq` short-circuits on length mismatch, leaking secret byte length (see finding 1.6) |
 | Rust host process | ✅ Accurate | |
-| Container filesystem and network isolation | ✅ Accurate | Vault mounted in container; container port bound to `127.0.0.1` |
+| Container filesystem and network isolation | ⚠️ Partially accurate | Container port is loopback-only (✅) but MCP container has unrestricted outbound internet access — vault exfiltration is possible from a compromised container (see finding 3.7) |
 | Cloudflare tunnels with TLS | ✅ Accurate | Both quick and named tunnel paths are implemented |
 
 **Suggested README additions** for the "Authentication & Authorization" subsection:
@@ -539,6 +693,8 @@ The following security features are implemented in v0.1.6 but not mentioned in t
 | 3.4 | 🟡 MEDIUM | Container | Upstream secret stored in `/tmp` with predictable name | Open |
 | 3.5 | 🟢 LOW | Container | No seccomp / capability-dropping profile | Open |
 | 3.6 | 🟢 LOW | Container | No CPU/memory resource limits | Open |
+| 3.7 | 🔴 HIGH | Container | MCP container has unrestricted outbound internet access | Open |
+| 3.8 | 🟡 MEDIUM | Container | MCP container on default bridge — reachable from peer containers | Open |
 | 4.1 | ✅ GOOD | Credentials | No hardcoded default passwords | — |
 | 4.2 | 🟡 MEDIUM | Credentials | Default username is predictable (`"admin"`) | Open |
 | 4.3 | ✅ GOOD | Credentials | Secrets generated with 256-bit CSPRNG | — |
@@ -555,13 +711,14 @@ The following security features are implemented in v0.1.6 but not mentioned in t
 
 ## Prioritized Remediation Order
 
-1. **Fix `resolve_base_url` to use configured hostname** (1.3) — prevents host header injection across OAuth metadata and MCP protected-resource metadata.
-2. **Allowlist `redirect_uri`** (1.4) — blocks open redirects and code interception; straightforward config addition.
-3. **Move upstream secret out of `/tmp`** (3.4) — easy default path change plus symlink guard.
-4. **Replace partial secret logging with `elide_secret`** (4.6) — one-line fix per log call.
-5. **Add checksum verification to install script** (5.1) — supply chain hygiene.
-6. **Verify Cloudflare credentials file permissions** (2.2) — startup check, low effort.
-7. **Reduce auth code lifetime to 60s** (1.5) — one-constant change.
-8. **Add CSP/security headers** (1.8) — middleware layer addition.
-9. **Rate-limit `GET /oauth/authorize`** (1.10) — reuse existing `OAuthRateLimiter`.
-10. **Change default username from `"admin"`** (4.2) — one-constant change in `setup.rs`.
+1. **Block MCP container outbound internet** (3.7) — HIGH severity; one network configuration change eliminates the vault exfiltration vector for both Docker and macOS (Apple introduced `container network create --internal` in macOS 26 — see Discussion #1170). Also resolves 3.8 as a side-effect. If port publishing with an internal network turns out to be broken on a given macOS version (Issue #1037), the startup health check will surface it and a PF firewall rule is the fallback.
+2. **Fix `resolve_base_url` to use configured hostname** (1.3) — prevents host header injection across OAuth metadata and MCP protected-resource metadata.
+3. **Allowlist `redirect_uri`** (1.4) — blocks open redirects and code interception; straightforward config addition.
+4. **Move upstream secret out of `/tmp`** (3.4) — easy default path change plus symlink guard.
+5. **Replace partial secret logging with `elide_secret`** (4.6) — one-line fix per log call.
+6. **Add checksum verification to install script** (5.1) — supply chain hygiene.
+7. **Verify Cloudflare credentials file permissions** (2.2) — startup check, low effort.
+8. **Reduce auth code lifetime to 60s** (1.5) — one-constant change.
+9. **Add CSP/security headers** (1.8) — middleware layer addition.
+10. **Rate-limit `GET /oauth/authorize`** (1.10) — reuse existing `OAuthRateLimiter`.
+11. **Change default username from `"admin"`** (4.2) — one-constant change in `setup.rs`.

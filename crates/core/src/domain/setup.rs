@@ -56,6 +56,7 @@ pub struct SetupDraftConfig {
     pub container_image: String,
     pub container_host_port: u16,
     pub container_mcp_port: u16,
+    pub container_network_isolated: bool,
     pub pkce_required: bool,
     pub enforce_hostname_check: bool,
     pub direct_public_origin_hostname: Option<String>,

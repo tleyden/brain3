@@ -41,6 +41,7 @@ impl FirstRunSetupUseCase {
             container_image: self.defaults.default_container_image.clone(),
             container_host_port: DEFAULT_CONTAINER_HOST_PORT,
             container_mcp_port: DEFAULT_CONTAINER_MCP_PORT,
+            container_network_isolated: false, // disabled by default since this is still experimental
             pkce_required: true,
             enforce_hostname_check: true,
             direct_public_origin_hostname: None,
@@ -298,6 +299,7 @@ mod tests {
             container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
             container_host_port: 8420,
             container_mcp_port: 8420,
+            container_network_isolated: false,
             pkce_required: true,
             enforce_hostname_check: true,
             direct_public_origin_hostname: None,
@@ -365,6 +367,7 @@ mod tests {
         let preparation = use_case.prepare().await.expect("prepare should succeed");
 
         assert_eq!(preparation.draft.client_id, "brain3-oauth2-client");
+        assert!(!preparation.draft.container_network_isolated);
     }
 
     #[tokio::test]

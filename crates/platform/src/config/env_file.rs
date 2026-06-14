@@ -62,9 +62,7 @@ impl ConfigPort for EnvFileConfigAdapter {
             &DEFAULT_REFRESH_TOKEN_LIFETIME_SECS.to_string(),
         )
         .parse::<u64>()
-        .map_err(|e| {
-            ConfigError::Invalid(format!("B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS: {e}"))
-        })?;
+        .map_err(|e| ConfigError::Invalid(format!("B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS: {e}")))?;
         if refresh_token_lifetime_secs == 0 {
             return Err(ConfigError::Invalid(
                 "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS must be greater than 0".into(),
@@ -259,6 +257,8 @@ fn load_container_startup_config(
     let container_port = env_var_or("B3_CONTAINER_MCP_PORT", "8420")
         .parse::<u16>()
         .map_err(|e| ConfigError::Invalid(format!("B3_CONTAINER_MCP_PORT: {e}")))?;
+    // Disabled by default since this is still experimental
+    let network_isolated = env_bool("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", false);
 
     let upstream_secret_dir = upstream_secret_file
         .parent()
@@ -278,6 +278,7 @@ fn load_container_startup_config(
         upstream_secret_dir,
         host_port,
         container_port,
+        network_isolated,
         dev_mount_source,
     }))
 }

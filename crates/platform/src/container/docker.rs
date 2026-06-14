@@ -3,8 +3,23 @@ use brain3_core::domain::model::ContainerConfig;
 use brain3_core::ports::container::{ContainerId, ContainerPort};
 
 use super::process::{command_succeeds, run_command};
+use super::MCP_NETWORK_NAME;
 
 pub struct DockerContainerAdapter;
+
+async fn recreate_internal_network(name: &str) -> Result<(), ContainerError> {
+    if command_succeeds("docker", &["network", "inspect", name]).await? {
+        tracing::info!(
+            network = name,
+            "removing existing MCP network before recreation"
+        );
+        run_command("docker", &["network", "rm", name]).await?;
+    }
+
+    tracing::info!(network = name, "creating fresh internal MCP network");
+    run_command("docker", &["network", "create", "--internal", name]).await?;
+    Ok(())
+}
 
 #[async_trait::async_trait]
 impl ContainerPort for DockerContainerAdapter {
@@ -42,6 +57,20 @@ impl ContainerPort for DockerContainerAdapter {
     async fn logs_tail(&self, id: &ContainerId, lines: usize) -> Result<String, ContainerError> {
         let lines = lines.to_string();
         run_command("docker", &["logs", "--tail", &lines, &id.0]).await
+    }
+
+    async fn prepare_network_isolation(&self) -> Result<bool, ContainerError> {
+        match recreate_internal_network(MCP_NETWORK_NAME).await {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    network = MCP_NETWORK_NAME,
+                    "network recreation failed; starting MCP container without outbound restrictions"
+                );
+                Ok(false)
+            }
+        }
     }
 
     async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
@@ -83,6 +112,10 @@ impl ContainerPort for DockerContainerAdapter {
         if let Some(ref wd) = config.workdir {
             args.push("--workdir".into());
             args.push(wd.clone());
+        }
+        if config.network_isolated {
+            args.push("--network".into());
+            args.push(MCP_NETWORK_NAME.into());
         }
         args.push(config.image.clone());
         for c in &config.command {

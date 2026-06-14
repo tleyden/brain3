@@ -46,6 +46,7 @@ pub enum ContainerRuntime {
 pub struct ContainerConfig {
     pub image: String,
     pub name: String,
+    pub network_isolated: bool,
     pub port_mappings: Vec<PortMapping>,
     pub env_vars: Vec<(String, String)>,
     pub bind_mounts: Vec<BindMount>,
@@ -82,6 +83,7 @@ pub struct ContainerStartupConfig {
     pub upstream_secret_dir: PathBuf,
     pub host_port: u16,
     pub container_port: u16,
+    pub network_isolated: bool,
     /// When set, bind-mount this host directory into the container and run
     /// from source instead of the code baked into the image.
     pub dev_mount_source: Option<PathBuf>,

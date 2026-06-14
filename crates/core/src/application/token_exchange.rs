@@ -83,14 +83,10 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| OAuthError::InvalidRequest("code required".into()))?;
 
-        let code_data = self
-            .store
-            .take(code)
-            .await
-            .ok_or_else(|| {
-                tracing::warn!(code = %code, "token exchange rejected: auth code not found or expired");
-                OAuthError::InvalidGrant("Invalid or expired code".into())
-            })?;
+        let code_data = self.store.take(code).await.ok_or_else(|| {
+            tracing::warn!(code = %code, "token exchange rejected: auth code not found or expired");
+            OAuthError::InvalidGrant("Invalid or expired code".into())
+        })?;
 
         if !constant_time_eq(req.client_id.as_bytes(), code_data.client_id.as_bytes()) {
             tracing::warn!(
@@ -159,7 +155,10 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
         Ok(response)
     }
 
-    async fn exchange_refresh_token(&self, req: &TokenRequest) -> Result<TokenResponse, OAuthError> {
+    async fn exchange_refresh_token(
+        &self,
+        req: &TokenRequest,
+    ) -> Result<TokenResponse, OAuthError> {
         self.validate_client(req)?;
 
         let refresh_token = req
@@ -192,7 +191,9 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
                 client_id = %stored.client_id,
                 "refresh exchange rejected: refresh token expired"
             );
-            return Err(OAuthError::InvalidGrant("Invalid or expired refresh token".into()));
+            return Err(OAuthError::InvalidGrant(
+                "Invalid or expired refresh token".into(),
+            ));
         }
 
         if !constant_time_eq(req.client_id.as_bytes(), stored.client_id.as_bytes()) {
@@ -206,14 +207,17 @@ impl<S: AuthCodeStore> TokenExchangeUseCase<S> {
 
         let response = self.issue_token_pair(&req.client_id).await?;
 
-        self.token_store.revoke(refresh_token).await.map_err(|error| {
-            tracing::error!(
-                %error,
-                refresh_token_hint = %elide_secret(refresh_token),
-                "refresh exchange failed to revoke used refresh token"
-            );
-            OAuthError::ServerError("failed to rotate refresh token".into())
-        })?;
+        self.token_store
+            .revoke(refresh_token)
+            .await
+            .map_err(|error| {
+                tracing::error!(
+                    %error,
+                    refresh_token_hint = %elide_secret(refresh_token),
+                    "refresh exchange failed to revoke used refresh token"
+                );
+                OAuthError::ServerError("failed to rotate refresh token".into())
+            })?;
 
         tracing::info!(
             client_id = %req.client_id,

@@ -1202,7 +1202,7 @@ async fn mcp_rejects_expired_bearer_token() {
     let (server, token_store) =
         TestHarness::default().build_server_with_token_store(MockMcpProxy::should_not_be_called());
 
-        token_store
+    token_store
         .store(
             "expired-token".into(),
             StoredTokenData {

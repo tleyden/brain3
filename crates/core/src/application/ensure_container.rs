@@ -78,7 +78,12 @@ impl EnsureContainerUseCase {
         }
 
         tracing::info!(container = %config.name, image = %config.image, "starting container");
-        let id = self.port.run(config).await?;
+        let mut runtime_config = config.clone();
+        if config.network_isolated {
+            runtime_config.network_isolated = self.port.prepare_network_isolation().await?;
+        }
+
+        let id = self.port.run(&runtime_config).await?;
         self.verify_startup(&id, config).await?;
         tracing::info!(container = %config.name, "container ready");
         Ok(id)
@@ -192,6 +197,9 @@ mod tests {
         container_running: bool,
         running_checks: Vec<bool>,
         logs_tail_output: Option<String>,
+        prepare_network_isolation_result: bool,
+        prepare_network_isolation_count: usize,
+        last_run_network_isolated: Option<bool>,
         pull_count: usize,
         stop_count: usize,
         remove_count: usize,
@@ -258,10 +266,18 @@ mod tests {
             Ok(state.logs_tail_output.clone().unwrap_or_default())
         }
 
+        async fn prepare_network_isolation(&self) -> Result<bool, ContainerError> {
+            let mut state = self.state.lock().unwrap();
+            state.actions.push("prepare_network_isolation");
+            state.prepare_network_isolation_count += 1;
+            Ok(state.prepare_network_isolation_result)
+        }
+
         async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
             let mut state = self.state.lock().unwrap();
             state.actions.push("run");
             state.run_count += 1;
+            state.last_run_network_isolated = Some(config.network_isolated);
             state.container_exists = true;
             state.container_running = true;
             Ok(ContainerId(config.name.clone()))
@@ -288,6 +304,7 @@ mod tests {
         ContainerConfig {
             image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
             name: "brain3-mcp-vault-tools".into(),
+            network_isolated: false,
             port_mappings: vec![],
             env_vars: vec![],
             bind_mounts: vec![],
@@ -439,5 +456,35 @@ mod tests {
         let state = port.snapshot();
         assert_eq!(state.logs_tail_count, 1);
         assert!(state.actions.contains(&"logs_tail"));
+    }
+
+    #[tokio::test]
+    async fn prepares_network_isolation_before_run_and_downgrades_when_unavailable() {
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            prepare_network_isolation_result: false,
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let mut config = sample_config();
+        config.network_isolated = true;
+
+        let id = use_case.ensure(&config).await.unwrap();
+
+        assert_eq!(id.0, config.name);
+
+        let state = port.snapshot();
+        assert_eq!(state.prepare_network_isolation_count, 1);
+        assert_eq!(state.last_run_network_isolated, Some(false));
+        assert_eq!(
+            state.actions,
+            vec![
+                "image_exists",
+                "exists",
+                "prepare_network_isolation",
+                "run",
+                "is_running"
+            ]
+        );
     }
 }

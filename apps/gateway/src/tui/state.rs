@@ -26,6 +26,7 @@ pub enum PortsField {
     RefreshTokenLifetimeSecs,
     PkceRequired,
     EnforceHostnameCheck,
+    ContainerNetworkIsolation,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,6 +55,7 @@ pub enum SummaryField {
     RefreshTokenLifetimeSecs,
     PkceRequired,
     HostnameCheck,
+    ContainerNetworkIsolation,
 }
 
 pub struct FirstRunTuiState {
@@ -278,19 +280,21 @@ impl FirstRunTuiState {
             PortsField::AccessTokenLifetimeSecs => PortsField::RefreshTokenLifetimeSecs,
             PortsField::RefreshTokenLifetimeSecs => PortsField::PkceRequired,
             PortsField::PkceRequired => PortsField::EnforceHostnameCheck,
-            PortsField::EnforceHostnameCheck => PortsField::GatewayPort,
+            PortsField::EnforceHostnameCheck => PortsField::ContainerNetworkIsolation,
+            PortsField::ContainerNetworkIsolation => PortsField::GatewayPort,
         };
     }
 
     pub fn previous_ports_focus(&mut self) {
         self.ports_focus = match self.ports_focus {
-            PortsField::GatewayPort => PortsField::EnforceHostnameCheck,
+            PortsField::GatewayPort => PortsField::ContainerNetworkIsolation,
             PortsField::ContainerHostPort => PortsField::GatewayPort,
             PortsField::ContainerMcpPort => PortsField::ContainerHostPort,
             PortsField::AccessTokenLifetimeSecs => PortsField::ContainerMcpPort,
             PortsField::RefreshTokenLifetimeSecs => PortsField::AccessTokenLifetimeSecs,
             PortsField::PkceRequired => PortsField::RefreshTokenLifetimeSecs,
             PortsField::EnforceHostnameCheck => PortsField::PkceRequired,
+            PortsField::ContainerNetworkIsolation => PortsField::EnforceHostnameCheck,
         };
     }
 
@@ -301,6 +305,9 @@ impl FirstRunTuiState {
             }
             PortsField::EnforceHostnameCheck => {
                 self.draft.enforce_hostname_check = !self.draft.enforce_hostname_check;
+            }
+            PortsField::ContainerNetworkIsolation => {
+                self.draft.container_network_isolated = !self.draft.container_network_isolated;
             }
             _ => {}
         }
@@ -336,13 +343,14 @@ impl FirstRunTuiState {
             SummaryField::AccessTokenLifetimeSecs => SummaryField::RefreshTokenLifetimeSecs,
             SummaryField::RefreshTokenLifetimeSecs => SummaryField::PkceRequired,
             SummaryField::PkceRequired => SummaryField::HostnameCheck,
-            SummaryField::HostnameCheck => SummaryField::VaultPath,
+            SummaryField::HostnameCheck => SummaryField::ContainerNetworkIsolation,
+            SummaryField::ContainerNetworkIsolation => SummaryField::VaultPath,
         };
     }
 
     pub fn previous_summary_focus(&mut self) {
         self.summary_focus = match self.summary_focus {
-            SummaryField::VaultPath => SummaryField::HostnameCheck,
+            SummaryField::VaultPath => SummaryField::ContainerNetworkIsolation,
             SummaryField::Username => SummaryField::VaultPath,
             SummaryField::ClientId => SummaryField::Username,
             SummaryField::PasswordMode => SummaryField::ClientId,
@@ -360,6 +368,7 @@ impl FirstRunTuiState {
             SummaryField::RefreshTokenLifetimeSecs => SummaryField::AccessTokenLifetimeSecs,
             SummaryField::PkceRequired => SummaryField::RefreshTokenLifetimeSecs,
             SummaryField::HostnameCheck => SummaryField::PkceRequired,
+            SummaryField::ContainerNetworkIsolation => SummaryField::HostnameCheck,
         };
     }
 
@@ -452,6 +461,9 @@ impl FirstRunTuiState {
             }
             SummaryField::HostnameCheck => {
                 self.draft.enforce_hostname_check = !self.draft.enforce_hostname_check;
+            }
+            SummaryField::ContainerNetworkIsolation => {
+                self.draft.container_network_isolated = !self.draft.container_network_isolated;
             }
             _ => {}
         }
