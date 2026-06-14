@@ -6,6 +6,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /opt/brain3-mcp-vault-tools
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    netcat-openbsd \
+    iputils-ping \
+    iproute2 \
+    dnsutils \
+    net-tools \
+    traceroute \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN python -m pip install --no-cache-dir --upgrade pip uv
 
 COPY pyproject.toml uv.lock README.md ./
