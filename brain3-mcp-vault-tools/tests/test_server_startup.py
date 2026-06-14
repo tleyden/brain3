@@ -84,7 +84,7 @@ class ServerStartupTests(unittest.TestCase):
         )
 
 
-    def test_unix_socket_mode_pre_binds_socket_and_passes_to_uvicorn(self):
+    def test_unix_socket_mode_binds_uvicorn_to_socket_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             socket_path = os.path.join(tmpdir, "mcp.sock")
             with patch.dict(
@@ -97,29 +97,22 @@ class ServerStartupTests(unittest.TestCase):
             ):
                 server = import_server_module()
 
-            serve_calls = []
+            uvicorn_calls = []
 
-            async def fake_serve(sockets=None):
-                serve_calls.append(sockets)
-
-            mock_uvicorn_server = MagicMock()
-            mock_uvicorn_server.serve = fake_serve
+            def fake_uvicorn_run(app, **kwargs):
+                uvicorn_calls.append(kwargs)
 
             with (
                 patch.object(server, "_start_process_resources"),
                 patch.object(server, "_stop_process_resources"),
                 patch.object(server, "_package_version", return_value="0.1.6"),
                 patch.object(server, "_load_upstream_shared_secret", return_value="test-secret"),
-                patch("uvicorn.Server", return_value=mock_uvicorn_server),
-                patch("uvicorn.Config"),
+                patch("uvicorn.run", side_effect=fake_uvicorn_run),
             ):
                 server.main()
 
-        # Server.serve() must be called with a pre-bound socket, not uds=,
-        # to avoid uvicorn's os.chmod call (fails with EINVAL on virtioFS/macOS Docker).
-        self.assertEqual(len(serve_calls), 1)
-        self.assertIsNotNone(serve_calls[0])
-        self.assertEqual(len(serve_calls[0]), 1)
+        self.assertEqual(len(uvicorn_calls), 1)
+        self.assertEqual(uvicorn_calls[0]["uds"], socket_path)
 
 
 if __name__ == "__main__":
