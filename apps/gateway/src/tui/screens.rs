@@ -251,10 +251,7 @@ fn welcome_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         muted_line("This guided setup writes the default Brain3 config and starts the gateway."),
         muted_line("The same shell is also used later for everyday runtime status."),
         blank_line(),
-        Line::from(Span::styled(
-            "Here are the default locations for future reference.",
-            accent_style(),
-        )),
+        Line::from(Span::styled("Important locations:", accent_style())),
         blank_line(),
         key_value_line(
             "App home",

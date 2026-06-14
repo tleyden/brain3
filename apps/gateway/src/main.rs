@@ -606,6 +606,7 @@ async fn main() -> Result<()> {
                 GatewayTuiLaunch::FirstRun,
                 setup_defaults(&runtime_overrides),
                 runtime_overrides.clone(),
+                args.brain3_home.clone(),
             )
             .await
         }
@@ -626,6 +627,7 @@ async fn main() -> Result<()> {
                 GatewayTuiLaunch::Configured { launch_plan },
                 setup_defaults(&runtime_overrides),
                 runtime_overrides.clone(),
+                args.brain3_home.clone(),
             )
             .await
         }

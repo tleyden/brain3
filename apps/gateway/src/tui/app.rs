@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,12 +35,16 @@ pub enum GatewayTuiLaunch {
 
 pub async fn run_gateway_tui(
     host: &str,
-    log_file: std::path::PathBuf,
+    log_file: PathBuf,
     launch: GatewayTuiLaunch,
     setup_defaults: SetupDefaults,
     runtime_overrides: RuntimeOverrides,
+    brain3_home: Option<PathBuf>,
 ) -> Result<()> {
-    let setup_system: Arc<dyn SetupSystemPort> = Arc::new(PlatformSetupSystem::new());
+    let setup_system: Arc<dyn SetupSystemPort> = Arc::new(match brain3_home {
+        Some(dir) => PlatformSetupSystem::with_home_override(dir),
+        None => PlatformSetupSystem::new(),
+    });
     let use_case = FirstRunSetupUseCase::new(Arc::clone(&setup_system), setup_defaults);
     let preparation = use_case
         .prepare()
