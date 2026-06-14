@@ -31,12 +31,47 @@ impl CloudflareNamedTunnelAdapter {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct CfTunnel {
+    name: String,
+    connections: Vec<serde_json::Value>,
+}
+
 fn cloudflared_on_path() -> bool {
     std::process::Command::new("which")
         .arg("cloudflared")
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
+}
+
+async fn check_for_active_tunnel(tunnel_name: &str) -> Result<(), TunnelError> {
+    let output = Command::new("cloudflared")
+        .args(["tunnel", "list", "--output", "json", "--name", tunnel_name])
+        .output()
+        .await
+        .map_err(|e| TunnelError::Other(e.to_string()))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let tunnels: Vec<CfTunnel> = match serde_json::from_str(&stdout) {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!("could not parse `cloudflared tunnel list` output: {e}");
+            return Ok(());
+        }
+    };
+
+    for t in &tunnels {
+        if t.name == tunnel_name && !t.connections.is_empty() {
+            return Err(TunnelError::AlreadyRunning {
+                name: tunnel_name.to_string(),
+                connections: t.connections.len(),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 #[async_trait::async_trait]
@@ -51,6 +86,8 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
                 self.config_file.display().to_string(),
             ));
         }
+
+        check_for_active_tunnel(&self.tunnel_name).await?;
 
         let mut cmd = Command::new("cloudflared");
         cmd.args([
