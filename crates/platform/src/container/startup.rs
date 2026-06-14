@@ -83,6 +83,19 @@ pub async fn ensure_mcp_container(
         ];
     }
 
+    let allowed_hosts_env = env_vars
+        .iter()
+        .find(|(key, _)| key == "B3_VAULT_MCP_ALLOWED_HOSTS")
+        .map(|(_, value)| value.as_str());
+    tracing::info!(
+        container = %startup.container_name,
+        network_isolated = startup.network_isolated,
+        host_probe_target = %format!("127.0.0.1:{}", startup.host_port),
+        isolated_probe_target = %format!("<container-ip>:{}", startup.container_port),
+        allowed_hosts_env = ?allowed_hosts_env,
+        "prepared MCP container runtime networking configuration"
+    );
+
     let config = ContainerConfig {
         image: startup.image.clone(),
         name: startup.container_name.clone(),

@@ -107,6 +107,24 @@ impl EnsureContainerUseCase {
         probe_host_override: Option<&str>,
     ) -> Result<(), ContainerError> {
         let deadline = Instant::now() + self.probe_settings.timeout;
+        let probe_desc = if let Some(host) = probe_host_override {
+            config
+                .port_mappings
+                .iter()
+                .map(|mapping| format!("{host}:{}", mapping.container_port))
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            format_port_mappings(&config.port_mappings)
+        };
+        tracing::info!(
+            container = %config.name,
+            probe_target = %probe_desc,
+            probe_uses_container_ip = probe_host_override.is_some(),
+            timeout_ms = self.probe_settings.timeout.as_millis() as u64,
+            poll_interval_ms = self.probe_settings.poll_interval.as_millis() as u64,
+            "verifying container startup reachability"
+        );
 
         loop {
             if !self.port.is_running(id).await? {
@@ -135,16 +153,6 @@ impl EnsureContainerUseCase {
             }
 
             if Instant::now() >= deadline {
-                let probe_desc = if let Some(host) = probe_host_override {
-                    config
-                        .port_mappings
-                        .iter()
-                        .map(|m| format!("{host}:{}", m.container_port))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                } else {
-                    format_port_mappings(&config.port_mappings)
-                };
                 return Err(self
                     .startup_failed(
                         id,

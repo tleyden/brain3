@@ -150,13 +150,23 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
         }
 
         let upstream_url = self.build_upstream_url(path, query);
+        let original_host_header = header_value(&headers, "host").map(str::to_owned);
+        let original_x_forwarded_host =
+            header_value(&headers, "x-forwarded-host").map(str::to_owned);
         let filtered_headers = self.filter_request_headers(headers);
+        let forwarded_host_header = header_value(&filtered_headers, "host").map(str::to_owned);
+        let upstream_authority = url_authority(&upstream_url);
 
         let header_count = filtered_headers.len() + 1; // +1 for upstream secret
         tracing::info!(
             method = method,
             path = path,
+            request_host = request_host,
             upstream_url = %upstream_url,
+            upstream_authority = ?upstream_authority,
+            original_host_header = ?original_host_header,
+            original_x_forwarded_host = ?original_x_forwarded_host,
+            forwarded_host_header = ?forwarded_host_header,
             forwarded_headers = header_count,
             body_bytes = body.len(),
             upstream_secret_hint = %elide_secret(&self.upstream_secret),
@@ -224,4 +234,16 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             .filter(|(name, _)| !HOP_BY_HOP_HEADERS.contains(name.to_lowercase().as_str()))
             .collect()
     }
+}
+
+fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(header_name, _)| header_name.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+}
+
+fn url_authority(url: &str) -> Option<&str> {
+    url.split_once("://")
+        .map(|(_, rest)| rest.split('/').next().unwrap_or(rest))
 }
