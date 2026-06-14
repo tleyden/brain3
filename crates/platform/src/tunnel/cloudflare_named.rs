@@ -6,6 +6,9 @@ use brain3_core::ports::tunnel::{TunnelInfo, TunnelPort, TunnelStatus};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
+
+use super::probe::probe_tunnel_url;
 
 pub struct CloudflareNamedTunnelAdapter {
     tunnel_name: String,
@@ -45,30 +48,37 @@ fn cloudflared_on_path() -> bool {
         .unwrap_or(false)
 }
 
-async fn count_active_connections(tunnel_name: &str) -> Result<Option<usize>, TunnelError> {
-    let output = Command::new("cloudflared")
+/// Returns (registered, active_connection_count).
+/// registered=false means the tunnel name does not exist in Cloudflare's registry.
+async fn check_cf_registry(tunnel_name: &str) -> (bool, usize) {
+    let output = match Command::new("cloudflared")
         .args(["tunnel", "list", "--output", "json", "--name", tunnel_name])
         .output()
         .await
-        .map_err(|e| TunnelError::Other(e.to_string()))?;
+    {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::warn!(error = %e, "could not run `cloudflared tunnel list` for registry check");
+            return (false, 0);
+        }
+    };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-
     let tunnels: Vec<CfTunnel> = match serde_json::from_str(&stdout) {
         Ok(t) => t,
         Err(e) => {
-            tracing::warn!("could not parse `cloudflared tunnel list` output: {e}");
-            return Ok(None);
+            tracing::warn!(error = %e, raw = %stdout, "could not parse `cloudflared tunnel list` output");
+            return (false, 0);
         }
     };
 
     for t in &tunnels {
-        if t.name == tunnel_name && !t.connections.is_empty() {
-            return Ok(Some(t.connections.len()));
+        if t.name == tunnel_name {
+            return (true, t.connections.len());
         }
     }
 
-    Ok(None)
+    (false, 0)
 }
 
 async fn cleanup_tunnel(tunnel_name: &str) -> Result<(), TunnelError> {
@@ -101,10 +111,18 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
             ));
         }
 
-        if let Some(n) = count_active_connections(&self.tunnel_name).await? {
+        // Pre-start: cleanup any stale connections before spawning.
+        let (registered_before, stale_connections) = check_cf_registry(&self.tunnel_name).await;
+        tracing::info!(
+            tunnel_name = %self.tunnel_name,
+            registered = registered_before,
+            stale_connections,
+            "pre-start CF registry check"
+        );
+        if registered_before && stale_connections > 0 {
             tracing::warn!(
                 tunnel = %self.tunnel_name,
-                connections = n,
+                connections = stale_connections,
                 "found stale tunnel connections — running cleanup before start"
             );
             cleanup_tunnel(&self.tunnel_name).await?;
@@ -128,6 +146,12 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
 
         let stderr = child.stderr.take().expect("stderr was piped");
 
+        // Store child and URL immediately so the stderr logger can start and
+        // so stop() works even if diagnostics fail below.
+        let public_url = format!("https://{}.{}", self.tunnel_name, self.domain);
+        *self.public_url.lock().await = Some(public_url.clone());
+        *self.child.lock().await = Some(child);
+
         tokio::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
@@ -135,9 +159,69 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
             }
         });
 
-        let public_url = format!("https://{}.{}", self.tunnel_name, self.domain);
-        *self.public_url.lock().await = Some(public_url.clone());
-        *self.child.lock().await = Some(child);
+        // Wait 2s to let cloudflared either connect or fail fast.
+        sleep(Duration::from_secs(2)).await;
+
+        // --- Check 1: process still alive ---
+        let process_alive = {
+            let mut guard = self.child.lock().await;
+            match guard.as_mut() {
+                None => false,
+                Some(child) => child.try_wait().map(|r| r.is_none()).unwrap_or(false),
+            }
+        };
+        tracing::info!(
+            tunnel_name = %self.tunnel_name,
+            process_alive,
+            "tunnel process check"
+        );
+        if !process_alive {
+            return Err(TunnelError::Other(format!(
+                "cloudflared process for tunnel '{}' exited immediately after launch — \
+                 check logs above for the error from cloudflared",
+                self.tunnel_name
+            )));
+        }
+
+        // --- Check 2: Cloudflare registry ---
+        let (registered, active_connections) = check_cf_registry(&self.tunnel_name).await;
+        tracing::info!(
+            tunnel_name = %self.tunnel_name,
+            registered,
+            active_connections,
+            "post-start CF registry check"
+        );
+        if !registered {
+            return Err(TunnelError::TunnelNotFound(self.tunnel_name.clone()));
+        }
+
+        // --- Check 3: HTTP probe ---
+        let probe_url = format!("{}/mcp", public_url);
+        let probe = probe_tunnel_url(&probe_url).await;
+        let probe_healthy = probe.is_healthy();
+        let probe_summary = probe.summary();
+
+        if probe_healthy {
+            tracing::info!(
+                tunnel_name = %self.tunnel_name,
+                url = %probe_url,
+                outcome = %probe_summary,
+                "tunnel HTTP probe passed"
+            );
+        } else {
+            tracing::error!(
+                tunnel_name = %self.tunnel_name,
+                url = %probe_url,
+                outcome = %probe_summary,
+                registered,
+                active_connections,
+                process_alive,
+                "tunnel HTTP probe failed — tunnel is running but not reachable"
+            );
+            return Err(TunnelError::NotReachable(format!(
+                "HTTP probe to {probe_url} failed: {probe_summary}"
+            )));
+        }
 
         Ok(TunnelInfo { public_url })
     }

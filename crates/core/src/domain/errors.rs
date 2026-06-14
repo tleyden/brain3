@@ -116,6 +116,10 @@ pub enum TunnelError {
     SetupFailed(String),
     #[error("could not spawn cloudflared: {0}")]
     SpawnFailed(String),
+    #[error("tunnel '{0}' not found in Cloudflare registry — it may have been deleted (run `cloudflared tunnel list` to check)")]
+    TunnelNotFound(String),
+    #[error("tunnel not reachable at startup: {0}")]
+    NotReachable(String),
     #[error("tunnel error: {0}")]
     Other(String),
 }
