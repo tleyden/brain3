@@ -529,7 +529,7 @@ async fn run_cli_mode(
 
     logging.enable_terminal_mirror();
 
-    let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
+    let mut runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
 
     if let Some(public_url) = &runtime.public_url {
         tracing::info!(url = %public_url, "runtime public URL ready");
@@ -564,7 +564,9 @@ async fn run_cli_mode(
         runtime.upstream_secret.clone(),
         shutdown_signal(),
     )
-    .await
+    .await?;
+    runtime.stop_tunnel().await;
+    Ok(())
 }
 
 #[tokio::main]

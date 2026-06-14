@@ -123,7 +123,7 @@ pub fn write_config_file(
 
     let hostname = format!("{tunnel_name}.{domain}");
     let content = format!(
-        "tunnel: {tunnel_id}\ncredentials-file: {creds}\n\ningress:\n  - hostname: {hostname}\n    service: http://localhost:{local_port}\n  - service: http_status:404\n",
+        "tunnel: {tunnel_id}\ncredentials-file: {creds}\n\ningress:\n  - hostname: {hostname}\n    service: http://127.0.0.1:{local_port}\n  - service: http_status:404\n",
         creds = credentials_file.display(),
     );
 

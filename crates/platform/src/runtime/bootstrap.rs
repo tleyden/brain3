@@ -37,7 +37,7 @@ pub struct RuntimeBootstrap {
     pub public_url: Option<String>,
     pub container_status: StartupStatus,
     pub tunnel_status: StartupStatus,
-    _tunnel_guard: Option<Box<dyn TunnelPort>>,
+    tunnel: Option<Box<dyn TunnelPort>>,
 }
 
 impl RuntimeBootstrap {
@@ -56,7 +56,15 @@ impl RuntimeBootstrap {
             public_url,
             container_status,
             tunnel_status,
-            _tunnel_guard: None,
+            tunnel: None,
+        }
+    }
+
+    pub async fn stop_tunnel(&mut self) {
+        if let Some(tunnel) = self.tunnel.take() {
+            if let Err(e) = tunnel.stop().await {
+                tracing::warn!(error = %e, "error stopping tunnel during shutdown");
+            }
         }
     }
 
@@ -147,7 +155,7 @@ pub async fn bootstrap_configured_runtime(
         public_url,
         container_status,
         tunnel_status,
-        _tunnel_guard: tunnel_guard,
+        tunnel: tunnel_guard,
     })
 }
 

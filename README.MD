@@ -56,9 +56,10 @@ Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the 
 - <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
 - You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
 
-### Trusted 3rd Parties
+### Cloudflare Tunnels
 
 - ⚠️ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
+- Tunnels are cleaned up automatically when Brain3 stops.
 
 ### Authentication & Authorization
 
