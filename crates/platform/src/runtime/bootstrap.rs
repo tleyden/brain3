@@ -105,9 +105,22 @@ pub async fn bootstrap_configured_runtime(
     let upstream_secret =
         upstream_secret::read_or_create(&config.mcp_reverse_proxy.upstream_secret_file)?;
 
+    let mut config = config;
     let container_status = if let Some(startup) = &config.container {
         match ensure_mcp_container(startup).await {
-            Ok(()) => StartupStatus::Ready,
+            Ok(Some(container_ip)) if startup.network_isolated => {
+                let upstream_url = format!("http://{}:{}", container_ip, startup.container_port);
+                tracing::info!(
+                    container_ip = %container_ip,
+                    upstream_url = %upstream_url,
+                    "isolated container: routing MCP reverse proxy directly to container IP"
+                );
+                let mut updated = (*config).clone();
+                updated.mcp_reverse_proxy.mcp_upstream_url = upstream_url;
+                config = Arc::new(updated);
+                StartupStatus::Ready
+            }
+            Ok(_) => StartupStatus::Ready,
             Err(error) => container_failure_status(startup.container_name.as_str(), &error),
         }
     } else {

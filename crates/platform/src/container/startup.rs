@@ -11,7 +11,9 @@ use super::{DockerContainerAdapter, MacOsContainerAdapter};
 
 const DEV_MOUNT_TARGET: &str = "/workspace/brain3-mcp-vault-tools";
 
-pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
+pub async fn ensure_mcp_container(
+    startup: &ContainerStartupConfig,
+) -> Result<Option<String>, ContainerError> {
     let dev_mode = startup.dev_mount_source.is_some();
     tracing::info!(
         container = %startup.container_name,
@@ -99,6 +101,6 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         command,
     };
 
-    EnsureContainerUseCase::new(port).ensure(&config).await?;
-    Ok(())
+    let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
+    Ok(container_ip)
 }

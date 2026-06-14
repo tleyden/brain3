@@ -86,12 +86,14 @@ impl ContainerPort for DockerContainerAdapter {
             args.push("--user".into());
             args.push(user.clone());
         }
-        for pm in &config.port_mappings {
-            args.push("--publish".into());
-            args.push(format!(
-                "{}:{}:{}",
-                pm.host_address, pm.host_port, pm.container_port
-            ));
+        if !config.network_isolated {
+            for pm in &config.port_mappings {
+                args.push("--publish".into());
+                args.push(format!(
+                    "{}:{}:{}",
+                    pm.host_address, pm.host_port, pm.container_port
+                ));
+            }
         }
         for (k, v) in &config.env_vars {
             args.push("--env".into());
@@ -133,5 +135,26 @@ impl ContainerPort for DockerContainerAdapter {
 
     async fn remove(&self, id: &ContainerId) -> Result<(), ContainerError> {
         run_command("docker", &["rm", &id.0]).await.map(|_| ())
+    }
+
+    async fn get_container_ip(&self, id: &ContainerId) -> Result<Option<String>, ContainerError> {
+        match run_command(
+            "docker",
+            &[
+                "inspect",
+                "--format",
+                "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}",
+                &id.0,
+            ],
+        )
+        .await
+        {
+            Ok(out) => {
+                let ip = out.trim().to_string();
+                Ok(if ip.is_empty() { None } else { Some(ip) })
+            }
+            Err(ContainerError::CommandFailed { .. }) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 }

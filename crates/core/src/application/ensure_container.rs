@@ -53,7 +53,10 @@ impl EnsureContainerUseCase {
         }
     }
 
-    pub async fn ensure(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
+    pub async fn ensure(
+        &self,
+        config: &ContainerConfig,
+    ) -> Result<(ContainerId, Option<String>), ContainerError> {
         if !self.port.image_exists(&config.image).await? {
             tracing::warn!(
                 image = %config.image,
@@ -84,15 +87,24 @@ impl EnsureContainerUseCase {
         }
 
         let id = self.port.run(&runtime_config).await?;
-        self.verify_startup(&id, config).await?;
+
+        let container_ip = if runtime_config.network_isolated {
+            self.port.get_container_ip(&id).await?
+        } else {
+            None
+        };
+
+        self.verify_startup(&id, config, container_ip.as_deref())
+            .await?;
         tracing::info!(container = %config.name, "container ready");
-        Ok(id)
+        Ok((id, container_ip))
     }
 
     async fn verify_startup(
         &self,
         id: &ContainerId,
         config: &ContainerConfig,
+        probe_host_override: Option<&str>,
     ) -> Result<(), ContainerError> {
         let deadline = Instant::now() + self.probe_settings.timeout;
 
@@ -110,23 +122,35 @@ impl EnsureContainerUseCase {
             }
 
             let ports_ready = config.port_mappings.is_empty()
-                || config
-                    .port_mappings
-                    .iter()
-                    .all(|mapping| tcp_port_ready(&mapping.host_address, mapping.host_port));
+                || config.port_mappings.iter().all(|mapping| {
+                    if let Some(host) = probe_host_override {
+                        tcp_port_ready(host, mapping.container_port)
+                    } else {
+                        tcp_port_ready(&mapping.host_address, mapping.host_port)
+                    }
+                });
 
             if ports_ready {
                 return Ok(());
             }
 
             if Instant::now() >= deadline {
+                let probe_desc = if let Some(host) = probe_host_override {
+                    config
+                        .port_mappings
+                        .iter()
+                        .map(|m| format!("{host}:{}", m.container_port))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                } else {
+                    format_port_mappings(&config.port_mappings)
+                };
                 return Err(self
                     .startup_failed(
                         id,
                         format!(
                             "container '{}' did not become reachable on {} before timeout",
-                            config.name,
-                            format_port_mappings(&config.port_mappings)
+                            config.name, probe_desc
                         ),
                     )
                     .await);
@@ -298,6 +322,13 @@ mod tests {
             state.container_exists = false;
             Ok(())
         }
+
+        async fn get_container_ip(
+            &self,
+            _id: &ContainerId,
+        ) -> Result<Option<String>, ContainerError> {
+            Ok(None)
+        }
     }
 
     fn sample_config() -> ContainerConfig {
@@ -333,7 +364,7 @@ mod tests {
         let use_case = short_probe_use_case(port.clone());
         let config = sample_config();
 
-        let id = use_case.ensure(&config).await.unwrap();
+        let (id, _) = use_case.ensure(&config).await.unwrap();
 
         assert_eq!(id.0, config.name);
 
@@ -366,7 +397,7 @@ mod tests {
         let use_case = short_probe_use_case(port.clone());
         let config = sample_config();
 
-        let id = use_case.ensure(&config).await.unwrap();
+        let (id, _) = use_case.ensure(&config).await.unwrap();
 
         assert_eq!(id.0, config.name);
 
@@ -469,7 +500,7 @@ mod tests {
         let mut config = sample_config();
         config.network_isolated = true;
 
-        let id = use_case.ensure(&config).await.unwrap();
+        let (id, _) = use_case.ensure(&config).await.unwrap();
 
         assert_eq!(id.0, config.name);
 

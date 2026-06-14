@@ -571,7 +571,7 @@ async fn run_cli_mode(
 
     server::run_gateway_server_until(
         host,
-        config,
+        Arc::clone(&runtime.config),
         runtime.upstream_secret.clone(),
         shutdown_signal(),
     )

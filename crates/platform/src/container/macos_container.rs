@@ -76,12 +76,14 @@ impl ContainerPort for MacOsContainerAdapter {
             args.push("--user".into());
             args.push(user.clone());
         }
-        for pm in &config.port_mappings {
-            args.push("--publish".into());
-            args.push(format!(
-                "{}:{}:{}",
-                pm.host_address, pm.host_port, pm.container_port
-            ));
+        if !config.network_isolated {
+            for pm in &config.port_mappings {
+                args.push("--publish".into());
+                args.push(format!(
+                    "{}:{}:{}",
+                    pm.host_address, pm.host_port, pm.container_port
+                ));
+            }
         }
         for (k, v) in &config.env_vars {
             args.push("--env".into());
@@ -131,6 +133,31 @@ impl ContainerPort for MacOsContainerAdapter {
             {
                 Ok(())
             }
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn get_container_ip(&self, id: &ContainerId) -> Result<Option<String>, ContainerError> {
+        match run_command("container", &["inspect", &id.0]).await {
+            Ok(out) => {
+                // Parse the first IP address from the JSON output.
+                // Look for `"IPAddress": "x.x.x.x"` pattern.
+                let ip = out.lines().find_map(|line| {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("\"IPAddress\"") || trimmed.starts_with("\"ipAddress\"")
+                    {
+                        trimmed
+                            .split(':')
+                            .nth(1)
+                            .map(|s| s.trim().trim_matches('"').trim_matches(',').to_string())
+                            .filter(|s| !s.is_empty() && s != "null")
+                    } else {
+                        None
+                    }
+                });
+                Ok(ip)
+            }
+            Err(ContainerError::CommandFailed { .. }) => Ok(None),
             Err(e) => Err(e),
         }
     }
