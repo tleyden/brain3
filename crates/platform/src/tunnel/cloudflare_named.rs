@@ -8,7 +8,6 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
-use super::probe::probe_tunnel_url;
 
 pub struct CloudflareNamedTunnelAdapter {
     tunnel_name: String,
@@ -193,34 +192,6 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
         );
         if !registered {
             return Err(TunnelError::TunnelNotFound(self.tunnel_name.clone()));
-        }
-
-        // --- Check 3: HTTP probe ---
-        let probe_url = format!("{}/mcp", public_url);
-        let probe = probe_tunnel_url(&probe_url).await;
-        let probe_healthy = probe.is_healthy();
-        let probe_summary = probe.summary();
-
-        if probe_healthy {
-            tracing::info!(
-                tunnel_name = %self.tunnel_name,
-                url = %probe_url,
-                outcome = %probe_summary,
-                "tunnel HTTP probe passed"
-            );
-        } else {
-            tracing::error!(
-                tunnel_name = %self.tunnel_name,
-                url = %probe_url,
-                outcome = %probe_summary,
-                registered,
-                active_connections,
-                process_alive,
-                "tunnel HTTP probe failed — tunnel is running but not reachable"
-            );
-            return Err(TunnelError::NotReachable(format!(
-                "HTTP probe to {probe_url} failed: {probe_summary}"
-            )));
         }
 
         Ok(TunnelInfo { public_url })
