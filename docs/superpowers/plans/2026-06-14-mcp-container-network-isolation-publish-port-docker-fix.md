@@ -116,7 +116,14 @@
 - [ ] If `B3_VAULT_MCP_UNIX_SOCKET` is set and the socket path cannot be bound (directory missing, permission denied, or any other error), the server **must exit immediately with a non-zero exit code and a clear error message**. Do not fall back to TCP — TCP is not published in isolated mode and a silent TCP fallback produces a container that appears running but is completely unreachable.
 - [ ] Before binding the socket, unlink any existing socket file at that path to avoid "address already in use" on container restart after a crash or unclean shutdown.
 - [ ] Preserve the current upstream-secret middleware and transport-security behavior in both modes.
-- [ ] Prefer a native ASGI/uvicorn Unix-socket startup path over adding `socat` or a second long-running bridge process.
+- [ ] **Do NOT use `uvicorn.run(app, uds=path)`.** uvicorn calls `os.chmod(uds_path, 0o666)` immediately after creating the socket file. On macOS Docker, the bind-mounted runtime directory goes through virtioFS, which returns `EINVAL` for `chmod` on socket files (confirmed by RCA: `OSError: [Errno 22] Invalid argument`). Instead, create and bind the socket manually, then pass the already-bound socket to uvicorn via the `sockets=` parameter: `uvicorn.run(app, sockets=[sock])`. When uvicorn receives a pre-bound socket, `config.uds` remains `None` and the `chmod` code path is skipped entirely.
+  ```python
+  import socket as _socket
+  sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+  sock.bind(str(socket_path))
+  sock.listen(128)
+  uvicorn.run(app, sockets=[sock])
+  ```
 - [ ] Treat a bridge process as contingency only if FastMCP cannot be made to serve the existing app over a Unix socket cleanly.
 
 ## Task 4: Change Container Runtime Adapters to Use Sockets in Isolated Mode

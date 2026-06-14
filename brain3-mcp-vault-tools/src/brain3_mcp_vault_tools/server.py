@@ -408,6 +408,8 @@ def _run_on_tcp() -> None:
 
 
 def _run_on_unix_socket() -> None:
+    import asyncio
+    import socket as _socket
     import uvicorn
 
     socket_path = Path(VAULT_MCP_UNIX_SOCKET)
@@ -431,12 +433,30 @@ def _run_on_unix_socket() -> None:
         _package_version(),
         VAULT_MCP_UNIX_SOCKET,
     )
+
+    # Pre-bind the socket and pass it to uvicorn via Server.serve(sockets=[]).
+    # uvicorn.run(uds=) calls os.chmod() on the socket file after creating it,
+    # which fails with EINVAL on virtioFS-mounted directories in macOS Docker.
+    # uvicorn.run() has no sockets= parameter; the sockets= arg lives on
+    # Server.serve() / Server._serve(). When sockets is not None, uvicorn
+    # skips the elif config.uds branch entirely, so os.chmod is never called.
+    sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    try:
+        sock.bind(str(socket_path))
+        sock.listen(128)
+    except OSError as exc:
+        sock.close()
+        logger.error("Failed to bind Unix socket %s: %s", socket_path, exc)
+        sys.exit(1)
+
     app = mcp.streamable_http_app()
     _start_process_resources()
     try:
-        uvicorn.run(app, uds=str(socket_path))
+        server = uvicorn.Server(uvicorn.Config(app))
+        asyncio.run(server.serve(sockets=[sock]))
     finally:
         _stop_process_resources()
+        sock.close()
 
 
 if __name__ == "__main__":
