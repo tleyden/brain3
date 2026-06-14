@@ -51,6 +51,9 @@ pub async fn ensure_mcp_container(
             "/run/brain3/upstream_secret".into(),
         ),
     ];
+    if startup.network_isolated {
+        env_vars.push(("B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS".into(), "true".into()));
+    }
 
     let mut bind_mounts = vec![
         BindMount {
@@ -87,12 +90,17 @@ pub async fn ensure_mcp_container(
         .iter()
         .find(|(key, _)| key == "B3_VAULT_MCP_ALLOWED_HOSTS")
         .map(|(_, value)| value.as_str());
+    let allow_self_ip_hosts = env_vars
+        .iter()
+        .find(|(key, _)| key == "B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS")
+        .map(|(_, value)| value.as_str());
     tracing::info!(
         container = %startup.container_name,
         network_isolated = startup.network_isolated,
         host_probe_target = %format!("127.0.0.1:{}", startup.host_port),
         isolated_probe_target = %format!("<container-ip>:{}", startup.container_port),
         allowed_hosts_env = ?allowed_hosts_env,
+        allow_self_ip_hosts = ?allow_self_ip_hosts,
         "prepared MCP container runtime networking configuration"
     );
 

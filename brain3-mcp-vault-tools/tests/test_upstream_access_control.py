@@ -1,5 +1,6 @@
 import importlib
 import os
+import socket
 import sys
 import tempfile
 import unittest
@@ -74,6 +75,46 @@ class UpstreamAccessControlTests(unittest.TestCase):
 
     def test_mcp_allows_requests_with_correct_shared_secret(self):
         with TestClient(self.app, base_url="http://127.0.0.1:8420") as client:
+            response = self._tools_list_request(client, secret="shared-secret")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_mcp_allows_requests_to_detected_self_ip_when_enabled(self):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "B3_VAULT_PATH": str(self.vault),
+                    "B3_VAULT_MCP_PORT": "8420",
+                    "B3_UPSTREAM_SHARED_SECRET_FILE": str(self.secret_file),
+                    "B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS": "true",
+                },
+                clear=False,
+            ),
+            patch(
+                "socket.getaddrinfo",
+                return_value=[
+                    (
+                        socket.AF_INET,
+                        socket.SOCK_STREAM,
+                        6,
+                        "",
+                        ("172.18.0.2", 0),
+                    ),
+                    (
+                        socket.AF_INET,
+                        socket.SOCK_STREAM,
+                        6,
+                        "",
+                        ("127.0.0.1", 0),
+                    ),
+                ],
+            ),
+        ):
+            server = import_server_module()
+            app = server.mcp.streamable_http_app()
+
+        with TestClient(app, base_url="http://172.18.0.2:8420") as client:
             response = self._tools_list_request(client, secret="shared-secret")
 
         self.assertEqual(response.status_code, 200)

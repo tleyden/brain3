@@ -1,7 +1,9 @@
 """Authless Obsidian MCP server."""
 
 import hmac
+import ipaddress
 import logging
+import socket
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -13,6 +15,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import (
+    VAULT_MCP_ALLOW_SELF_IP_HOSTS,
     UPSTREAM_SHARED_SECRET_FILE,
     UPSTREAM_SHARED_SECRET_HEADER,
     VAULT_MCP_EXTRA_ALLOWED_HOSTS,
@@ -56,7 +59,60 @@ DEFAULT_ALLOWED_HOSTS = [
     "localhost:*",
     "[::1]:*",
 ]
-ALLOWED_HOSTS = DEFAULT_ALLOWED_HOSTS + VAULT_MCP_EXTRA_ALLOWED_HOSTS
+
+
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _format_ip_allowed_host(ip: str) -> str:
+    return f"[{ip}]:*" if ":" in ip else f"{ip}:*"
+
+
+def _discover_self_ips() -> list[str]:
+    hostname = socket.gethostname()
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        logger.warning(
+            "Unable to resolve self IPs from hostname=%s: %s", hostname, exc
+        )
+        return []
+
+    ips: list[str] = []
+    for _family, _socktype, _proto, _canonname, sockaddr in addrinfos:
+        host = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_unspecified:
+            continue
+        ips.append(ip.compressed)
+
+    return _dedupe_keep_order(ips)
+
+
+def _resolve_allowed_hosts() -> tuple[list[str], list[str]]:
+    detected_self_ips = (
+        _discover_self_ips() if VAULT_MCP_ALLOW_SELF_IP_HOSTS else []
+    )
+    allowed_hosts = (
+        DEFAULT_ALLOWED_HOSTS
+        + VAULT_MCP_EXTRA_ALLOWED_HOSTS
+        + [_format_ip_allowed_host(ip) for ip in detected_self_ips]
+    )
+    return _dedupe_keep_order(allowed_hosts), detected_self_ips
+
+
+ALLOWED_HOSTS, DETECTED_SELF_IPS = _resolve_allowed_hosts()
 
 
 def _package_version() -> str:
@@ -199,11 +255,13 @@ def _start_process_resources() -> None:
     """Start process-scoped resources before serving requests."""
     logger.info(f"Starting vault MCP server. Vault: {VAULT_PATH}")
     logger.info(
-        "Transport security bind_host=%s bind_port=%s allowed_hosts=%s extra_allowed_hosts=%s",
+        "Transport security bind_host=%s bind_port=%s allowed_hosts=%s extra_allowed_hosts=%s allow_self_ip_hosts=%s detected_self_ips=%s",
         VAULT_MCP_HOST,
         VAULT_MCP_PORT,
         ALLOWED_HOSTS,
         VAULT_MCP_EXTRA_ALLOWED_HOSTS,
+        VAULT_MCP_ALLOW_SELF_IP_HOSTS,
+        DETECTED_SELF_IPS,
     )
     frontmatter_index.start()
     logger.info(
