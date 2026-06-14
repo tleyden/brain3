@@ -10,7 +10,7 @@ use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::token_exchange::TokenExchangeUseCase;
 use brain3_core::domain::errors::ProxyError;
 use brain3_core::domain::model::{
-    GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig,
+    GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig, UpstreamTransport,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
 use brain3_core::ports::token_store::{StoredTokenData, StoredTokenKind, TokenStore};
@@ -161,7 +161,7 @@ impl TestHarness {
         ));
         let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
             proxy,
-            self.mcp_upstream_url,
+            self.mcp_upstream_url.clone(),
             self.mcp_upstream_secret,
             token_store_port,
             self.hostname_validation.clone(),
@@ -173,7 +173,9 @@ impl TestHarness {
             token_db_path: "/tmp/brain3-test-brain3.db".into(),
             oauth: self.oauth,
             mcp_reverse_proxy: MCPReverseProxyConfig {
-                mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                upstream: UpstreamTransport::Http {
+                    url: self.mcp_upstream_url,
+                },
                 upstream_secret_file: "/dev/null".into(),
             },
             hostname_validation: self.hostname_validation,

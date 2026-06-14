@@ -1197,7 +1197,9 @@ mod tests {
                     password: "password".into(),
                 },
                 mcp_reverse_proxy: MCPReverseProxyConfig {
-                    mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                    upstream: brain3_core::domain::model::UpstreamTransport::Http {
+                        url: "http://127.0.0.1:8420".into(),
+                    },
                     upstream_secret_file: PathBuf::from("/tmp/upstream_secret"),
                 },
                 hostname_validation: HostnameValidationConfig {
@@ -1213,6 +1215,9 @@ mod tests {
                     host_port: 8420,
                     container_port: 8420,
                     network_isolated: true,
+                    host_runtime_dir: std::env::temp_dir()
+                        .join("brain3-runtime")
+                        .join("brain3-mcp-vault-tools"),
                     dev_mount_source: None,
                 }),
                 tunnel: None,

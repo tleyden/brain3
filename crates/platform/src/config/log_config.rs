@@ -1,4 +1,4 @@
-use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
+use brain3_core::domain::model::{GatewayConfig, TunnelConfig, UpstreamTransport};
 
 pub fn log_startup_config(config: &GatewayConfig) {
     let upstream_secret_dir = config
@@ -18,7 +18,7 @@ pub fn log_startup_config(config: &GatewayConfig) {
         username = %config.oauth.username,
         password = mask(&config.oauth.password),
         pkce_required = config.oauth.pkce_required,
-        upstream_url = %config.mcp_reverse_proxy.mcp_upstream_url,
+        upstream = %upstream_summary(&config.mcp_reverse_proxy.upstream),
         upstream_secret_file = %config.mcp_reverse_proxy.upstream_secret_file.display(),
         upstream_secret_dir = %upstream_secret_dir,
         expected_host = ?config.hostname_validation.expected_host,
@@ -30,6 +30,15 @@ pub fn log_startup_config(config: &GatewayConfig) {
         tunnel = ?config.tunnel.as_ref().map(tunnel_summary),
         "startup config"
     );
+}
+
+fn upstream_summary(t: &UpstreamTransport) -> String {
+    match t {
+        UpstreamTransport::Http { url } => format!("tcp:{url}"),
+        UpstreamTransport::UnixSocket { socket_path } => {
+            format!("unix:{}", socket_path.display())
+        }
+    }
 }
 
 fn tunnel_summary(t: &TunnelConfig) -> String {

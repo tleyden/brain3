@@ -34,17 +34,17 @@ static REQUEST_STRIP_HEADERS: LazyLock<HashSet<&'static str>> = LazyLock::new(||
     set
 });
 
-pub struct ProxyMcpUseCase<P: McpProxyPort> {
-    proxy: Arc<P>,
+pub struct ProxyMcpUseCase {
+    proxy: Arc<dyn McpProxyPort>,
     upstream_url: String,
     upstream_secret: String,
     token_store: Arc<dyn TokenStore>,
     hostname_validation: HostnameValidationConfig,
 }
 
-impl<P: McpProxyPort> ProxyMcpUseCase<P> {
+impl ProxyMcpUseCase {
     pub fn new(
-        proxy: Arc<P>,
+        proxy: Arc<dyn McpProxyPort>,
         upstream_url: String,
         upstream_secret: String,
         token_store: Arc<dyn TokenStore>,

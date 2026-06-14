@@ -5,19 +5,18 @@ use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::token_exchange::TokenExchangeUseCase;
 use brain3_core::domain::model::GatewayConfig;
 use brain3_core::ports::auth_code_store::AuthCodeStore;
-use brain3_core::ports::mcp_proxy::McpProxyPort;
 
 use super::rate_limit::OAuthRateLimiter;
 
-pub struct AppState<S: AuthCodeStore, P: McpProxyPort> {
+pub struct AppState<S: AuthCodeStore> {
     pub authorize: Arc<AuthorizeUseCase<S>>,
     pub token_exchange: Arc<TokenExchangeUseCase<S>>,
-    pub proxy_mcp: Arc<ProxyMcpUseCase<P>>,
+    pub proxy_mcp: Arc<ProxyMcpUseCase>,
     pub config: Arc<GatewayConfig>,
     pub rate_limiter: Arc<OAuthRateLimiter>,
 }
 
-impl<S: AuthCodeStore, P: McpProxyPort> Clone for AppState<S, P> {
+impl<S: AuthCodeStore> Clone for AppState<S> {
     fn clone(&self) -> Self {
         Self {
             authorize: Arc::clone(&self.authorize),

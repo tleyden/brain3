@@ -11,7 +11,6 @@ use brain3_core::domain::errors::OAuthError;
 use brain3_core::domain::oauth::{AuthorizeRequest, TokenRequest};
 use brain3_core::domain::redact::elide_secret;
 use brain3_core::ports::auth_code_store::AuthCodeStore;
-use brain3_core::ports::mcp_proxy::McpProxyPort;
 
 use super::state::AppState;
 use super::templates::{render_login_form, render_misconfigured_page};
@@ -79,8 +78,8 @@ fn parse_authorize_request(source: &HashMap<String, String>) -> AuthorizeRequest
     }
 }
 
-pub async fn oauth_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(_state): State<AppState<S, P>>,
+pub async fn oauth_metadata<S: AuthCodeStore + 'static>(
+    State(_state): State<AppState<S>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let base_url = resolve_base_url(&headers);
@@ -101,8 +100,8 @@ pub async fn oauth_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'stati
     }))
 }
 
-pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(state): State<AppState<S, P>>,
+pub async fn oauth_authorize_get<S: AuthCodeStore + 'static>(
+    State(state): State<AppState<S>>,
     axum::extract::Query(query): axum::extract::Query<HashMap<String, String>>,
 ) -> Response {
     let req = parse_authorize_request(&query);
@@ -138,8 +137,8 @@ pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + '
     Html(render_login_form(&req, None)).into_response()
 }
 
-pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(state): State<AppState<S, P>>,
+pub async fn oauth_authorize_post<S: AuthCodeStore + 'static>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {
@@ -206,8 +205,8 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
     Redirect::to(&redirect_url).into_response()
 }
 
-pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(state): State<AppState<S, P>>,
+pub async fn oauth_token<S: AuthCodeStore + 'static>(
+    State(state): State<AppState<S>>,
     headers: HeaderMap,
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {

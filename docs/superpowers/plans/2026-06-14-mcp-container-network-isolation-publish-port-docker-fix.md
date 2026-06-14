@@ -100,6 +100,8 @@
 - [ ] Add a dedicated writable runtime directory for the managed MCP socket on the host, separate from the existing read-only upstream-secret mount.
 - [ ] Use a stable in-container socket path such as `/run/brain3-runtime/mcp.sock` and a deterministic host socket path under a Brain3-owned temp/runtime directory.
 - [ ] Keep `B3_CONTAINER_HOST_PORT` in the model for non-isolated mode; do not remove it from config or setup flows in this pass.
+- [ ] Track two distinct path values in the Rust adapter: the **host-side socket directory** (used in the volume mount, e.g. `--volume /host/brain3-runtime:/run/brain3-runtime`) and the **in-container socket path** (e.g. `/run/brain3-runtime/mcp.sock`). The in-container path is what gets passed as the `B3_VAULT_MCP_UNIX_SOCKET` env var to the container. These are distinct values derived from the same base configuration and must not be conflated.
+- [ ] Create the host-side socket directory before launching the container and set permissions so the container's runtime UID can write to it.
 
 ## Task 3: Teach the Python MCP Server to Serve on a Unix Socket
 
@@ -109,8 +111,10 @@
 - Modify: `brain3-mcp-vault-tools/tests/test_server_startup.py`
 - Modify: `brain3-mcp-vault-tools/pyproject.toml` only if an additional dependency is truly required
 
-- [ ] Add an optional env var for a Unix socket path, for example `B3_VAULT_MCP_UNIX_SOCKET`.
+- [ ] Add an optional env var for a Unix socket path, for example `B3_VAULT_MCP_UNIX_SOCKET`. The value must be the **in-container** socket path (e.g. `/run/brain3-runtime/mcp.sock`), not the host path.
 - [ ] When the socket env var is set, start the existing Streamable HTTP app on that socket instead of binding a TCP host/port.
+- [ ] If `B3_VAULT_MCP_UNIX_SOCKET` is set and the socket path cannot be bound (directory missing, permission denied, or any other error), the server **must exit immediately with a non-zero exit code and a clear error message**. Do not fall back to TCP — TCP is not published in isolated mode and a silent TCP fallback produces a container that appears running but is completely unreachable.
+- [ ] Before binding the socket, unlink any existing socket file at that path to avoid "address already in use" on container restart after a crash or unclean shutdown.
 - [ ] Preserve the current upstream-secret middleware and transport-security behavior in both modes.
 - [ ] Prefer a native ASGI/uvicorn Unix-socket startup path over adding `socat` or a second long-running bridge process.
 - [ ] Treat a bridge process as contingency only if FastMCP cannot be made to serve the existing app over a Unix socket cleanly.
@@ -125,13 +129,14 @@
 - [ ] Docker isolated mode:
   - keep `docker network create --internal` behavior
   - stop passing `--publish`
-  - mount the runtime socket directory read-write into the container
-  - pass the MCP socket env var to the container
+  - mount the host-side socket directory read-write into the container (e.g. `--volume /host/brain3-runtime:/run/brain3-runtime`)
+  - pass `B3_VAULT_MCP_UNIX_SOCKET=<in-container socket path>` as a container env var (e.g. `--env B3_VAULT_MCP_UNIX_SOCKET=/run/brain3-runtime/mcp.sock`); the value must be the in-container path, not the host path
 - [ ] Docker non-isolated mode:
   - keep the current `--publish 127.0.0.1:<host_port>:<container_port>` path unchanged
 - [ ] macOS isolated mode:
   - keep internal-network creation
   - replace isolated TCP publish with socket-based exposure using `--publish-socket` or the closest supported equivalent verified during implementation
+  - **before starting Task 4 for macOS**, confirm whether the Apple `container` CLI supports Unix socket sharing (volume mounts of a host directory containing a socket file); if it does not, define the contingency inside this task before writing any code — do not discover this as a blocker mid-implementation
   - keep the same public Brain3 transport contract even if the macOS adapter needs a slightly different CLI wiring than Docker
 - [ ] macOS non-isolated mode:
   - keep the current `--publish` path unchanged

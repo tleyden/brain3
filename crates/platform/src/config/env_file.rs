@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
     ContainerRuntime, ContainerStartupConfig, GatewayConfig, HostnameValidationConfig,
-    MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
+    MCPReverseProxyConfig, OAuthConfig, TunnelConfig, UpstreamTransport,
 };
 use brain3_core::domain::oauth::{
     DEFAULT_ACCESS_TOKEN_LIFETIME_SECS, DEFAULT_REFRESH_TOKEN_LIFETIME_SECS,
@@ -80,10 +80,7 @@ impl ConfigPort for EnvFileConfigAdapter {
 
         let container = load_container_startup_config(&upstream_secret_file)?;
 
-        let default_upstream_url = match &container {
-            Some(c) => format!("http://127.0.0.1:{}", c.host_port),
-            None => "http://127.0.0.1:8420".to_string(),
-        };
+        let upstream = derive_upstream_transport(&container);
 
         let mut missing = Vec::new();
         let client_secret = require_nonempty("B3_OAUTH2_GATEWAY_CLIENT_SECRET", &mut missing);
@@ -112,10 +109,7 @@ impl ConfigPort for EnvFileConfigAdapter {
                 password,
             },
             mcp_reverse_proxy: MCPReverseProxyConfig {
-                mcp_upstream_url: env_var_or(
-                    "B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
-                    &default_upstream_url,
-                ),
+                upstream,
                 upstream_secret_file,
             },
             hostname_validation: HostnameValidationConfig {
@@ -225,6 +219,48 @@ fn direct_public_origin_hostname() -> Option<String> {
     }
 }
 
+/// Compute the host-side runtime directory for a given managed container.
+/// This directory is Brain3-owned; in isolated mode a `mcp.sock` is placed here.
+fn host_runtime_dir(container_name: &str) -> PathBuf {
+    std::env::temp_dir()
+        .join("brain3-runtime")
+        .join(container_name)
+}
+
+/// Derive which upstream transport to use based on whether a managed container is configured
+/// and whether network isolation is enabled.
+fn derive_upstream_transport(container: &Option<ContainerStartupConfig>) -> UpstreamTransport {
+    match container {
+        Some(c) if c.network_isolated => {
+            let socket_path = c.host_runtime_dir.join("mcp.sock");
+            tracing::info!(
+                socket_path = %socket_path.display(),
+                "isolated managed container: using Unix socket transport to MCP upstream"
+            );
+            UpstreamTransport::UnixSocket { socket_path }
+        }
+        Some(c) => {
+            let url = env_var_or(
+                "B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
+                &format!("http://127.0.0.1:{}", c.host_port),
+            );
+            tracing::info!(
+                url = %url,
+                "non-isolated managed container: using TCP transport to MCP upstream"
+            );
+            UpstreamTransport::Http { url }
+        }
+        None => {
+            let url = env_var_or(
+                "B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
+                "http://127.0.0.1:8420",
+            );
+            tracing::info!(url = %url, "no managed container: using explicit/default URL for MCP upstream");
+            UpstreamTransport::Http { url }
+        }
+    }
+}
+
 fn load_container_startup_config(
     upstream_secret_file: &PathBuf,
 ) -> Result<Option<ContainerStartupConfig>, ConfigError> {
@@ -269,6 +305,8 @@ fn load_container_startup_config(
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from);
 
+    let runtime_dir = host_runtime_dir(&container_name);
+
     Ok(Some(ContainerStartupConfig {
         runtime,
         image,
@@ -278,6 +316,7 @@ fn load_container_startup_config(
         host_port,
         container_port,
         network_isolated,
+        host_runtime_dir: runtime_dir,
         dev_mount_source,
     }))
 }

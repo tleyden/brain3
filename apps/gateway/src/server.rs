@@ -12,15 +12,17 @@ use tokio::task::JoinHandle;
 use brain3_core::application::authorize::AuthorizeUseCase;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::token_exchange::TokenExchangeUseCase;
-use brain3_core::domain::model::GatewayConfig;
+use brain3_core::domain::model::{GatewayConfig, UpstreamTransport};
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::config::ConfigPort;
+use brain3_core::ports::mcp_proxy::McpProxyPort;
 use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
+use brain3_platform::mcp_proxy::unix_socket_proxy::UnixSocketMcpProxy;
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
 use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
@@ -104,10 +106,17 @@ where
     let router = build_gateway_router(Arc::clone(&config), upstream_secret)?;
 
     tracing::info!(bind_addr = %bind_addr, local_url = %local_url, "starting OAuth2 gateway");
-    tracing::info!(
-        "Proxying MCP traffic to {}",
-        config.mcp_reverse_proxy.mcp_upstream_url
-    );
+    match &config.mcp_reverse_proxy.upstream {
+        UpstreamTransport::Http { url } => {
+            tracing::info!(upstream_url = %url, "proxying MCP traffic over TCP");
+        }
+        UpstreamTransport::UnixSocket { socket_path } => {
+            tracing::info!(
+                socket_path = %socket_path.display(),
+                "proxying MCP traffic over Unix socket"
+            );
+        }
+    }
 
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown)
@@ -201,7 +210,6 @@ async fn bind_listener(host: &str, port: u16) -> Result<TcpListener> {
 
 fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> Result<Router> {
     let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
-    let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
     let oauth_config = Arc::new(config.oauth.clone());
     let token_store: Arc<dyn brain3_core::ports::token_store::TokenStore> = Arc::new(
         SqliteTokenStore::from_path(&config.token_db_path).with_context(|| {
@@ -214,6 +222,17 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
 
     spawn_token_cleanup_task(Arc::clone(&token_store));
 
+    let (mcp_proxy, upstream_url): (Arc<dyn McpProxyPort>, String) =
+        match &config.mcp_reverse_proxy.upstream {
+            UpstreamTransport::Http { url } => {
+                (Arc::new(ReqwestMcpProxy::new()), url.clone())
+            }
+            UpstreamTransport::UnixSocket { socket_path } => (
+                Arc::new(UnixSocketMcpProxy::new(socket_path.clone())),
+                "http://localhost".to_string(),
+            ),
+        };
+
     let authorize = Arc::new(AuthorizeUseCase::new(
         Arc::clone(&oauth_config),
         Arc::clone(&auth_code_store),
@@ -225,7 +244,7 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
     ));
     let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
         mcp_proxy,
-        config.mcp_reverse_proxy.mcp_upstream_url.clone(),
+        upstream_url,
         upstream_secret,
         token_store,
         config.hostname_validation.clone(),

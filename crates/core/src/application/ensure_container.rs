@@ -1,4 +1,5 @@
 use std::net::{TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -109,27 +110,35 @@ impl EnsureContainerUseCase {
                     .await);
             }
 
-            let ports_ready = config.port_mappings.is_empty()
-                || config
-                    .port_mappings
-                    .iter()
-                    .all(|mapping| tcp_port_ready(&mapping.host_address, mapping.host_port));
+            let ready = if let Some(ref socket_path) = config.unix_socket_path {
+                unix_socket_ready(socket_path)
+            } else {
+                config.port_mappings.is_empty()
+                    || config
+                        .port_mappings
+                        .iter()
+                        .all(|mapping| tcp_port_ready(&mapping.host_address, mapping.host_port))
+            };
 
-            if ports_ready {
+            if ready {
                 return Ok(());
             }
 
             if Instant::now() >= deadline {
-                return Err(self
-                    .startup_failed(
-                        id,
-                        format!(
-                            "container '{}' did not become reachable on {} before timeout",
-                            config.name,
-                            format_port_mappings(&config.port_mappings)
-                        ),
+                let summary = if let Some(ref socket_path) = config.unix_socket_path {
+                    format!(
+                        "container '{}' Unix socket {} did not appear before timeout",
+                        config.name,
+                        socket_path.display()
                     )
-                    .await);
+                } else {
+                    format!(
+                        "container '{}' did not become reachable on {} before timeout",
+                        config.name,
+                        format_port_mappings(&config.port_mappings)
+                    )
+                };
+                return Err(self.startup_failed(id, summary).await);
             }
 
             sleep(self.probe_settings.poll_interval);
@@ -173,6 +182,10 @@ fn tcp_port_ready(host: &str, port: u16) -> bool {
             .any(|addr| TcpStream::connect_timeout(&addr, TCP_CONNECT_TIMEOUT).is_ok()),
         Err(_) => false,
     }
+}
+
+fn unix_socket_ready(path: &PathBuf) -> bool {
+    path.exists()
 }
 
 fn format_port_mappings(port_mappings: &[PortMapping]) -> String {
@@ -313,6 +326,7 @@ mod tests {
             remove_on_exit: false,
             workdir: None,
             command: vec![],
+            unix_socket_path: None,
         }
     }
 
@@ -456,6 +470,34 @@ mod tests {
         let state = port.snapshot();
         assert_eq!(state.logs_tail_count, 1);
         assert!(state.actions.contains(&"logs_tail"));
+    }
+
+    #[tokio::test]
+    async fn isolated_mode_uses_socket_readiness_and_fails_clearly_when_socket_absent() {
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let mut config = sample_config();
+        // Point at a path that will never exist during the test.
+        config.unix_socket_path = Some(PathBuf::from("/tmp/brain3-test-nonexistent.sock"));
+        config.network_isolated = true;
+
+        let error = use_case
+            .ensure(&config)
+            .await
+            .expect_err("socket that never appears should fail startup verification");
+
+        match error {
+            ContainerError::StartupFailed { summary, .. } => {
+                assert!(
+                    summary.contains("Unix socket") && summary.contains("did not appear"),
+                    "unexpected summary: {summary}"
+                );
+            }
+            other => panic!("expected startup failure, got {other:?}"),
+        }
     }
 
     #[tokio::test]

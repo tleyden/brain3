@@ -23,9 +23,19 @@ pub struct OAuthConfig {
     pub password: String,
 }
 
+/// How the gateway reaches the upstream MCP server.
+#[derive(Debug, Clone)]
+pub enum UpstreamTransport {
+    /// HTTP over TCP. `url` is the full base URL, e.g. `http://127.0.0.1:8420`.
+    Http { url: String },
+    /// HTTP/1.1 over a Unix domain socket on the host.
+    /// `socket_path` is the host-side path to the `.sock` file.
+    UnixSocket { socket_path: PathBuf },
+}
+
 #[derive(Debug, Clone)]
 pub struct MCPReverseProxyConfig {
-    pub mcp_upstream_url: String,
+    pub upstream: UpstreamTransport,
     pub upstream_secret_file: PathBuf,
 }
 
@@ -57,6 +67,9 @@ pub struct ContainerConfig {
     pub workdir: Option<String>,
     /// Override the image's default CMD/entrypoint.
     pub command: Vec<String>,
+    /// Host-side Unix socket path to poll for readiness instead of TCP ports.
+    /// Set only in isolated mode; `None` means use port_mappings-based TCP probe.
+    pub unix_socket_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +97,9 @@ pub struct ContainerStartupConfig {
     pub host_port: u16,
     pub container_port: u16,
     pub network_isolated: bool,
+    /// Host-side directory Brain3 owns for runtime files (Unix socket, etc.).
+    /// In isolated mode a `mcp.sock` file is placed here and bind-mounted into the container.
+    pub host_runtime_dir: PathBuf,
     /// When set, bind-mount this host directory into the container and run
     /// from source instead of the code baked into the image.
     pub dev_mount_source: Option<PathBuf>,

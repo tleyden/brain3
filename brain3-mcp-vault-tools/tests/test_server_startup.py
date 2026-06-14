@@ -1,9 +1,10 @@
 import importlib
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, MagicMock, patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_VAULT = PROJECT_ROOT / "test_vault"
@@ -81,6 +82,37 @@ class ServerStartupTests(unittest.TestCase):
         info_mock.assert_any_call(
             "Starting authless MCP server version=%s on port %s", "0.1.6", ANY
         )
+
+
+    def test_unix_socket_mode_binds_uvicorn_to_socket_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            socket_path = os.path.join(tmpdir, "mcp.sock")
+            with patch.dict(
+                os.environ,
+                {
+                    "B3_VAULT_PATH": str(TEST_VAULT),
+                    "B3_VAULT_MCP_UNIX_SOCKET": socket_path,
+                },
+                clear=False,
+            ):
+                server = import_server_module()
+
+            uvicorn_calls = []
+
+            def fake_uvicorn_run(app, **kwargs):
+                uvicorn_calls.append(kwargs)
+
+            with (
+                patch.object(server, "_start_process_resources"),
+                patch.object(server, "_stop_process_resources"),
+                patch.object(server, "_package_version", return_value="0.1.6"),
+                patch.object(server, "_load_upstream_shared_secret", return_value="test-secret"),
+                patch("uvicorn.run", side_effect=fake_uvicorn_run),
+            ):
+                server.main()
+
+        self.assertEqual(len(uvicorn_calls), 1)
+        self.assertEqual(uvicorn_calls[0]["uds"], socket_path)
 
 
 if __name__ == "__main__":

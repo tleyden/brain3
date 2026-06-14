@@ -18,6 +18,7 @@ from .config import (
     VAULT_MCP_EXTRA_ALLOWED_HOSTS,
     VAULT_MCP_HOST,
     VAULT_MCP_PORT,
+    VAULT_MCP_UNIX_SOCKET,
     VAULT_PATH,
 )
 from .frontmatter_index import FrontmatterIndex
@@ -376,7 +377,7 @@ def vault_delete(path: str, confirm: bool = False) -> str:
 
 
 def main() -> None:
-    """Run the authless MCP server over Streamable HTTP."""
+    """Run the authless MCP server over Streamable HTTP (TCP or Unix socket)."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -387,6 +388,13 @@ def main() -> None:
         logger.error(f"Vault path does not exist: {VAULT_PATH}")
         sys.exit(1)
 
+    if VAULT_MCP_UNIX_SOCKET:
+        _run_on_unix_socket()
+    else:
+        _run_on_tcp()
+
+
+def _run_on_tcp() -> None:
     _start_process_resources()
     try:
         logger.info(
@@ -395,6 +403,38 @@ def main() -> None:
             VAULT_MCP_PORT,
         )
         mcp.run(transport="streamable-http")
+    finally:
+        _stop_process_resources()
+
+
+def _run_on_unix_socket() -> None:
+    import uvicorn
+
+    socket_path = Path(VAULT_MCP_UNIX_SOCKET)
+
+    # Fail immediately if the parent directory does not exist.
+    if not socket_path.parent.exists():
+        logger.error(
+            "Unix socket parent directory does not exist: %s — "
+            "check that the host runtime dir is bind-mounted into the container",
+            socket_path.parent,
+        )
+        sys.exit(1)
+
+    # Unlink any stale socket file so bind() always succeeds on restart.
+    if socket_path.exists():
+        logger.info("Removing stale socket file: %s", socket_path)
+        socket_path.unlink()
+
+    logger.info(
+        "Starting authless MCP server version=%s on Unix socket %s",
+        _package_version(),
+        VAULT_MCP_UNIX_SOCKET,
+    )
+    app = mcp.streamable_http_app()
+    _start_process_resources()
+    try:
+        uvicorn.run(app, uds=str(socket_path))
     finally:
         _stop_process_resources()
 

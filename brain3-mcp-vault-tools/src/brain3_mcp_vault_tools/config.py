@@ -4,6 +4,9 @@ from pathlib import Path
 VAULT_PATH = Path(os.environ.get("B3_VAULT_PATH", os.path.expanduser("~/Obsidian/MyVault")))
 VAULT_MCP_HOST = os.environ.get("B3_VAULT_MCP_HOST", "127.0.0.1")
 VAULT_MCP_PORT = int(os.environ.get("B3_VAULT_MCP_PORT", "8420"))
+# In-container path of the Unix domain socket to bind to when isolation mode is active.
+# When set the server ignores VAULT_MCP_HOST / VAULT_MCP_PORT and serves over the socket.
+VAULT_MCP_UNIX_SOCKET: str = os.environ.get("B3_VAULT_MCP_UNIX_SOCKET", "")
 
 _extra = os.environ.get("B3_VAULT_MCP_ALLOWED_HOSTS", "")
 VAULT_MCP_EXTRA_ALLOWED_HOSTS: list[str] = [host.strip() for host in _extra.split(",") if host.strip()]
