@@ -37,15 +37,24 @@ impl PlatformEnvironment {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct PlatformSetupSystem {
     environment: PlatformEnvironment,
+    app_home_override: Option<PathBuf>,
 }
 
 impl PlatformSetupSystem {
     pub fn new() -> Self {
         Self {
             environment: PlatformEnvironment::detect(),
+            app_home_override: None,
+        }
+    }
+
+    pub fn with_home_override(root_dir: PathBuf) -> Self {
+        Self {
+            environment: PlatformEnvironment::detect(),
+            app_home_override: Some(root_dir),
         }
     }
 
@@ -58,6 +67,7 @@ impl PlatformSetupSystem {
                 operating_system,
                 package_manager,
             },
+            app_home_override: None,
         }
     }
 }
@@ -75,7 +85,12 @@ impl SetupSystemPort for PlatformSetupSystem {
     }
 
     fn resolve_paths(&self) -> Result<SetupPaths, SetupError> {
-        Ok(Brain3AppHome::resolve_from_env()?.as_setup_paths())
+        let home = if let Some(dir) = &self.app_home_override {
+            Brain3AppHome::from_root(dir.clone())
+        } else {
+            Brain3AppHome::resolve_from_env()?
+        };
+        Ok(home.as_setup_paths())
     }
 
     async fn collect_dependency_status(&self) -> Result<DependencyStatus, SetupError> {

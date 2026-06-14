@@ -76,6 +76,9 @@ struct Args {
     )]
     cf_setup: bool,
 
+    #[arg(long, help = "Override the Brain3 home directory (default: ~/.brain3)")]
+    brain3_home: Option<PathBuf>,
+
     #[arg(
         long,
         help = "Override the Brain3 MCP container tag for this run or new setup, e.g. latest, v0.1.6, pr-123"
@@ -159,8 +162,11 @@ fn choose_launch_mode(args: &Args) -> LaunchMode {
 }
 
 fn resolve_config_env_file(args: &Args) -> Result<ResolvedEnvFile> {
-    let app_home =
-        Brain3AppHome::resolve_from_env().context("failed to resolve Brain3 app home")?;
+    let app_home = if let Some(dir) = &args.brain3_home {
+        Brain3AppHome::from_root(dir.clone())
+    } else {
+        Brain3AppHome::resolve_from_env().context("failed to resolve Brain3 app home")?
+    };
     let source = if args.env_file.is_some() {
         EnvFileSource::Custom
     } else {
@@ -341,6 +347,11 @@ fn brain3_command(args: &Args, mode: LaunchMode) -> String {
     if let Some(env_file) = &args.env_file {
         parts.push("--env-file".into());
         parts.push(shell_quote(&env_file.display().to_string()));
+    }
+
+    if let Some(brain3_home) = &args.brain3_home {
+        parts.push("--brain3-home".into());
+        parts.push(shell_quote(&brain3_home.display().to_string()));
     }
 
     if let Some(container_tag) = &args.container_tag {
@@ -595,6 +606,7 @@ async fn main() -> Result<()> {
                 GatewayTuiLaunch::FirstRun,
                 setup_defaults(&runtime_overrides),
                 runtime_overrides.clone(),
+                args.brain3_home.clone(),
             )
             .await
         }
@@ -615,6 +627,7 @@ async fn main() -> Result<()> {
                 GatewayTuiLaunch::Configured { launch_plan },
                 setup_defaults(&runtime_overrides),
                 runtime_overrides.clone(),
+                args.brain3_home.clone(),
             )
             .await
         }
