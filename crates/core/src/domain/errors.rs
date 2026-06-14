@@ -116,8 +116,6 @@ pub enum TunnelError {
     SetupFailed(String),
     #[error("could not spawn cloudflared: {0}")]
     SpawnFailed(String),
-    #[error("tunnel '{name}' is already running ({connections} active connection(s)) — stop the existing cloudflared process first")]
-    AlreadyRunning { name: String, connections: usize },
     #[error("tunnel error: {0}")]
     Other(String),
 }

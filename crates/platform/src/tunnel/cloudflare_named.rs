@@ -45,7 +45,7 @@ fn cloudflared_on_path() -> bool {
         .unwrap_or(false)
 }
 
-async fn check_for_active_tunnel(tunnel_name: &str) -> Result<(), TunnelError> {
+async fn count_active_connections(tunnel_name: &str) -> Result<Option<usize>, TunnelError> {
     let output = Command::new("cloudflared")
         .args(["tunnel", "list", "--output", "json", "--name", tunnel_name])
         .output()
@@ -58,17 +58,31 @@ async fn check_for_active_tunnel(tunnel_name: &str) -> Result<(), TunnelError> {
         Ok(t) => t,
         Err(e) => {
             tracing::warn!("could not parse `cloudflared tunnel list` output: {e}");
-            return Ok(());
+            return Ok(None);
         }
     };
 
     for t in &tunnels {
         if t.name == tunnel_name && !t.connections.is_empty() {
-            return Err(TunnelError::AlreadyRunning {
-                name: tunnel_name.to_string(),
-                connections: t.connections.len(),
-            });
+            return Ok(Some(t.connections.len()));
         }
+    }
+
+    Ok(None)
+}
+
+async fn cleanup_tunnel(tunnel_name: &str) -> Result<(), TunnelError> {
+    let output = Command::new("cloudflared")
+        .args(["tunnel", "cleanup", tunnel_name])
+        .output()
+        .await
+        .map_err(|e| TunnelError::Other(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(TunnelError::Other(format!(
+            "cloudflared tunnel cleanup failed: {stderr}"
+        )));
     }
 
     Ok(())
@@ -87,7 +101,14 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
             ));
         }
 
-        check_for_active_tunnel(&self.tunnel_name).await?;
+        if let Some(n) = count_active_connections(&self.tunnel_name).await? {
+            tracing::warn!(
+                tunnel = %self.tunnel_name,
+                connections = n,
+                "found stale tunnel connections — running cleanup before start"
+            );
+            cleanup_tunnel(&self.tunnel_name).await?;
+        }
 
         let mut cmd = Command::new("cloudflared");
         cmd.args([
