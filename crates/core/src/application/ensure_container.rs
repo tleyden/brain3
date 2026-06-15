@@ -441,6 +441,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn removes_existing_stopped_container_before_fresh_start() {
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            container_exists: true,
+            container_running: false,
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let config = sample_config();
+
+        let (id, _) = use_case.ensure(&config).await.unwrap();
+
+        assert_eq!(id.0, config.name);
+
+        let state = port.snapshot();
+        assert_eq!(state.pull_count, 0);
+        assert_eq!(state.run_count, 1);
+        assert_eq!(state.stop_count, 0);
+        assert_eq!(state.remove_count, 1);
+        assert_eq!(
+            state.actions,
+            vec![
+                "image_exists",
+                "exists",
+                "is_running",
+                "remove",
+                "run",
+                "is_running"
+            ]
+        );
+    }
+
+    #[tokio::test]
     async fn returns_error_when_container_exits_during_startup_probe() {
         let port = Arc::new(MockContainerPort::new(MockState {
             image_exists: true,

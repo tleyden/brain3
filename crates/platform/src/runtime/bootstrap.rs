@@ -9,7 +9,7 @@ use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::tunnel::TunnelPort;
 
 use crate::config::{log_config, upstream_secret};
-use crate::container::startup::ensure_mcp_container;
+use crate::container::startup::{ensure_mcp_container, stop_mcp_container};
 use crate::tunnel::start_tunnel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +67,23 @@ impl RuntimeBootstrap {
             if let Err(e) = tunnel.stop().await {
                 tracing::warn!(error = %e, "error stopping tunnel during shutdown");
             }
+        }
+    }
+
+    pub async fn shutdown_managed_runtime(&mut self) {
+        self.stop_tunnel().await;
+
+        let Some(startup) = self.config.container.as_ref() else {
+            return;
+        };
+
+        if let Err(error) = stop_mcp_container(startup).await {
+            tracing::warn!(
+                container = %startup.container_name,
+                runtime = ?startup.runtime,
+                error = %error,
+                "failed to stop managed MCP container during shutdown; continuing exit"
+            );
         }
     }
 
