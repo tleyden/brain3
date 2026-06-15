@@ -648,6 +648,12 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
         if let Some(container) = runtime.config.container.as_ref() {
             lines.push(key_value_line("Container image", container.image.clone()));
+            let network = if container.isolation_strategy.is_some() {
+                container.network_name.clone()
+            } else {
+                "bridge".to_string()
+            };
+            lines.push(key_value_line("Network", network));
         }
 
         if let Some(url) = &runtime.public_url {
