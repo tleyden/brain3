@@ -17,6 +17,7 @@ use brain3_core::domain::setup::{
     ConnectionCard, FinalizeSetupRequest, RuntimeLaunchPlan, SetupDefaults, SetupStep,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
+use brain3_platform::runtime::probe_mcp_vault_list;
 use brain3_platform::setup::PlatformSetupSystem;
 
 use crate::server;
@@ -353,6 +354,23 @@ async fn event_loop(
                     state.clear_messages();
                     state.step = SetupStep::ConnectionCard;
                 }
+                KeyCode::Char('r')
+                    if state.runtime_view == RuntimeView::Status
+                        && state.probe_rx.is_none()
+                        && state.startup_rx.is_none() =>
+                {
+                    if let Some(runtime) = &state.runtime {
+                        let url = runtime.config.mcp_reverse_proxy.mcp_upstream_url.clone();
+                        let secret = runtime.upstream_secret.clone();
+                        let (tx, rx) = oneshot::channel();
+                        tokio::spawn(async move {
+                            let _ = tx.send(probe_mcp_vault_list(&url, &secret).await);
+                        });
+                        state.probe_rx = Some(rx);
+                        state.clear_messages();
+                        state.info_message = Some("Checking MCP health...".into());
+                    }
+                }
                 _ => {}
             },
         }
@@ -363,6 +381,21 @@ fn handle_runtime_tick(state: &mut FirstRunTuiState) {
     state.tick_count = state.tick_count.wrapping_add(1);
     if matches!(state.step, SetupStep::RuntimeStatus) {
         state.refresh_runtime_logs();
+    }
+    if let Some(rx) = &mut state.probe_rx {
+        match rx.try_recv() {
+            Ok(Ok(())) => {
+                state.probe_rx = None;
+                state.info_message = Some("MCP health check passed.".into());
+                state.error_message = None;
+            }
+            Ok(Err(e)) => {
+                state.probe_rx = None;
+                state.error_message = Some(format!("MCP health check failed: {e}"));
+                state.info_message = None;
+            }
+            Err(_) => {}
+        }
     }
 }
 

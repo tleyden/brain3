@@ -132,6 +132,24 @@ pub async fn bootstrap_configured_runtime(
         StartupStatus::NotConfigured
     };
 
+    // If the container TCP check passed, do a full end-to-end MCP functional probe (auth + RPC).
+    let container_status = if container_status == StartupStatus::Ready {
+        match super::health_probe::probe_mcp_vault_list(
+            &config.mcp_reverse_proxy.mcp_upstream_url,
+            &upstream_secret,
+        )
+        .await
+        {
+            Ok(()) => StartupStatus::Ready,
+            Err(summary) => {
+                tracing::error!(summary, "MCP health probe failed after container TCP-ready");
+                StartupStatus::Failed { summary }
+            }
+        }
+    } else {
+        container_status
+    };
+
     let (tunnel_status, public_url, tunnel_guard) = if !container_status.allows_gateway_start() {
         match &config.tunnel {
             Some(_) => (
