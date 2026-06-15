@@ -81,14 +81,17 @@ impl EnsureContainerUseCase {
         }
 
         tracing::info!(container = %config.name, image = %config.image, "starting container");
-        let mut runtime_config = config.clone();
+        let runtime_config = config.clone();
         if config.isolation_strategy.is_some() {
             let isolation_ok = self
                 .port
                 .prepare_network_isolation(&config.network_name)
                 .await?;
             if !isolation_ok {
-                runtime_config.isolation_strategy = None;
+                return Err(ContainerError::Other(format!(
+                    "network isolation setup failed for '{}' — aborting to preserve security posture",
+                    config.network_name
+                )));
             }
         }
 
@@ -507,7 +510,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepares_network_isolation_before_run_and_downgrades_when_unavailable() {
+    async fn aborts_startup_when_network_isolation_setup_fails() {
         let port = Arc::new(MockContainerPort::new(MockState {
             image_exists: true,
             prepare_network_isolation_result: false,
@@ -517,22 +520,17 @@ mod tests {
         let mut config = sample_config();
         config.isolation_strategy = Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp);
 
-        let (id, _) = use_case.ensure(&config).await.unwrap();
-
-        assert_eq!(id.0, config.name);
+        let err = use_case.ensure(&config).await.unwrap_err();
+        assert!(
+            matches!(err, ContainerError::Other(_)),
+            "expected ContainerError::Other, got {err:?}"
+        );
 
         let state = port.snapshot();
         assert_eq!(state.prepare_network_isolation_count, 1);
-        assert_eq!(state.last_run_isolation_strategy, Some(None));
         assert_eq!(
             state.actions,
-            vec![
-                "image_exists",
-                "exists",
-                "prepare_network_isolation",
-                "run",
-                "is_running"
-            ]
+            vec!["image_exists", "exists", "prepare_network_isolation"]
         );
     }
 }

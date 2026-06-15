@@ -62,12 +62,12 @@ impl ContainerPort for DockerContainerAdapter {
         match recreate_internal_network(network_name).await {
             Ok(()) => Ok(true),
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     error = %e,
                     network = network_name,
-                    "network recreation failed; starting MCP container without outbound restrictions"
+                    "network isolation setup failed"
                 );
-                Ok(false)
+                Err(e)
             }
         }
     }
