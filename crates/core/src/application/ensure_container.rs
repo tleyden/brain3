@@ -309,7 +309,10 @@ mod tests {
             Ok(state.logs_tail_output.clone().unwrap_or_default())
         }
 
-        async fn prepare_network_isolation(&self, _network_name: &str) -> Result<bool, ContainerError> {
+        async fn prepare_network_isolation(
+            &self,
+            _network_name: &str,
+        ) -> Result<bool, ContainerError> {
             let mut state = self.state.lock().unwrap();
             state.actions.push("prepare_network_isolation");
             state.prepare_network_isolation_count += 1;

@@ -636,6 +636,17 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
     lines.push(blank_line());
 
+    if state.startup_rx.is_some() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner_char(state.tick_count)),
+                accent_style(),
+            ),
+            Span::styled("Starting Brain3, please wait...", accent_style()),
+        ]));
+        return lines;
+    }
+
     if let Some(runtime) = &state.runtime {
         lines.push(key_badge_line(
             "Container",
@@ -647,6 +658,10 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ));
 
         if let Some(container) = runtime.config.container.as_ref() {
+            lines.push(key_value_line(
+                "Container runtime",
+                format_container_runtime(container.runtime).to_string(),
+            ));
             lines.push(key_value_line("Container image", container.image.clone()));
             let network = if container.isolation_strategy.is_some() {
                 container.network_name.clone()
@@ -720,13 +735,32 @@ fn status_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     }
 
     if let Some(info) = &state.info_message {
-        return vec![Line::from(vec![
-            Span::styled("Info: ", success_style()),
-            Span::styled(info.clone(), success_style()),
-        ])];
+        let has_active_task = state.startup_rx.is_some() || state.probe_rx.is_some();
+        return vec![Line::from(if has_active_task {
+            vec![
+                Span::styled(
+                    format!("{} ", spinner_char(state.tick_count)),
+                    accent_style(),
+                ),
+                Span::styled(info.clone(), success_style()),
+            ]
+        } else {
+            vec![
+                Span::styled("Info: ", success_style()),
+                Span::styled(info.clone(), success_style()),
+            ]
+        })];
     }
 
     vec![muted_line("Ready.")]
+}
+
+fn spinner_char(tick_count: u64) -> char {
+    const FRAMES: &str = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏";
+    FRAMES
+        .chars()
+        .nth(tick_count as usize % FRAMES.chars().count())
+        .unwrap_or('⠋')
 }
 
 fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
@@ -755,7 +789,6 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ]),
         SetupStep::Summary => vec![
             primary_action_line("Edit any field, then save config and start."),
-            muted_line("⚠ The UI will \"stick\" for 5s, but it's starting. Known issue."),
             hint_line(vec![
                 ("[Tab/↑↓]", "Move"),
                 ("[Type]", "Edit"),
@@ -780,9 +813,14 @@ fn runtime_action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             if matches!(state.previous_step(), Some(SetupStep::ConnectionCard)) {
                 hints.push(("[c]", "MCP config settings"));
             }
+            if state.startup_rx.is_none() && state.probe_rx.is_none() && state.runtime.is_some() {
+                hints.push(("[r]", "Refresh"));
+            }
             hints.push(("[q]", "Quit"));
 
-            let message = if state
+            let message = if state.startup_rx.is_some() {
+                "Brain3 is starting..."
+            } else if state
                 .runtime
                 .as_ref()
                 .and_then(|runtime| runtime.primary_failure_summary())
@@ -1139,6 +1177,7 @@ mod tests {
         assert!(text.contains(&format!(
             "Container image: ghcr.io/tleyden/brain3-mcp-vault-tools:{CURRENT_RELEASE}"
         )));
+        assert!(text.contains("Container runtime: Docker"));
         assert!(text.contains("Vault path does not exist"));
         assert!(text.contains("Gateway:  Not started"));
     }
