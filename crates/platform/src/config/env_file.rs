@@ -248,7 +248,14 @@ fn load_container_startup_config(
 
     let image = require_nonempty_env("B3_CONTAINER_IMAGE", "when B3_CONTAINER_RUNTIME is set")?;
 
-    let container_name = derive_container_name_from_image(&image)?;
+    let container_name = {
+        let override_name = env_var_or("B3_CONTAINER_NAME", "");
+        if !override_name.trim().is_empty() {
+            override_name.trim().to_string()
+        } else {
+            derive_container_name_from_image(&image)?
+        }
+    };
 
     let host_port = env_var_or("B3_CONTAINER_HOST_PORT", "8420")
         .parse::<u16>()
