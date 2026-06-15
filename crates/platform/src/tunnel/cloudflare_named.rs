@@ -267,7 +267,9 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
 
         match cleanup_tunnel(&self.tunnel_name).await {
             Ok(()) => tracing::info!(tunnel = %self.tunnel_name, "tunnel connections cleaned up"),
-            Err(e) => tracing::warn!(tunnel = %self.tunnel_name, error = %e, "tunnel cleanup after stop failed"),
+            Err(e) => {
+                tracing::warn!(tunnel = %self.tunnel_name, error = %e, "tunnel cleanup after stop failed")
+            }
         }
 
         tracing::info!(tunnel_name = %self.tunnel_name, "cloudflared named tunnel stopped");
