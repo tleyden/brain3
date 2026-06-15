@@ -658,6 +658,10 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ));
 
         if let Some(container) = runtime.config.container.as_ref() {
+            lines.push(key_value_line(
+                "Container runtime",
+                format_container_runtime(container.runtime).to_string(),
+            ));
             lines.push(key_value_line("Container image", container.image.clone()));
             let network = if container.isolation_strategy.is_some() {
                 container.network_name.clone()
@@ -1169,6 +1173,7 @@ mod tests {
             .join("\n");
 
         assert!(text.contains("Container:  Failed"));
+        assert!(text.contains("Container runtime: Docker"));
         assert!(text.contains("Container image: ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.6"));
         assert!(text.contains("Vault path does not exist"));
         assert!(text.contains("Gateway:  Not started"));
