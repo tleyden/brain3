@@ -1,6 +1,7 @@
 pub mod cloudflare_named;
 pub mod cloudflare_quick;
 pub mod cloudflare_setup;
+pub mod lifecycle;
 pub mod probe;
 pub mod startup;
 

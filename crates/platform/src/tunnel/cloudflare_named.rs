@@ -8,11 +8,13 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
+use super::lifecycle;
 
 pub struct CloudflareNamedTunnelAdapter {
     tunnel_name: String,
     domain: String,
     config_file: PathBuf,
+    pid_file: PathBuf,
     child: Arc<Mutex<Option<Child>>>,
     public_url: Arc<Mutex<Option<String>>>,
 }
@@ -22,11 +24,13 @@ impl CloudflareNamedTunnelAdapter {
         tunnel_name: impl Into<String>,
         domain: impl Into<String>,
         config_file: PathBuf,
+        pid_file: PathBuf,
     ) -> Self {
         Self {
             tunnel_name: tunnel_name.into(),
             domain: domain.into(),
             config_file,
+            pid_file,
             child: Arc::new(Mutex::new(None)),
             public_url: Arc::new(Mutex::new(None)),
         }
@@ -139,9 +143,45 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
         .stdout(std::process::Stdio::null())
         .kill_on_drop(true);
 
+        // On Linux: if our process dies unexpectedly cloudflared receives SIGTERM
+        // (runs in the child after fork, before exec — cannot use tracing here).
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            tracing::debug!(
+                tunnel_name = %self.tunnel_name,
+                "configuring pdeathsig for cloudflared named tunnel process"
+            );
+            unsafe {
+                cmd.as_std_mut().pre_exec(|| {
+                    let _ = libc::prctl(
+                        libc::PR_SET_PDEATHSIG,
+                        libc::SIGTERM as libc::c_ulong,
+                        0,
+                        0,
+                        0,
+                    );
+                    Ok(())
+                });
+            }
+        }
+
+        tracing::info!(
+            tunnel_name = %self.tunnel_name,
+            pid_file = %self.pid_file.display(),
+            "spawning cloudflared named tunnel"
+        );
+
         let mut child = cmd
             .spawn()
             .map_err(|e| TunnelError::SpawnFailed(e.to_string()))?;
+
+        let pid = child.id();
+        tracing::info!(tunnel_name = %self.tunnel_name, pid = ?pid, "cloudflared named tunnel process spawned");
+
+        if let Some(p) = pid {
+            lifecycle::write_pid_file(&self.pid_file, p).await;
+        }
 
         let stderr = child.stderr.take().expect("stderr was piped");
 
@@ -194,21 +234,43 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
             return Err(TunnelError::TunnelNotFound(self.tunnel_name.clone()));
         }
 
+        tracing::info!(
+            tunnel_name = %self.tunnel_name,
+            url = %public_url,
+            "cloudflared named tunnel ready"
+        );
+
         Ok(TunnelInfo { public_url })
     }
 
     async fn stop(&self) -> Result<(), TunnelError> {
-        if let Some(mut child) = self.child.lock().await.take() {
-            child
-                .kill()
-                .await
-                .map_err(|e| TunnelError::Other(e.to_string()))?;
+        let Some(mut child) = self.child.lock().await.take() else {
+            tracing::debug!(
+                tunnel_name = %self.tunnel_name,
+                "stop() called but no cloudflared named tunnel process is running"
+            );
+            lifecycle::remove_pid_file(&self.pid_file).await;
+            return Ok(());
+        };
+
+        let pid = child.id();
+        tracing::info!(tunnel_name = %self.tunnel_name, pid = ?pid, "stopping cloudflared named tunnel");
+
+        if let Some(p) = pid {
+            lifecycle::graceful_kill(&mut child, p, &self.pid_file).await;
+        } else {
+            tracing::info!(tunnel_name = %self.tunnel_name, "cloudflared named tunnel process already exited");
+            lifecycle::remove_pid_file(&self.pid_file).await;
         }
+
         *self.public_url.lock().await = None;
+
         match cleanup_tunnel(&self.tunnel_name).await {
             Ok(()) => tracing::info!(tunnel = %self.tunnel_name, "tunnel connections cleaned up"),
             Err(e) => tracing::warn!(tunnel = %self.tunnel_name, error = %e, "tunnel cleanup after stop failed"),
         }
+
+        tracing::info!(tunnel_name = %self.tunnel_name, "cloudflared named tunnel stopped");
         Ok(())
     }
 
