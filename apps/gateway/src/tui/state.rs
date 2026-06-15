@@ -4,9 +4,11 @@ use brain3_core::domain::setup::{
     ConnectionCard, DependencyAvailability, FinalizeSetupRequest, InstallAction, SetupDraftConfig,
     SetupPreparation, SetupStep, SetupSummary,
 };
+use tokio::sync::oneshot;
+
 use brain3_platform::runtime::RuntimeBootstrap;
 
-use crate::server::{GatewayServerHandle, GatewayServerStatus};
+use crate::server::{ConfiguredGatewaySession, GatewayServerHandle, GatewayServerStatus};
 
 use super::runtime_logs::RuntimeLogs;
 
@@ -87,6 +89,9 @@ pub struct FirstRunTuiState {
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
     pub summary_focus: SummaryField,
+    pub startup_rx: Option<oneshot::Receiver<anyhow::Result<ConfiguredGatewaySession>>>,
+    pub probe_rx: Option<oneshot::Receiver<Result<(), String>>>,
+    pub tick_count: u64,
 }
 
 impl FirstRunTuiState {
@@ -136,65 +141,22 @@ impl FirstRunTuiState {
             dependency_focus,
             dependency_action_index: 0,
             summary_focus: SummaryField::VaultPath,
+            startup_rx: None,
+            probe_rx: None,
+            tick_count: 0,
         }
     }
 
-    pub fn new_runtime(
+    pub fn new_starting(
         host: String,
         log_file: PathBuf,
         preparation: SetupPreparation,
-        display_url: Option<String>,
-        runtime: RuntimeBootstrap,
-        server: Option<GatewayServerHandle>,
+        startup_rx: oneshot::Receiver<anyhow::Result<ConfiguredGatewaySession>>,
     ) -> Self {
-        let connection_card = display_url.map(|server_url| {
-            let oauth = &runtime.config.oauth;
-            tracing::trace!(
-                server_url = %server_url,
-                runtime_client_id = %oauth.client_id,
-                runtime_username = %oauth.username,
-                preparation_client_id = %preparation.draft.client_id,
-                preparation_username = %preparation.draft.username,
-                "building connection card: credentials source is runtime config (loaded from disk \
-                 by spawn_configured_gateway_session), not preparation draft (loaded earlier by \
-                 prepare())"
-            );
-            if oauth.client_id != preparation.draft.client_id
-                || oauth.username != preparation.draft.username
-            {
-                tracing::warn!(
-                    runtime_client_id = %oauth.client_id,
-                    runtime_username = %oauth.username,
-                    preparation_client_id = %preparation.draft.client_id,
-                    preparation_username = %preparation.draft.username,
-                    "connection card credentials differ from preparation draft — env file may \
-                     have changed between prepare() and spawn_configured_gateway_session()"
-                );
-            }
-            ConnectionCard {
-                server_url,
-                client_id: oauth.client_id.clone(),
-                client_secret: oauth.client_secret.clone(),
-                username: oauth.username.clone(),
-                password: oauth.password.clone(),
-                log_file: log_file.clone(),
-            }
-        });
         let mut state = Self::new(host, log_file, preparation);
-        state.connection_card = connection_card;
-        state.runtime = Some(runtime);
-        state.server = server;
         state.step = SetupStep::RuntimeStatus;
-
-        if let Some(runtime) = &state.runtime {
-            if let Some(summary) = runtime.primary_failure_summary() {
-                tracing::error!(summary, "runtime reported primary failure on state init");
-                state.error_message = Some(summary.to_string());
-            } else {
-                state.info_message = Some("Brain3 is running.".into());
-            }
-        }
-
+        state.startup_rx = Some(startup_rx);
+        state.info_message = Some("Starting Brain3...".into());
         state
     }
 
