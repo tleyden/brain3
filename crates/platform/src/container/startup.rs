@@ -85,6 +85,7 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         image: startup.image.clone(),
         name: startup.container_name.clone(),
         network_isolated: startup.network_isolated,
+        network_name: startup.network_name.clone(),
         port_mappings: vec![PortMapping {
             host_address: "127.0.0.1".into(),
             host_port: startup.host_port,

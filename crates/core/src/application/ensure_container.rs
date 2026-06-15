@@ -80,7 +80,10 @@ impl EnsureContainerUseCase {
         tracing::info!(container = %config.name, image = %config.image, "starting container");
         let mut runtime_config = config.clone();
         if config.network_isolated {
-            runtime_config.network_isolated = self.port.prepare_network_isolation().await?;
+            runtime_config.network_isolated = self
+                .port
+                .prepare_network_isolation(&config.network_name)
+                .await?;
         }
 
         let id = self.port.run(&runtime_config).await?;
@@ -266,7 +269,7 @@ mod tests {
             Ok(state.logs_tail_output.clone().unwrap_or_default())
         }
 
-        async fn prepare_network_isolation(&self) -> Result<bool, ContainerError> {
+        async fn prepare_network_isolation(&self, _network_name: &str) -> Result<bool, ContainerError> {
             let mut state = self.state.lock().unwrap();
             state.actions.push("prepare_network_isolation");
             state.prepare_network_isolation_count += 1;
@@ -305,6 +308,7 @@ mod tests {
             image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
             name: "brain3-mcp-vault-tools".into(),
             network_isolated: false,
+            network_name: "brain3-mcp-net".into(),
             port_mappings: vec![],
             env_vars: vec![],
             bind_mounts: vec![],

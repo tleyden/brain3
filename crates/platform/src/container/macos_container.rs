@@ -3,7 +3,6 @@ use brain3_core::domain::model::ContainerConfig;
 use brain3_core::ports::container::{ContainerId, ContainerPort};
 
 use super::process::{command_succeeds, run_command};
-use super::MCP_NETWORK_NAME;
 
 pub struct MacOsContainerAdapter;
 
@@ -51,13 +50,13 @@ impl ContainerPort for MacOsContainerAdapter {
         run_command("container", &["logs", "--tail", &lines, &id.0]).await
     }
 
-    async fn prepare_network_isolation(&self) -> Result<bool, ContainerError> {
-        match recreate_internal_network(MCP_NETWORK_NAME).await {
+    async fn prepare_network_isolation(&self, network_name: &str) -> Result<bool, ContainerError> {
+        match recreate_internal_network(network_name).await {
             Ok(()) => Ok(true),
             Err(e) => {
                 tracing::warn!(
                     error = %e,
-                    network = MCP_NETWORK_NAME,
+                    network = network_name,
                     "network recreation failed; starting MCP container without outbound restrictions"
                 );
                 Ok(false)
@@ -105,7 +104,7 @@ impl ContainerPort for MacOsContainerAdapter {
         }
         if config.network_isolated {
             args.push("--network".into());
-            args.push(MCP_NETWORK_NAME.into());
+            args.push(config.network_name.clone());
         }
         args.push(config.image.clone());
         for c in &config.command {
