@@ -5,7 +5,7 @@ use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{
     BindMount, ContainerConfig, ContainerRuntime, ContainerStartupConfig, PortMapping,
 };
-use brain3_core::ports::container::ContainerPort;
+use brain3_core::ports::container::{ContainerId, ContainerPort};
 
 use super::{DockerContainerAdapter, MacOsContainerAdapter};
 
@@ -120,11 +120,32 @@ pub async fn ensure_mcp_container(
         bind_mounts,
         user: Some(uid_gid),
         detach: true,
-        remove_on_exit: false,
+        remove_on_exit: matches!(startup.runtime, ContainerRuntime::Docker),
         workdir,
         command,
     };
 
     let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
     Ok(container_ip)
+}
+
+pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
+    let port: Arc<dyn ContainerPort> = match startup.runtime {
+        ContainerRuntime::Docker => Arc::new(DockerContainerAdapter),
+        ContainerRuntime::MacOSContainer => Arc::new(MacOsContainerAdapter),
+    };
+    let id = ContainerId(startup.container_name.clone());
+
+    if !port.exists(&id).await? {
+        tracing::debug!(container = %startup.container_name, "managed MCP container already absent during shutdown");
+        return Ok(());
+    }
+
+    if !port.is_running(&id).await? {
+        tracing::debug!(container = %startup.container_name, "managed MCP container already stopped during shutdown");
+        return Ok(());
+    }
+
+    tracing::info!(container = %startup.container_name, runtime = ?startup.runtime, "stopping managed MCP container during shutdown");
+    port.stop(&id).await
 }

@@ -7,7 +7,7 @@ use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::tunnel::TunnelPort;
 
 use crate::config::{log_config, upstream_secret};
-use crate::container::startup::ensure_mcp_container;
+use crate::container::startup::{ensure_mcp_container, stop_mcp_container};
 use crate::tunnel::start_tunnel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,6 +65,23 @@ impl RuntimeBootstrap {
             if let Err(e) = tunnel.stop().await {
                 tracing::warn!(error = %e, "error stopping tunnel during shutdown");
             }
+        }
+    }
+
+    pub async fn shutdown_managed_runtime(&mut self) {
+        self.stop_tunnel().await;
+
+        let Some(startup) = self.config.container.as_ref() else {
+            return;
+        };
+
+        if let Err(error) = stop_mcp_container(startup).await {
+            tracing::warn!(
+                container = %startup.container_name,
+                runtime = ?startup.runtime,
+                error = %error,
+                "failed to stop managed MCP container during shutdown; continuing exit"
+            );
         }
     }
 
@@ -151,6 +168,7 @@ pub async fn bootstrap_configured_runtime(
     } else {
         container_status
     };
+    let pid_file = launch_plan.paths.app_home.join("cloudflared.pid");
 
     let (tunnel_status, public_url, tunnel_guard) = if !container_status.allows_gateway_start() {
         match &config.tunnel {
@@ -166,7 +184,7 @@ pub async fn bootstrap_configured_runtime(
             None => (StartupStatus::NotConfigured, None, None),
         }
     } else if let Some(tunnel_config) = &config.tunnel {
-        match start_tunnel(tunnel_config).await {
+        match start_tunnel(tunnel_config, pid_file).await {
             Ok((adapter, info)) => {
                 tracing::info!(url = %info.public_url, "tunnel started");
                 (StartupStatus::Ready, Some(info.public_url), Some(adapter))
