@@ -3,12 +3,19 @@ use brain3_core::domain::model::{ContainerConfig, ContainerNetworkIsolationStrat
 use brain3_core::ports::container::{ContainerId, ContainerPort};
 
 use super::process::{command_succeeds, run_command};
-use super::MCP_NETWORK_NAME;
 
 pub struct DockerContainerAdapter;
 
+async fn network_exists(name: &str) -> Result<bool, ContainerError> {
+    match run_command("docker", &["network", "inspect", name]).await {
+        Ok(out) => Ok(out.trim() != "[]" && !out.trim().is_empty()),
+        Err(ContainerError::CommandFailed { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 async fn recreate_internal_network(name: &str) -> Result<(), ContainerError> {
-    if command_succeeds("docker", &["network", "inspect", name]).await? {
+    if network_exists(name).await? {
         tracing::info!(
             network = name,
             "removing existing MCP network before recreation"
@@ -59,16 +66,16 @@ impl ContainerPort for DockerContainerAdapter {
         run_command("docker", &["logs", "--tail", &lines, &id.0]).await
     }
 
-    async fn prepare_network_isolation(&self) -> Result<bool, ContainerError> {
-        match recreate_internal_network(MCP_NETWORK_NAME).await {
+    async fn prepare_network_isolation(&self, network_name: &str) -> Result<bool, ContainerError> {
+        match recreate_internal_network(network_name).await {
             Ok(()) => Ok(true),
             Err(e) => {
-                tracing::warn!(
+                tracing::error!(
                     error = %e,
-                    network = MCP_NETWORK_NAME,
-                    "network recreation failed; starting MCP container without outbound restrictions"
+                    network = network_name,
+                    "network isolation setup failed"
                 );
-                Ok(false)
+                Err(e)
             }
         }
     }
@@ -122,7 +129,7 @@ impl ContainerPort for DockerContainerAdapter {
         }
         if config.isolation_strategy.is_some() {
             args.push("--network".into());
-            args.push(MCP_NETWORK_NAME.into());
+            args.push(config.network_name.clone());
         }
         args.push(config.image.clone());
         for c in &config.command {

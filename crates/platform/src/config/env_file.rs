@@ -257,6 +257,15 @@ fn load_container_startup_config(
         }
     };
 
+    let network_name = {
+        let override_name = env_var_or("B3_CONTAINER_NETWORK_NAME", "");
+        if !override_name.trim().is_empty() {
+            override_name.trim().to_string()
+        } else {
+            "brain3-mcp-net".to_string()
+        }
+    };
+
     let host_port = env_var_or("B3_CONTAINER_HOST_PORT", "8420")
         .parse::<u16>()
         .map_err(|e| ConfigError::Invalid(format!("B3_CONTAINER_HOST_PORT: {e}")))?;
@@ -305,6 +314,7 @@ fn load_container_startup_config(
         runtime,
         image,
         container_name,
+        network_name,
         vault_path: PathBuf::from(vault_path_str),
         upstream_secret_dir,
         host_port,
