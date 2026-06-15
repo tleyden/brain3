@@ -1216,6 +1216,7 @@ mod tests {
                     host_port: 8420,
                     container_port: 8420,
                     isolation_strategy: Some(brain3_core::domain::model::ContainerNetworkIsolationStrategy::DiscoverContainerIp),
+                    network_name: "brain3-mcp-net".into(),
                     dev_mount_source: None,
                 }),
                 tunnel: None,
