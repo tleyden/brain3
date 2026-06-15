@@ -266,6 +266,7 @@ fn load_container_startup_config(
         .map_err(|e| ConfigError::Invalid(format!("B3_CONTAINER_MCP_PORT: {e}")))?;
     // Disabled by default since this is still experimental
     let network_isolated = env_bool("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", false);
+    validate_network_isolation_support(runtime, network_isolated)?;
 
     let upstream_secret_dir = upstream_secret_file
         .parent()
@@ -288,6 +289,24 @@ fn load_container_startup_config(
         network_isolated,
         dev_mount_source,
     }))
+}
+
+fn validate_network_isolation_support(
+    runtime: ContainerRuntime,
+    network_isolated: bool,
+) -> Result<(), ConfigError> {
+    if !network_isolated {
+        return Ok(());
+    }
+
+    if matches!(runtime, ContainerRuntime::Docker) && env::consts::OS == "macos" {
+        return Err(ConfigError::Invalid(
+            "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true is not supported with B3_CONTAINER_RUNTIME=docker on macos. For highest security, use the native macos-container runtime instead of Docker. Otherwise set B3_CONTAINER_RUNTIME=macos-container or B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=false. Linux Docker is supported."
+                .into(),
+        ));
+    }
+
+    Ok(())
 }
 
 fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigError> {
@@ -369,4 +388,135 @@ fn resolve_expected_host() -> Result<Option<String>, ConfigError> {
     }
 
     Ok(named.or(direct))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::sync::{LazyLock, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use super::*;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    const CONFIG_KEYS: &[&str] = &[
+        "B3_OAUTH2_GATEWAY_CLIENT_SECRET",
+        "B3_USERNAME",
+        "B3_PASSWORD",
+        "B3_TOKEN_DB_PATH",
+        "B3_CONTAINER_RUNTIME",
+        "B3_VAULT_PATH",
+        "B3_CONTAINER_IMAGE",
+        "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION",
+        "B3_CONTAINER_HOST_PORT",
+        "B3_CONTAINER_MCP_PORT",
+        "B3_CF_QUICK_TUNNEL",
+    ];
+
+    fn with_clean_config_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let saved: Vec<(&str, Option<String>)> = CONFIG_KEYS
+            .iter()
+            .map(|key| (*key, env::var(key).ok()))
+            .collect();
+
+        for key in CONFIG_KEYS {
+            env::remove_var(key);
+        }
+
+        let result = f();
+
+        for key in CONFIG_KEYS {
+            env::remove_var(key);
+        }
+        for (key, value) in saved {
+            if let Some(value) = value {
+                env::set_var(key, value);
+            }
+        }
+
+        result
+    }
+
+    fn write_test_env_file(contents: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("brain3-env-file-test-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        let env_path = dir.join(".env");
+        fs::write(&env_path, contents).unwrap();
+        env_path
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn load_rejects_internal_network_isolation_for_docker_on_macos() {
+        with_clean_config_env(|| {
+            let vault_dir = env::temp_dir().join("brain3-config-test-vault-macos");
+            fs::create_dir_all(&vault_dir).unwrap();
+            let token_db = env::temp_dir().join("brain3-config-test-macos.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_CF_QUICK_TUNNEL=false\n\
+                 B3_CONTAINER_RUNTIME=docker\n\
+                 B3_VAULT_PATH={}\n\
+                 B3_CONTAINER_IMAGE=ghcr.io/tleyden/brain3-mcp-vault-tools:latest\n\
+                 B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true\n",
+                token_db.display(),
+                vault_dir.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let err = adapter.load().expect_err("expected invalid macos docker config");
+
+            match err {
+                ConfigError::Invalid(message) => {
+                    assert!(message.contains("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true"));
+                    assert!(message.contains("B3_CONTAINER_RUNTIME=docker"));
+                    assert!(message.contains("macos-container"));
+                }
+                other => panic!("expected invalid config error, got {other:?}"),
+            }
+        });
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn load_allows_internal_network_isolation_for_docker_on_linux() {
+        with_clean_config_env(|| {
+            let vault_dir = env::temp_dir().join("brain3-config-test-vault-linux");
+            fs::create_dir_all(&vault_dir).unwrap();
+            let token_db = env::temp_dir().join("brain3-config-test-linux.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_CF_QUICK_TUNNEL=false\n\
+                 B3_CONTAINER_RUNTIME=docker\n\
+                 B3_VAULT_PATH={}\n\
+                 B3_CONTAINER_IMAGE=ghcr.io/tleyden/brain3-mcp-vault-tools:latest\n\
+                 B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true\n",
+                token_db.display(),
+                vault_dir.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected linux docker config to load");
+
+            assert_eq!(
+                config.container.as_ref().map(|c| c.runtime),
+                Some(ContainerRuntime::Docker)
+            );
+            assert_eq!(
+                config.container.as_ref().map(|c| c.network_isolated),
+                Some(true)
+            );
+        });
+    }
 }
