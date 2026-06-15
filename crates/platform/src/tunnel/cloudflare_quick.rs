@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use brain3_core::domain::errors::TunnelError;
@@ -7,16 +8,20 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
+use super::lifecycle;
+
 pub struct CloudflareQuickTunnelAdapter {
     local_port: u16,
+    pid_file: PathBuf,
     child: Arc<Mutex<Option<Child>>>,
     public_url: Arc<Mutex<Option<String>>>,
 }
 
 impl CloudflareQuickTunnelAdapter {
-    pub fn new(local_port: u16) -> Self {
+    pub fn new(local_port: u16, pid_file: PathBuf) -> Self {
         Self {
             local_port,
+            pid_file,
             child: Arc::new(Mutex::new(None)),
             public_url: Arc::new(Mutex::new(None)),
         }
@@ -48,9 +53,42 @@ impl TunnelPort for CloudflareQuickTunnelAdapter {
         .stdout(std::process::Stdio::null())
         .kill_on_drop(true);
 
+        // On Linux: if our process dies unexpectedly cloudflared receives SIGTERM
+        // (runs in the child after fork, before exec — cannot use tracing here).
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            tracing::debug!("configuring pdeathsig for cloudflared quick tunnel process");
+            unsafe {
+                cmd.as_std_mut().pre_exec(|| {
+                    let _ = libc::prctl(
+                        libc::PR_SET_PDEATHSIG,
+                        libc::SIGTERM as libc::c_ulong,
+                        0,
+                        0,
+                        0,
+                    );
+                    Ok(())
+                });
+            }
+        }
+
+        tracing::info!(
+            local_port = self.local_port,
+            pid_file = %self.pid_file.display(),
+            "spawning cloudflared quick tunnel"
+        );
+
         let mut child = cmd
             .spawn()
             .map_err(|e| TunnelError::SpawnFailed(e.to_string()))?;
+
+        let pid = child.id();
+        tracing::info!(pid = ?pid, "cloudflared quick tunnel process spawned");
+
+        if let Some(p) = pid {
+            lifecycle::write_pid_file(&self.pid_file, p).await;
+        }
 
         let stderr = child.stderr.take().expect("stderr was piped");
 
@@ -78,19 +116,32 @@ impl TunnelPort for CloudflareQuickTunnelAdapter {
         .await
         .map_err(|_| TunnelError::Other("timed out waiting for tunnel URL".into()))?;
 
+        tracing::info!(url = %url, "cloudflared quick tunnel URL ready");
+
         *self.child.lock().await = Some(child);
 
         Ok(TunnelInfo { public_url: url })
     }
 
     async fn stop(&self) -> Result<(), TunnelError> {
-        if let Some(mut child) = self.child.lock().await.take() {
-            child
-                .kill()
-                .await
-                .map_err(|e| TunnelError::Other(e.to_string()))?;
+        let Some(mut child) = self.child.lock().await.take() else {
+            tracing::debug!("stop() called but no cloudflared quick tunnel process is running");
+            lifecycle::remove_pid_file(&self.pid_file).await;
+            return Ok(());
+        };
+
+        let pid = child.id();
+        tracing::info!(pid = ?pid, "stopping cloudflared quick tunnel");
+
+        if let Some(p) = pid {
+            lifecycle::graceful_kill(&mut child, p, &self.pid_file).await;
+        } else {
+            tracing::info!("cloudflared quick tunnel process already exited");
+            lifecycle::remove_pid_file(&self.pid_file).await;
         }
+
         *self.public_url.lock().await = None;
+        tracing::info!("cloudflared quick tunnel stopped");
         Ok(())
     }
 

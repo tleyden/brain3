@@ -132,6 +132,8 @@ pub async fn bootstrap_configured_runtime(
         StartupStatus::NotConfigured
     };
 
+    let pid_file = launch_plan.paths.app_home.join("cloudflared.pid");
+
     let (tunnel_status, public_url, tunnel_guard) = if !container_status.allows_gateway_start() {
         match &config.tunnel {
             Some(_) => (
@@ -146,7 +148,7 @@ pub async fn bootstrap_configured_runtime(
             None => (StartupStatus::NotConfigured, None, None),
         }
     } else if let Some(tunnel_config) = &config.tunnel {
-        match start_tunnel(tunnel_config).await {
+        match start_tunnel(tunnel_config, pid_file).await {
             Ok((adapter, info)) => {
                 tracing::info!(url = %info.public_url, "tunnel started");
                 (StartupStatus::Ready, Some(info.public_url), Some(adapter))
