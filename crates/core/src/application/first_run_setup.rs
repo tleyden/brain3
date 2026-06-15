@@ -11,6 +11,8 @@ use crate::domain::setup::{
 };
 use crate::ports::setup_system::SetupSystemPort;
 
+pub const CURRENT_RELEASE: &str = "v0.1.7";
+
 pub struct FirstRunSetupUseCase {
     port: Arc<dyn SetupSystemPort>,
     defaults: SetupDefaults,
@@ -308,7 +310,9 @@ mod tests {
 
     fn sample_defaults() -> SetupDefaults {
         SetupDefaults {
-            default_container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.6".into(),
+            default_container_image: format!(
+                "ghcr.io/tleyden/brain3-mcp-vault-tools:{CURRENT_RELEASE}"
+            ),
         }
     }
 
