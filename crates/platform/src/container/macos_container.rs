@@ -6,8 +6,16 @@ use super::process::{command_succeeds, run_command};
 
 pub struct MacOsContainerAdapter;
 
+async fn network_exists(name: &str) -> Result<bool, ContainerError> {
+    match run_command("container", &["network", "inspect", name]).await {
+        Ok(out) => Ok(out.trim() != "[]" && !out.trim().is_empty()),
+        Err(ContainerError::CommandFailed { .. }) => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 async fn recreate_internal_network(name: &str) -> Result<(), ContainerError> {
-    if command_succeeds("container", &["network", "inspect", name]).await? {
+    if network_exists(name).await? {
         tracing::info!(
             network = name,
             "removing existing MCP network before recreation"
