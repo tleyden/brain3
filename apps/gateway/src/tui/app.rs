@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use tokio::sync::oneshot;
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -13,7 +14,7 @@ use ratatui::Terminal;
 
 use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
 use brain3_core::domain::setup::{
-    FinalizeSetupRequest, RuntimeLaunchPlan, SetupDefaults, SetupStep,
+    ConnectionCard, FinalizeSetupRequest, RuntimeLaunchPlan, SetupDefaults, SetupStep,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::setup::PlatformSetupSystem;
@@ -51,37 +52,29 @@ pub async fn run_gateway_tui(
         .await
         .map_err(|error| anyhow::anyhow!("{error}"))?;
 
-    let mut state = match launch {
-        GatewayTuiLaunch::FirstRun => {
-            FirstRunTuiState::new(host.to_string(), log_file.clone(), preparation)
-        }
-        GatewayTuiLaunch::Configured { launch_plan } => {
-            let session = server::spawn_configured_gateway_session(
-                host,
-                launch_plan,
-                runtime_overrides.clone(),
-            )
-            .await?;
-            tracing::debug!(
-                server_url = ?session.display_url,
-                "building connection card for configured launch"
-            );
-            FirstRunTuiState::new_runtime(
-                host.to_string(),
-                log_file.clone(),
-                preparation,
-                session.display_url,
-                session.runtime,
-                session.server,
-            )
-        }
-    };
-
+    // Start TUI immediately so the screen is live during all startup work.
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+
+    let mut state = match launch {
+        GatewayTuiLaunch::FirstRun => {
+            FirstRunTuiState::new(host.to_string(), log_file.clone(), preparation)
+        }
+        GatewayTuiLaunch::Configured { launch_plan } => {
+            let (tx, rx) = oneshot::channel();
+            let host_clone = host.to_string();
+            tokio::spawn(async move {
+                let _ = tx.send(
+                    server::spawn_configured_gateway_session(&host_clone, launch_plan, runtime_overrides)
+                        .await,
+                );
+            });
+            FirstRunTuiState::new_starting(host.to_string(), log_file.clone(), preparation, rx)
+        }
+    };
 
     let result = event_loop(&mut terminal, &mut state, &use_case, setup_system).await;
 
@@ -101,6 +94,14 @@ async fn event_loop(
 ) -> Result<()> {
     loop {
         handle_runtime_tick(state);
+
+        if let Some(rx) = &mut state.startup_rx {
+            if let Ok(result) = rx.try_recv() {
+                state.startup_rx = None;
+                apply_startup_result(state, result, use_case);
+            }
+        }
+
         terminal.draw(|f| screens::draw(f, state))?;
 
         if !event::poll(Duration::from_millis(200))? {
@@ -359,6 +360,7 @@ async fn event_loop(
 }
 
 fn handle_runtime_tick(state: &mut FirstRunTuiState) {
+    state.tick_count = state.tick_count.wrapping_add(1);
     if matches!(state.step, SetupStep::RuntimeStatus) {
         state.refresh_runtime_logs();
     }
@@ -430,10 +432,10 @@ async fn run_install_action(
 
 async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSetupUseCase) {
     state.clear_messages();
-    state.info_message = Some("Writing config and starting Brain3...".into());
 
     let request: FinalizeSetupRequest = state.apply_inputs_to_draft();
 
+    // Fast: validate inputs, generate secrets, write env file.
     let summary = match use_case
         .finalize(request)
         .await
@@ -443,55 +445,109 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
         Err(error) => {
             tracing::error!(error = %error, "failed to finalize setup");
             state.error_message = Some(error.to_string());
-            state.info_message = None;
             return;
         }
     };
 
-    let session = match start_configured_runtime_session(
-        &state.host,
-        RuntimeLaunchPlan {
-            paths: summary.paths.clone(),
-            env_file: summary.paths.env_file.clone(),
-            log_file: state.log_file.clone(),
-        },
-    )
-    .await
-    {
-        Ok(session) => session,
+    // Slow: container startup, tunnel, gateway bind — run in background so TUI stays live.
+    let launch_plan = RuntimeLaunchPlan {
+        paths: summary.paths.clone(),
+        env_file: summary.paths.env_file.clone(),
+        log_file: state.log_file.clone(),
+    };
+    let host = state.host.clone();
+    let (tx, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let _ = tx.send(start_configured_runtime_session(&host, launch_plan).await);
+    });
+
+    state.summary = Some(summary);
+    state.startup_rx = Some(rx);
+    state.info_message = Some("Starting Brain3...".into());
+    state.step = SetupStep::RuntimeStatus;
+}
+
+fn apply_startup_result(
+    state: &mut FirstRunTuiState,
+    result: anyhow::Result<ConfiguredGatewaySession>,
+    use_case: &FirstRunSetupUseCase,
+) {
+    let session = match result {
         Err(error) => {
-            tracing::error!(error = %error, "failed to start gateway session");
+            tracing::error!(error = %error, "startup task failed");
             state.error_message = Some(error.to_string());
             state.info_message = None;
             return;
         }
+        Ok(session) => session,
     };
 
-    state.summary = Some(summary);
-    state.runtime = Some(session.runtime);
-    state.server = session.server;
+    let ConfiguredGatewaySession {
+        runtime,
+        server,
+        display_url,
+    } = session;
 
-    if let Some(display_url) = session.display_url {
-        let summary = state.summary.as_ref().expect("summary should be present");
-        tracing::debug!(server_url = %display_url, "building connection card after first-run wizard");
-        let connection_card =
-            use_case.build_connection_card(display_url, state.log_file.clone(), summary);
-        state.connection_card = Some(connection_card);
+    if let Some(display_url) = display_url {
+        let card = if let Some(summary) = state.summary.as_ref() {
+            // Wizard path: build card from the summary written to disk.
+            tracing::debug!(server_url = %display_url, "building connection card after first-run wizard");
+            use_case.build_connection_card(display_url, state.log_file.clone(), summary)
+        } else {
+            // Configured-launch path: credentials come from the loaded runtime config.
+            let oauth = &runtime.config.oauth;
+            tracing::trace!(
+                server_url = %display_url,
+                runtime_client_id = %oauth.client_id,
+                runtime_username = %oauth.username,
+                preparation_client_id = %state.preparation.draft.client_id,
+                preparation_username = %state.preparation.draft.username,
+                "building connection card: credentials from runtime config (loaded from disk)"
+            );
+            if oauth.client_id != state.preparation.draft.client_id
+                || oauth.username != state.preparation.draft.username
+            {
+                tracing::warn!(
+                    runtime_client_id = %oauth.client_id,
+                    runtime_username = %oauth.username,
+                    preparation_client_id = %state.preparation.draft.client_id,
+                    preparation_username = %state.preparation.draft.username,
+                    "connection card credentials differ from preparation draft — env file may \
+                     have changed since startup"
+                );
+            }
+            ConnectionCard {
+                server_url: display_url,
+                client_id: oauth.client_id.clone(),
+                client_secret: oauth.client_secret.clone(),
+                username: oauth.username.clone(),
+                password: oauth.password.clone(),
+                log_file: state.log_file.clone(),
+            }
+        };
+        state.connection_card = Some(card);
     }
+
+    state.runtime = Some(runtime);
+    state.server = server;
 
     if let Some(runtime) = &state.runtime {
         if let Some(failure) = runtime.primary_failure_summary() {
             tracing::error!(failure, "runtime reported primary failure");
             state.error_message = Some(failure.to_string());
             state.info_message = None;
-            state.step = SetupStep::RuntimeStatus;
+            // step stays on RuntimeStatus (already set by finalize_and_start or new_starting)
         } else {
             state.info_message = Some("Brain3 is running.".into());
-            state.step = if state.connection_card.is_some() {
-                SetupStep::ConnectionCard
-            } else {
-                SetupStep::RuntimeStatus
-            };
+            // Wizard path shows the connection card first so the user can copy credentials.
+            // Configured-launch path goes straight to RuntimeStatus (credentials already known).
+            if state.summary.is_some() {
+                state.step = if state.connection_card.is_some() {
+                    SetupStep::ConnectionCard
+                } else {
+                    SetupStep::RuntimeStatus
+                };
+            }
         }
     }
 }
