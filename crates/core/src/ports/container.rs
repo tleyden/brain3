@@ -12,6 +12,7 @@ pub trait ContainerPort: Send + Sync {
     async fn is_running(&self, id: &ContainerId) -> Result<bool, ContainerError>;
     async fn logs_tail(&self, id: &ContainerId, lines: usize) -> Result<String, ContainerError>;
     async fn prepare_network_isolation(&self) -> Result<bool, ContainerError>;
+    async fn get_container_ip(&self, id: &ContainerId) -> Result<Option<String>, ContainerError>;
     async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError>;
     async fn stop(&self, id: &ContainerId) -> Result<(), ContainerError>;
     async fn remove(&self, id: &ContainerId) -> Result<(), ContainerError>;

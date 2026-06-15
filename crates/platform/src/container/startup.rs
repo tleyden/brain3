@@ -11,7 +11,9 @@ use super::{DockerContainerAdapter, MacOsContainerAdapter};
 
 const DEV_MOUNT_TARGET: &str = "/workspace/brain3-mcp-vault-tools";
 
-pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
+pub async fn ensure_mcp_container(
+    startup: &ContainerStartupConfig,
+) -> Result<Option<String>, ContainerError> {
     let dev_mode = startup.dev_mount_source.is_some();
     tracing::info!(
         container = %startup.container_name,
@@ -24,7 +26,8 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
     );
     tracing::info!(
         container = %startup.container_name,
-        network_isolated = startup.network_isolated,
+        network_isolated = startup.isolation_strategy.is_some(),
+        isolation_strategy = ?startup.isolation_strategy,
         "resolved MCP container network isolation mode"
     );
 
@@ -49,6 +52,9 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
             "/run/brain3/upstream_secret".into(),
         ),
     ];
+    if startup.isolation_strategy.is_some() {
+        env_vars.push(("B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS".into(), "true".into()));
+    }
 
     let mut bind_mounts = vec![
         BindMount {
@@ -81,10 +87,29 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         ];
     }
 
+    let allowed_hosts_env = env_vars
+        .iter()
+        .find(|(key, _)| key == "B3_VAULT_MCP_ALLOWED_HOSTS")
+        .map(|(_, value)| value.as_str());
+    let allow_self_ip_hosts = env_vars
+        .iter()
+        .find(|(key, _)| key == "B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS")
+        .map(|(_, value)| value.as_str());
+    tracing::info!(
+        container = %startup.container_name,
+        network_isolated = startup.isolation_strategy.is_some(),
+        isolation_strategy = ?startup.isolation_strategy,
+        host_probe_target = %format!("127.0.0.1:{}", startup.host_port),
+        isolated_probe_target = %format!("<container-ip>:{}", startup.container_port),
+        allowed_hosts_env = ?allowed_hosts_env,
+        allow_self_ip_hosts = ?allow_self_ip_hosts,
+        "prepared MCP container runtime networking configuration"
+    );
+
     let config = ContainerConfig {
         image: startup.image.clone(),
         name: startup.container_name.clone(),
-        network_isolated: startup.network_isolated,
+        isolation_strategy: startup.isolation_strategy,
         port_mappings: vec![PortMapping {
             host_address: "127.0.0.1".into(),
             host_port: startup.host_port,
@@ -99,6 +124,6 @@ pub async fn ensure_mcp_container(startup: &ContainerStartupConfig) -> Result<()
         command,
     };
 
-    EnsureContainerUseCase::new(port).ensure(&config).await?;
-    Ok(())
+    let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
+    Ok(container_ip)
 }

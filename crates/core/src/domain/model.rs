@@ -41,12 +41,30 @@ pub enum ContainerRuntime {
     MacOSContainer,
 }
 
+/// How the gateway reaches the MCP container when it is on an internal-only network.
+///
+/// The strategy is independent of the container runtime so future runtimes can
+/// mix and match without adding new runtime-specific code paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerNetworkIsolationStrategy {
+    /// Container joins the internal network; `--publish` is **not** added.
+    /// The gateway discovers the container's IP via inspect and proxies to it
+    /// directly on the container port. Default for Docker on Linux.
+    DiscoverContainerIp,
+    /// Container joins the internal network; `--publish` **is** added to bind
+    /// the host loopback port. The gateway reaches the container via
+    /// `127.0.0.1:host_port` as normal. Default for macOS native containers.
+    PublishToLoopback,
+}
+
 /// Config passed to ContainerPort::run — runtime-agnostic.
 #[derive(Debug, Clone)]
 pub struct ContainerConfig {
     pub image: String,
     pub name: String,
-    pub network_isolated: bool,
+    /// `None` = no internal network; `Some(strategy)` = internal network with
+    /// the given reachability strategy.
+    pub isolation_strategy: Option<ContainerNetworkIsolationStrategy>,
     pub port_mappings: Vec<PortMapping>,
     pub env_vars: Vec<(String, String)>,
     pub bind_mounts: Vec<BindMount>,
@@ -83,7 +101,8 @@ pub struct ContainerStartupConfig {
     pub upstream_secret_dir: PathBuf,
     pub host_port: u16,
     pub container_port: u16,
-    pub network_isolated: bool,
+    /// `None` = not isolated; `Some(strategy)` = internal network with given strategy.
+    pub isolation_strategy: Option<ContainerNetworkIsolationStrategy>,
     /// When set, bind-mount this host directory into the container and run
     /// from source instead of the code baked into the image.
     pub dev_mount_source: Option<PathBuf>,

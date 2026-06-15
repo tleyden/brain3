@@ -29,14 +29,32 @@ impl McpProxyPort for ReqwestMcpProxy {
             .method
             .parse::<reqwest::Method>()
             .map_err(|e| ProxyError::BadGateway(format!("invalid method: {e}")))?;
+        let url_authority = reqwest::Url::parse(&request.url).ok().and_then(|url| {
+            url.host_str().map(|host| match url.port() {
+                Some(port) => format!("{host}:{port}"),
+                None => host.to_string(),
+            })
+        });
+        let has_host_header = request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("host"));
 
         tracing::debug!(
             method = %method,
             url = %request.url,
+            url_authority = ?url_authority,
+            has_host_header,
             header_count = request.headers.len(),
             body_bytes = request.body.len(),
             "reqwest: sending request to MCP container"
         );
+        if !has_host_header {
+            tracing::info!(
+                url_authority = ?url_authority,
+                "reqwest: no explicit Host header forwarded; upstream Host will be derived from request URL authority"
+            );
+        }
 
         let mut builder = self.client.request(method, &request.url);
 

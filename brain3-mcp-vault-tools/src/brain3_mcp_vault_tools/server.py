@@ -1,7 +1,9 @@
 """Authless Obsidian MCP server."""
 
 import hmac
+import ipaddress
 import logging
+import socket
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -13,6 +15,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import (
+    VAULT_MCP_ALLOW_SELF_IP_HOSTS,
     UPSTREAM_SHARED_SECRET_FILE,
     UPSTREAM_SHARED_SECRET_HEADER,
     VAULT_MCP_EXTRA_ALLOWED_HOSTS,
@@ -51,6 +54,65 @@ from .tools.write import (
 logger = logging.getLogger(__name__)
 
 frontmatter_index = FrontmatterIndex()
+DEFAULT_ALLOWED_HOSTS = [
+    "127.0.0.1:*",
+    "localhost:*",
+    "[::1]:*",
+]
+
+
+def _dedupe_keep_order(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _format_ip_allowed_host(ip: str) -> str:
+    return f"[{ip}]:*" if ":" in ip else f"{ip}:*"
+
+
+def _discover_self_ips() -> list[str]:
+    hostname = socket.gethostname()
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        logger.warning(
+            "Unable to resolve self IPs from hostname=%s: %s", hostname, exc
+        )
+        return []
+
+    ips: list[str] = []
+    for _family, _socktype, _proto, _canonname, sockaddr in addrinfos:
+        host = sockaddr[0]
+        try:
+            ip = ipaddress.ip_address(host)
+        except ValueError:
+            continue
+        if ip.is_loopback or ip.is_unspecified:
+            continue
+        ips.append(ip.compressed)
+
+    return _dedupe_keep_order(ips)
+
+
+def _resolve_allowed_hosts() -> tuple[list[str], list[str]]:
+    detected_self_ips = (
+        _discover_self_ips() if VAULT_MCP_ALLOW_SELF_IP_HOSTS else []
+    )
+    allowed_hosts = (
+        DEFAULT_ALLOWED_HOSTS
+        + VAULT_MCP_EXTRA_ALLOWED_HOSTS
+        + [_format_ip_allowed_host(ip) for ip in detected_self_ips]
+    )
+    return _dedupe_keep_order(allowed_hosts), detected_self_ips
+
+
+ALLOWED_HOSTS, DETECTED_SELF_IPS = _resolve_allowed_hosts()
 
 
 def _package_version() -> str:
@@ -118,9 +180,68 @@ class UpstreamSharedSecretMiddleware:
         await self.app(scope, receive, send)
 
 
+class InboundRequestLoggingMiddleware:
+    def __init__(self, app: ASGIApp, *, allowed_hosts: list[str]) -> None:
+        self.app = app
+        self.allowed_hosts = allowed_hosts
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        if not path.startswith("/mcp"):
+            await self.app(scope, receive, send)
+            return
+
+        headers = {
+            key.decode("latin-1"): value.decode("latin-1")
+            for key, value in scope.get("headers", [])
+        }
+        client = scope.get("client")
+        host_header = headers.get("host", "")
+        forwarded_host = headers.get("x-forwarded-host", "")
+        response_status: int | None = None
+
+        logger.info(
+            "Inbound MCP request method=%s path=%s client=%s host=%s x_forwarded_host=%s has_upstream_secret=%s allowed_hosts=%s",
+            scope.get("method", "<unknown>"),
+            path,
+            client,
+            host_header,
+            forwarded_host,
+            UPSTREAM_SHARED_SECRET_HEADER in headers,
+            self.allowed_hosts,
+        )
+
+        async def send_wrapper(message: Message) -> None:
+            nonlocal response_status
+            if message["type"] == "http.response.start":
+                response_status = message["status"]
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+        log = logger.warning if response_status == 421 else logger.info
+        log(
+            "Inbound MCP response status=%s method=%s path=%s host=%s x_forwarded_host=%s allowed_hosts=%s",
+            response_status,
+            scope.get("method", "<unknown>"),
+            path,
+            host_header,
+            forwarded_host,
+            self.allowed_hosts,
+        )
+
+
 class GuardedFastMCP(FastMCP):
     def streamable_http_app(self):
         app = super().streamable_http_app()
+        app.add_middleware(
+            InboundRequestLoggingMiddleware,
+            allowed_hosts=ALLOWED_HOSTS,
+        )
         app.add_middleware(
             UpstreamSharedSecretMiddleware,
             shared_secret=_load_upstream_shared_secret(),
@@ -133,6 +254,15 @@ class GuardedFastMCP(FastMCP):
 def _start_process_resources() -> None:
     """Start process-scoped resources before serving requests."""
     logger.info(f"Starting vault MCP server. Vault: {VAULT_PATH}")
+    logger.info(
+        "Transport security bind_host=%s bind_port=%s allowed_hosts=%s extra_allowed_hosts=%s allow_self_ip_hosts=%s detected_self_ips=%s",
+        VAULT_MCP_HOST,
+        VAULT_MCP_PORT,
+        ALLOWED_HOSTS,
+        VAULT_MCP_EXTRA_ALLOWED_HOSTS,
+        VAULT_MCP_ALLOW_SELF_IP_HOSTS,
+        DETECTED_SELF_IPS,
+    )
     frontmatter_index.start()
     logger.info(
         f"Frontmatter index built: {frontmatter_index.file_count} files indexed"
@@ -153,12 +283,7 @@ mcp = GuardedFastMCP(
     json_response=True,
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
-        allowed_hosts=[
-            "127.0.0.1:*",
-            "localhost:*",
-            "[::1]:*",
-        ]
-        + VAULT_MCP_EXTRA_ALLOWED_HOSTS,
+        allowed_hosts=ALLOWED_HOSTS,
     ),
 )
 

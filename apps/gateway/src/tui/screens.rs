@@ -1209,7 +1209,7 @@ mod tests {
                     upstream_secret_dir: PathBuf::from("/tmp"),
                     host_port: 8420,
                     container_port: 8420,
-                    network_isolated: true,
+                    isolation_strategy: Some(brain3_core::domain::model::ContainerNetworkIsolationStrategy::DiscoverContainerIp),
                     dev_mount_source: None,
                 }),
                 tunnel: None,

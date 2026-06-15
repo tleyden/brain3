@@ -4,7 +4,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::domain::errors::ContainerError;
-use crate::domain::model::{ContainerConfig, PortMapping};
+use crate::domain::model::{ContainerConfig, ContainerNetworkIsolationStrategy, PortMapping};
 use crate::ports::container::{ContainerId, ContainerPort};
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -53,7 +53,10 @@ impl EnsureContainerUseCase {
         }
     }
 
-    pub async fn ensure(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
+    pub async fn ensure(
+        &self,
+        config: &ContainerConfig,
+    ) -> Result<(ContainerId, Option<String>), ContainerError> {
         if !self.port.image_exists(&config.image).await? {
             tracing::warn!(
                 image = %config.image,
@@ -79,22 +82,54 @@ impl EnsureContainerUseCase {
 
         tracing::info!(container = %config.name, image = %config.image, "starting container");
         let mut runtime_config = config.clone();
-        if config.network_isolated {
-            runtime_config.network_isolated = self.port.prepare_network_isolation().await?;
+        if config.isolation_strategy.is_some() {
+            let isolation_ok = self.port.prepare_network_isolation().await?;
+            if !isolation_ok {
+                runtime_config.isolation_strategy = None;
+            }
         }
 
         let id = self.port.run(&runtime_config).await?;
-        self.verify_startup(&id, config).await?;
+
+        let container_ip = if runtime_config.isolation_strategy
+            == Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
+        {
+            self.port.get_container_ip(&id).await?
+        } else {
+            None
+        };
+
+        self.verify_startup(&id, config, container_ip.as_deref())
+            .await?;
         tracing::info!(container = %config.name, "container ready");
-        Ok(id)
+        Ok((id, container_ip))
     }
 
     async fn verify_startup(
         &self,
         id: &ContainerId,
         config: &ContainerConfig,
+        probe_host_override: Option<&str>,
     ) -> Result<(), ContainerError> {
         let deadline = Instant::now() + self.probe_settings.timeout;
+        let probe_desc = if let Some(host) = probe_host_override {
+            config
+                .port_mappings
+                .iter()
+                .map(|mapping| format!("{host}:{}", mapping.container_port))
+                .collect::<Vec<_>>()
+                .join(", ")
+        } else {
+            format_port_mappings(&config.port_mappings)
+        };
+        tracing::info!(
+            container = %config.name,
+            probe_target = %probe_desc,
+            probe_uses_container_ip = probe_host_override.is_some(),
+            timeout_ms = self.probe_settings.timeout.as_millis() as u64,
+            poll_interval_ms = self.probe_settings.poll_interval.as_millis() as u64,
+            "verifying container startup reachability"
+        );
 
         loop {
             if !self.port.is_running(id).await? {
@@ -110,10 +145,13 @@ impl EnsureContainerUseCase {
             }
 
             let ports_ready = config.port_mappings.is_empty()
-                || config
-                    .port_mappings
-                    .iter()
-                    .all(|mapping| tcp_port_ready(&mapping.host_address, mapping.host_port));
+                || config.port_mappings.iter().all(|mapping| {
+                    if let Some(host) = probe_host_override {
+                        tcp_port_ready(host, mapping.container_port)
+                    } else {
+                        tcp_port_ready(&mapping.host_address, mapping.host_port)
+                    }
+                });
 
             if ports_ready {
                 return Ok(());
@@ -125,8 +163,7 @@ impl EnsureContainerUseCase {
                         id,
                         format!(
                             "container '{}' did not become reachable on {} before timeout",
-                            config.name,
-                            format_port_mappings(&config.port_mappings)
+                            config.name, probe_desc
                         ),
                     )
                     .await);
@@ -199,7 +236,7 @@ mod tests {
         logs_tail_output: Option<String>,
         prepare_network_isolation_result: bool,
         prepare_network_isolation_count: usize,
-        last_run_network_isolated: Option<bool>,
+        last_run_isolation_strategy: Option<Option<ContainerNetworkIsolationStrategy>>,
         pull_count: usize,
         stop_count: usize,
         remove_count: usize,
@@ -277,7 +314,7 @@ mod tests {
             let mut state = self.state.lock().unwrap();
             state.actions.push("run");
             state.run_count += 1;
-            state.last_run_network_isolated = Some(config.network_isolated);
+            state.last_run_isolation_strategy = Some(config.isolation_strategy);
             state.container_exists = true;
             state.container_running = true;
             Ok(ContainerId(config.name.clone()))
@@ -298,13 +335,20 @@ mod tests {
             state.container_exists = false;
             Ok(())
         }
+
+        async fn get_container_ip(
+            &self,
+            _id: &ContainerId,
+        ) -> Result<Option<String>, ContainerError> {
+            Ok(None)
+        }
     }
 
     fn sample_config() -> ContainerConfig {
         ContainerConfig {
             image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
             name: "brain3-mcp-vault-tools".into(),
-            network_isolated: false,
+            isolation_strategy: None,
             port_mappings: vec![],
             env_vars: vec![],
             bind_mounts: vec![],
@@ -333,7 +377,7 @@ mod tests {
         let use_case = short_probe_use_case(port.clone());
         let config = sample_config();
 
-        let id = use_case.ensure(&config).await.unwrap();
+        let (id, _) = use_case.ensure(&config).await.unwrap();
 
         assert_eq!(id.0, config.name);
 
@@ -366,7 +410,7 @@ mod tests {
         let use_case = short_probe_use_case(port.clone());
         let config = sample_config();
 
-        let id = use_case.ensure(&config).await.unwrap();
+        let (id, _) = use_case.ensure(&config).await.unwrap();
 
         assert_eq!(id.0, config.name);
 
@@ -467,15 +511,15 @@ mod tests {
         }));
         let use_case = short_probe_use_case(port.clone());
         let mut config = sample_config();
-        config.network_isolated = true;
+        config.isolation_strategy = Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp);
 
-        let id = use_case.ensure(&config).await.unwrap();
+        let (id, _) = use_case.ensure(&config).await.unwrap();
 
         assert_eq!(id.0, config.name);
 
         let state = port.snapshot();
         assert_eq!(state.prepare_network_isolation_count, 1);
-        assert_eq!(state.last_run_network_isolated, Some(false));
+        assert_eq!(state.last_run_isolation_strategy, Some(None));
         assert_eq!(
             state.actions,
             vec![
