@@ -2,9 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use brain3_core::domain::errors::ContainerError;
-use brain3_core::domain::model::{
-    ContainerNetworkIsolationStrategy, GatewayConfig, TunnelConfig,
-};
+use brain3_core::domain::model::{ContainerNetworkIsolationStrategy, GatewayConfig, TunnelConfig};
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::tunnel::TunnelPort;
 
@@ -142,7 +140,11 @@ pub async fn bootstrap_configured_runtime(
         {
             Ok(()) => StartupStatus::Ready,
             Err(summary) => {
-                tracing::error!(summary, "MCP health probe failed after container TCP-ready");
+                tracing::error!(
+                    summary,
+                    upstream_url = %config.mcp_reverse_proxy.mcp_upstream_url,
+                    "MCP health probe failed after container TCP-ready"
+                );
                 StartupStatus::Failed { summary }
             }
         }

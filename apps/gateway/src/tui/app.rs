@@ -4,13 +4,13 @@ use std::time::Duration;
 
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use tokio::sync::oneshot;
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
+use tokio::sync::oneshot;
 
 use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
 use brain3_core::domain::setup::{
@@ -69,8 +69,12 @@ pub async fn run_gateway_tui(
             let host_clone = host.to_string();
             tokio::spawn(async move {
                 let _ = tx.send(
-                    server::spawn_configured_gateway_session(&host_clone, launch_plan, runtime_overrides)
-                        .await,
+                    server::spawn_configured_gateway_session(
+                        &host_clone,
+                        launch_plan,
+                        runtime_overrides,
+                    )
+                    .await,
                 );
             });
             FirstRunTuiState::new_starting(host.to_string(), log_file.clone(), preparation, rx)

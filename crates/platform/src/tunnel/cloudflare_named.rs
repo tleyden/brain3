@@ -8,7 +8,6 @@ use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use tokio::time::{sleep, Duration};
 
-
 pub struct CloudflareNamedTunnelAdapter {
     tunnel_name: String,
     domain: String,
@@ -207,7 +206,9 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
         *self.public_url.lock().await = None;
         match cleanup_tunnel(&self.tunnel_name).await {
             Ok(()) => tracing::info!(tunnel = %self.tunnel_name, "tunnel connections cleaned up"),
-            Err(e) => tracing::warn!(tunnel = %self.tunnel_name, error = %e, "tunnel cleanup after stop failed"),
+            Err(e) => {
+                tracing::warn!(tunnel = %self.tunnel_name, error = %e, "tunnel cleanup after stop failed")
+            }
         }
         Ok(())
     }

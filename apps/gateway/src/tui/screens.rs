@@ -638,7 +638,10 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
     if state.startup_rx.is_some() {
         lines.push(Line::from(vec![
-            Span::styled(format!("{} ", spinner_char(state.tick_count)), accent_style()),
+            Span::styled(
+                format!("{} ", spinner_char(state.tick_count)),
+                accent_style(),
+            ),
             Span::styled("Starting Brain3, please wait...", accent_style()),
         ]));
         return lines;
@@ -731,7 +734,10 @@ fn status_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         let has_active_task = state.startup_rx.is_some() || state.probe_rx.is_some();
         return vec![Line::from(if has_active_task {
             vec![
-                Span::styled(format!("{} ", spinner_char(state.tick_count)), accent_style()),
+                Span::styled(
+                    format!("{} ", spinner_char(state.tick_count)),
+                    accent_style(),
+                ),
                 Span::styled(info.clone(), success_style()),
             ]
         } else {

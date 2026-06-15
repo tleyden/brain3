@@ -506,7 +506,9 @@ mod tests {
             ));
 
             let adapter = EnvFileConfigAdapter::new(Some(env_path));
-            let err = adapter.load().expect_err("expected invalid macos docker config");
+            let err = adapter
+                .load()
+                .expect_err("expected invalid macos docker config");
 
             match err {
                 ConfigError::Invalid(message) => {
@@ -541,7 +543,9 @@ mod tests {
             ));
 
             let adapter = EnvFileConfigAdapter::new(Some(env_path));
-            let config = adapter.load().expect("expected linux docker config to load");
+            let config = adapter
+                .load()
+                .expect("expected linux docker config to load");
 
             assert_eq!(
                 config.container.as_ref().map(|c| c.runtime),
