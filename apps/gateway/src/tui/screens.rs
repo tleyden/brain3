@@ -1103,6 +1103,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
+    use brain3_core::application::first_run_setup::CURRENT_RELEASE;
     use brain3_core::domain::model::{
         ContainerRuntime, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
         OAuthConfig,
@@ -1135,7 +1136,9 @@ mod tests {
             .join("\n");
 
         assert!(text.contains("Container:  Failed"));
-        assert!(text.contains("Container image: ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.6"));
+        assert!(text.contains(&format!(
+            "Container image: ghcr.io/tleyden/brain3-mcp-vault-tools:{CURRENT_RELEASE}"
+        )));
         assert!(text.contains("Vault path does not exist"));
         assert!(text.contains("Gateway:  Not started"));
     }
@@ -1209,7 +1212,9 @@ mod tests {
                 },
                 container: Some(brain3_core::domain::model::ContainerStartupConfig {
                     runtime: ContainerRuntime::Docker,
-                    image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.6".into(),
+                    image: format!(
+                        "ghcr.io/tleyden/brain3-mcp-vault-tools:{CURRENT_RELEASE}"
+                    ),
                     container_name: "brain3-mcp-vault-tools".into(),
                     vault_path: PathBuf::from("/missing/vault"),
                     upstream_secret_dir: PathBuf::from("/tmp"),

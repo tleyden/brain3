@@ -1,3 +1,5 @@
+use brain3_core::application::first_run_setup::CURRENT_RELEASE;
+
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const APP_VERSION_DISPLAY: &str = concat!("Brain3 v", env!("CARGO_PKG_VERSION"));
 pub const HELP_ABOUT: &str = concat!(
@@ -9,7 +11,7 @@ pub const HELP_ABOUT: &str = concat!(
 pub const MCP_IMAGE_REPO: &str = "ghcr.io/tleyden/brain3-mcp-vault-tools";
 
 pub fn default_container_image() -> String {
-    format!("{MCP_IMAGE_REPO}:v{APP_VERSION}")
+    format!("{MCP_IMAGE_REPO}:{CURRENT_RELEASE}")
 }
 
 pub fn official_latest_container_image() -> String {
@@ -27,12 +29,13 @@ pub fn container_image_for_tag(tag: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use brain3_core::application::first_run_setup::CURRENT_RELEASE;
 
     #[test]
     fn default_container_image_uses_versioned_tag() {
         assert_eq!(
             default_container_image(),
-            format!("{MCP_IMAGE_REPO}:v{APP_VERSION}")
+            format!("{MCP_IMAGE_REPO}:{CURRENT_RELEASE}")
         );
     }
 
@@ -49,8 +52,6 @@ mod tests {
         assert!(is_official_latest_container_image(
             &official_latest_container_image()
         ));
-        assert!(!is_official_latest_container_image(
-            "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.6"
-        ));
+        assert!(!is_official_latest_container_image(&default_container_image()));
     }
 }
