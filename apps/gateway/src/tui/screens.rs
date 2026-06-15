@@ -653,7 +653,7 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             } else {
                 "bridge".to_string()
             };
-            lines.push(key_value_line("Network", network));
+            lines.push(key_value_line("Container network", network));
         }
 
         if let Some(url) = &runtime.public_url {
