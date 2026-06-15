@@ -4,7 +4,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::domain::errors::ContainerError;
-use crate::domain::model::{ContainerConfig, PortMapping};
+use crate::domain::model::{ContainerConfig, ContainerNetworkIsolationStrategy, PortMapping};
 use crate::ports::container::{ContainerId, ContainerPort};
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
@@ -82,13 +82,18 @@ impl EnsureContainerUseCase {
 
         tracing::info!(container = %config.name, image = %config.image, "starting container");
         let mut runtime_config = config.clone();
-        if config.network_isolated {
-            runtime_config.network_isolated = self.port.prepare_network_isolation().await?;
+        if config.isolation_strategy.is_some() {
+            let isolation_ok = self.port.prepare_network_isolation().await?;
+            if !isolation_ok {
+                runtime_config.isolation_strategy = None;
+            }
         }
 
         let id = self.port.run(&runtime_config).await?;
 
-        let container_ip = if runtime_config.network_isolated {
+        let container_ip = if runtime_config.isolation_strategy
+            == Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
+        {
             self.port.get_container_ip(&id).await?
         } else {
             None
@@ -231,7 +236,7 @@ mod tests {
         logs_tail_output: Option<String>,
         prepare_network_isolation_result: bool,
         prepare_network_isolation_count: usize,
-        last_run_network_isolated: Option<bool>,
+        last_run_isolation_strategy: Option<Option<ContainerNetworkIsolationStrategy>>,
         pull_count: usize,
         stop_count: usize,
         remove_count: usize,
@@ -309,7 +314,7 @@ mod tests {
             let mut state = self.state.lock().unwrap();
             state.actions.push("run");
             state.run_count += 1;
-            state.last_run_network_isolated = Some(config.network_isolated);
+            state.last_run_isolation_strategy = Some(config.isolation_strategy);
             state.container_exists = true;
             state.container_running = true;
             Ok(ContainerId(config.name.clone()))
@@ -343,7 +348,7 @@ mod tests {
         ContainerConfig {
             image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
             name: "brain3-mcp-vault-tools".into(),
-            network_isolated: false,
+            isolation_strategy: None,
             port_mappings: vec![],
             env_vars: vec![],
             bind_mounts: vec![],
@@ -506,7 +511,7 @@ mod tests {
         }));
         let use_case = short_probe_use_case(port.clone());
         let mut config = sample_config();
-        config.network_isolated = true;
+        config.isolation_strategy = Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp);
 
         let (id, _) = use_case.ensure(&config).await.unwrap();
 
@@ -514,7 +519,7 @@ mod tests {
 
         let state = port.snapshot();
         assert_eq!(state.prepare_network_isolation_count, 1);
-        assert_eq!(state.last_run_network_isolated, Some(false));
+        assert_eq!(state.last_run_isolation_strategy, Some(None));
         assert_eq!(
             state.actions,
             vec![

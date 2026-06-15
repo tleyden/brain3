@@ -1,5 +1,5 @@
 use brain3_core::domain::errors::ContainerError;
-use brain3_core::domain::model::ContainerConfig;
+use brain3_core::domain::model::{ContainerConfig, ContainerNetworkIsolationStrategy};
 use brain3_core::ports::container::{ContainerId, ContainerPort};
 
 use super::process::{command_succeeds, run_command};
@@ -86,7 +86,12 @@ impl ContainerPort for DockerContainerAdapter {
             args.push("--user".into());
             args.push(user.clone());
         }
-        if !config.network_isolated {
+        // DiscoverContainerIp: skip --publish; reach container via its internal IP.
+        // All other cases (None or PublishToLoopback): bind host loopback port.
+        if !matches!(
+            config.isolation_strategy,
+            Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
+        ) {
             for pm in &config.port_mappings {
                 args.push("--publish".into());
                 args.push(format!(
@@ -115,7 +120,7 @@ impl ContainerPort for DockerContainerAdapter {
             args.push("--workdir".into());
             args.push(wd.clone());
         }
-        if config.network_isolated {
+        if config.isolation_strategy.is_some() {
             args.push("--network".into());
             args.push(MCP_NETWORK_NAME.into());
         }

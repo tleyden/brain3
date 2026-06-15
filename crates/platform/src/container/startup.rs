@@ -26,7 +26,8 @@ pub async fn ensure_mcp_container(
     );
     tracing::info!(
         container = %startup.container_name,
-        network_isolated = startup.network_isolated,
+        network_isolated = startup.isolation_strategy.is_some(),
+        isolation_strategy = ?startup.isolation_strategy,
         "resolved MCP container network isolation mode"
     );
 
@@ -51,7 +52,7 @@ pub async fn ensure_mcp_container(
             "/run/brain3/upstream_secret".into(),
         ),
     ];
-    if startup.network_isolated {
+    if startup.isolation_strategy.is_some() {
         env_vars.push(("B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS".into(), "true".into()));
     }
 
@@ -96,7 +97,8 @@ pub async fn ensure_mcp_container(
         .map(|(_, value)| value.as_str());
     tracing::info!(
         container = %startup.container_name,
-        network_isolated = startup.network_isolated,
+        network_isolated = startup.isolation_strategy.is_some(),
+        isolation_strategy = ?startup.isolation_strategy,
         host_probe_target = %format!("127.0.0.1:{}", startup.host_port),
         isolated_probe_target = %format!("<container-ip>:{}", startup.container_port),
         allowed_hosts_env = ?allowed_hosts_env,
@@ -107,7 +109,7 @@ pub async fn ensure_mcp_container(
     let config = ContainerConfig {
         image: startup.image.clone(),
         name: startup.container_name.clone(),
-        network_isolated: startup.network_isolated,
+        isolation_strategy: startup.isolation_strategy,
         port_mappings: vec![PortMapping {
             host_address: "127.0.0.1".into(),
             host_port: startup.host_port,

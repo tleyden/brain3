@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use brain3_core::domain::errors::ContainerError;
-use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
+use brain3_core::domain::model::{
+    ContainerNetworkIsolationStrategy, GatewayConfig, TunnelConfig,
+};
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::tunnel::TunnelPort;
 
@@ -108,7 +110,10 @@ pub async fn bootstrap_configured_runtime(
     let mut config = config;
     let container_status = if let Some(startup) = &config.container {
         match ensure_mcp_container(startup).await {
-            Ok(Some(container_ip)) if startup.network_isolated => {
+            Ok(Some(container_ip))
+                if startup.isolation_strategy
+                    == Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp) =>
+            {
                 let upstream_url = format!("http://{}:{}", container_ip, startup.container_port);
                 tracing::info!(
                     container_ip = %container_ip,

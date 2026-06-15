@@ -3,8 +3,8 @@ use std::path::PathBuf;
 
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
-    ContainerRuntime, ContainerStartupConfig, GatewayConfig, HostnameValidationConfig,
-    MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
+    ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig, GatewayConfig,
+    HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
 };
 use brain3_core::domain::oauth::{
     DEFAULT_ACCESS_TOKEN_LIFETIME_SECS, DEFAULT_REFRESH_TOKEN_LIFETIME_SECS,
@@ -268,6 +268,29 @@ fn load_container_startup_config(
     let network_isolated = env_bool("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", false);
     validate_network_isolation_support(runtime, network_isolated)?;
 
+    let isolation_strategy = if network_isolated {
+        let strategy_str = env_var_or("B3_CONTAINER_NETWORK_ISOLATION_STRATEGY", "");
+        let strategy = match strategy_str.trim() {
+            "" => match runtime {
+                ContainerRuntime::Docker => ContainerNetworkIsolationStrategy::DiscoverContainerIp,
+                ContainerRuntime::MacOSContainer => {
+                    ContainerNetworkIsolationStrategy::PublishToLoopback
+                }
+            },
+            "discover-container-ip" => ContainerNetworkIsolationStrategy::DiscoverContainerIp,
+            "publish-to-loopback" => ContainerNetworkIsolationStrategy::PublishToLoopback,
+            other => {
+                return Err(ConfigError::Invalid(format!(
+                    "B3_CONTAINER_NETWORK_ISOLATION_STRATEGY: unknown value '{other}'; \
+                     expected 'discover-container-ip' or 'publish-to-loopback'"
+                )))
+            }
+        };
+        Some(strategy)
+    } else {
+        None
+    };
+
     let upstream_secret_dir = upstream_secret_file
         .parent()
         .unwrap_or(std::path::Path::new("/tmp"))
@@ -286,7 +309,7 @@ fn load_container_startup_config(
         upstream_secret_dir,
         host_port,
         container_port,
-        network_isolated,
+        isolation_strategy,
         dev_mount_source,
     }))
 }
@@ -408,6 +431,7 @@ mod tests {
         "B3_VAULT_PATH",
         "B3_CONTAINER_IMAGE",
         "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION",
+        "B3_CONTAINER_NETWORK_ISOLATION_STRATEGY",
         "B3_CONTAINER_HOST_PORT",
         "B3_CONTAINER_MCP_PORT",
         "B3_CF_QUICK_TUNNEL",
@@ -514,8 +538,8 @@ mod tests {
                 Some(ContainerRuntime::Docker)
             );
             assert_eq!(
-                config.container.as_ref().map(|c| c.network_isolated),
-                Some(true)
+                config.container.as_ref().map(|c| c.isolation_strategy),
+                Some(Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp))
             );
         });
     }
