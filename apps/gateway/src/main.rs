@@ -576,7 +576,7 @@ async fn run_cli_mode(
         shutdown_signal(),
     )
     .await?;
-    runtime.stop_tunnel().await;
+    runtime.shutdown_managed_runtime().await;
     Ok(())
 }
 

@@ -564,7 +564,7 @@ async fn cleanup(state: &mut FirstRunTuiState) -> Result<()> {
         server.shutdown().await?;
     }
     if let Some(mut runtime) = state.runtime.take() {
-        runtime.stop_tunnel().await;
+        runtime.shutdown_managed_runtime().await;
     }
     Ok(())
 }
