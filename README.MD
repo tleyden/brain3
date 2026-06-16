@@ -7,33 +7,13 @@
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-Brain3 lets you interact with your local markdown vault through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
+Brain3 lets you interact with your local markdown vault through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.  It runs as a remote MCP server that lives on your own machine (see [Privacy & Security](#privacy--security) for why).
 
 **Why This Exists**
 
-I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, in particular via voice dictation. 
+I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, and in particular so I could do so using voice dictation.  
 
-Putting an AI assistant in front of your markdown vault brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas.  
-
-Think of it like a **high-capacity memory system that you fully control** and can use with any AI assistant.  It's not quite [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), but the plan is to take it that direction.  
-
-Brain3 is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for third-party connectors, such as:
-
-* <img height="20" src="docs/logos/claude.svg" alt="Claude"> Claude (🌐/🖥️/📱)
-* <img height="20" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT (🌐/🖥️/📱)
-* <img height="20" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai (🖥️) - supports local models such as Gemma4.  
-
-Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Server (VPS) if you have one. It runs as a remote MCP server that runs on your own machine (see [Privacy & Security](#privacy--security) for why), and you administer it from the command line via a Terminal UI (TUI).  
-
-**Use Cases**
-
-Use Brain3 to interact with your local notes through any AI assistant:
-
-1. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
-2. Capture your research efforts when trying to understand a problem, or come up with a novel design
-3. Comparing new ideas with existing notes
-4. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
-5. Anything related to organizing, planning, decision-making and general knowledge management
+Think of it as a **high-capacity memory system you fully control**: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
 
 <div align="center">
 
@@ -43,77 +23,39 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 </div>
 
+<details>
+<summary><strong>Common Use Cases</strong></summary>
+
+Use Brain3 to interact with your local notes through any AI assistant:
+
+1. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
+2. Capture your research efforts when trying to understand a problem, or come up with a novel design
+3. Comparing new ideas with existing notes
+4. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
+5. Anything related to organizing, planning, decision-making and general knowledge management
+
+</details>
+
 ## Screenshots - Admin Terminal UI (TUI)
 
 <a href="docs/screenshots/tui_screenshot.png">
   <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
 </a>
 
-## Features
 
-- 🔐 Your markdown vault data stays 100% local and private (note: it's exposed to your AI assistant via a [Cloudflare Tunnel](#remote-mcp--cloudflare-tunnels))
-- Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
-- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) that is updated regularly for new releases. 
-- 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
-- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian and LLMWiki compatible (but neither are required)
-- <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
-- 🚯 **Not AI Slop** -- this project uses coding agents but maintains a high quality bar through regular manual review and testing.
-
-
-## Requirements
-
-* OS: <img height="16" src="docs/logos/apple.svg" alt="macOS"> macOS, <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux - MS Windows should also work, I'm looking for people to help test.
-* <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Cloudflare Tunnel - but no account needed, and it's a one-liner install.
-* AI Assistant (e.g. <img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT, <img height="16" src="docs/logos/claude.svg" alt="Claude"> Claude, etc) 
-* 🏠 If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to how OpenClaw works (got mac mini?).
-
-## Privacy & Security
-
-<details>
-<summary>🔒 View Privacy & Security Details</summary>
-
-- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) available, which will be done regularly on releases.  The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
-- 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
-- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem isolation plus internal-only networking by default; no other host directories are mounted unless you enable dev mode
-- <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS; `cloudflared` creates outbound-only connections so Brain3 does not need a publicly routable IP
-- <img height="16" src="docs/logos/oauth.svg" alt="OAuth"> OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens — no open registration (DCR/CIMD disabled)
-- 🦀 Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities
-- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
-- You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
-
-### Remote MCP & Cloudflare Tunnels
-
-Brain3 is a **remote MCP server that runs on your own machine**. Your vault never leaves your hardware -- but the connection from your AI assistant to Brain3 is remote, because that's the only connection model Claude and ChatGPT currently support for third-party MCP connectors.  (at least AFAIK, file an issue if you know otherwise)
-
-That somewhat annoying constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable endpoint, and OAuth2.1/PKCE is what Claude and ChatGPT require before they'll connect to any remote MCP server. 
-
-- ⚠️ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
-- Tunnels are cleaned up automatically when Brain3 stops.
-
-### Authentication & Authorization
-
-- Client secret is required at token exchange (`client_secret_post`).
-- Auth codes are single-use and expire after 5 minutes.
-
-### Request Integrity
-
-- Bearer-token validation on all `/mcp` routes.
-- Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured.
-- Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
-- Constant-time comparison for all secret and token checks.
-
-</details>
 
 ## Quick Start
 
-### <img height="16" src="docs/logos/apple.svg" alt="macOS"> Install macOS Prerequisites
+### Install Prerequisites
+
+#### <img height="16" src="docs/logos/apple.svg" alt="macOS"> macOS
 
 - Container runtime: `brew install container && brew services start container`
 - Cloudflare Tunnel: `brew install cloudflared`
 
 macOS container recommended, but you can also use [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
 
-### <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux Prerequisites
+#### <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux
 
 <details>
 <summary>Ubuntu/Debian install commands</summary>
@@ -143,50 +85,31 @@ echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudf
 sudo apt-get update
 sudo apt-get install cloudflared
 ```
-
 </details>
 
-### Quick Start Step 1: Install the latest release
+### Install and run Brain3
 
 ```bash
 curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.8/install.sh | sh
 ```
 
-This installs `brain3` from the `v0.1.8` release.
-
-### Quick Start Step 2: Run the Brain3 TUI app
-
-In your terminal, run: 
+Now run it:
 
 ```bash
-$ brain3
+brain3
 ```
 
-On first run, Brain3 launches an interactive setup wizard.
+and it should launch an interactive setup wizard.
 
 <a href="docs/screenshots/SetupWizardScreenshot.png">
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
 
-Follow the on-screen instructions to complete the setup, it should hopefully be self-explanatory.  After the setup is complete, it will continue running and will be ready to use.
-
-To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
-
-If you want a stable hostname on your own Cloudflare-managed domain (recommended) instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
-
-### Quick Start Step 3: Connect your AI app
+### Configure your AI 
 
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
-Brain3 displays all the connection information you need:
-
-- Server URL
-- Client ID
-- Client Secret
-- Username
-- Password
-
-Follow the instructions below for your AI client.
+Brain3 displays all the connection information you need.  Follow the instructions below for your AI client.
 
 <details>
 <summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT</strong></summary>
@@ -222,33 +145,11 @@ Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
 
 </details>
 
-<details>
-<summary><img height="16" src="docs/logos/jan.png" alt="Jan.ai"> <strong>Other MCP-Compatible AI Apps</strong></summary>
-
-Most MCP-compatible AI applications require the same information displayed in Brain3's MCP Config Settings screen:
-
-- Server URL
-- Client ID
-- Client Secret
-
-After connecting, complete the OAuth sign-in flow using the **Username** and **Password** shown on that screen.
-
-Refer to your AI application's documentation for client-specific setup instructions.
-
-</details>
-
-Once connected, you can ask your AI to search, organize, summarize, and edit your notes directly through Brain3.
-
-### Quick Start Step 4 (Final Step): Interact with Brain3 via your AI assistant
-
-Example prompt:
-`List all the files in my Brain3 vault.`
-
-Expected result:
-Brain3 should list the files in your vault.
-
+Now you're ready to access your markdown vault through your AI.
 
 ## Advanced Configuration Options
+
+To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
 
 <details>
 <summary><img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain (recommended)</summary>
@@ -294,6 +195,45 @@ brain3.yourdomain.com {
 ```
 
 </details>
+
+
+## Privacy & Security
+
+<details>
+<summary>🔒 View Privacy & Security Details</summary>
+
+- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) available, which will be done regularly on releases.  The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
+- 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
+- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem isolation plus internal-only networking by default; no other host directories are mounted unless you enable dev mode
+- <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS; `cloudflared` creates outbound-only connections so Brain3 does not need a publicly routable IP
+- <img height="16" src="docs/logos/oauth.svg" alt="OAuth"> OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens — no open registration (DCR/CIMD disabled)
+- 🦀 Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities
+- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
+- You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
+
+### Remote MCP & Cloudflare Tunnels
+
+Brain3 is a **remote MCP server that runs on your own machine**. Your vault never leaves your hardware -- but the connection from your AI assistant to Brain3 is remote, because that's the only connection model Claude and ChatGPT currently support for third-party MCP connectors.  (at least AFAIK, file an issue if you know otherwise)
+
+That somewhat annoying constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable endpoint, and OAuth2.1/PKCE is what Claude and ChatGPT require before they'll connect to any remote MCP server. 
+
+- ⚠️ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
+- Tunnels are cleaned up automatically when Brain3 stops.
+
+### Authentication & Authorization
+
+- Client secret is required at token exchange (`client_secret_post`).
+- Auth codes are single-use and expire after 5 minutes.
+
+### Request Integrity
+
+- Bearer-token validation on all `/mcp` routes.
+- Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured.
+- Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
+- Constant-time comparison for all secret and token checks.
+
+</details>
+
 
 ## Configuration Reference
 
@@ -351,12 +291,7 @@ Once connected, your AI app has access to these vault tools:
 
 ## Developers / Contributors
 
-<details>
-<summary><strong>Install Prerequisites</strong></summary>
-
-Refer to the [Quick Start](#quick-start) prerequisites above.
-
-</details>
+See the [Quick Start](#quick-start) prerequisites above before continuing.
 
 <details>
 <summary><strong>Clone and build from source</strong></summary>
@@ -435,4 +370,4 @@ The runtime status screen now reports whether the container is actually `Ready` 
 
 ## License 
 
-Apache 2.0. See [LICENSE.MD](LICENSE.MD).
+Apache 2.0. See [LICENSE.MD](LICENSE.MD) and [NOTICE.MD](NOTICE.MD).
