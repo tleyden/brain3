@@ -1,5 +1,11 @@
 
-<img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
+<p align="center">
+  <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
+  <br/>
+  Access your second brain via your favorite AI assistant using MCP
+  <br/>
+  <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
+</p>
 
 Brain3 lets you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
 
