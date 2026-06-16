@@ -37,7 +37,7 @@ Use Brain3 for anything you'd typically use a second brain for:
 
 <div align="center">
 
-https://github.com/user-attachments/assets/345512bb-5743-4698-90c3-275596a1c585
+https://github.com/user-attachments/assets/b87fa51a-f6f4-4b2d-82d5-0fa21ed84ff2
 
 <em>Sample Weekly Planning Session With ChatGPT and Brain3</em>
 
