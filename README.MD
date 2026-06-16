@@ -7,9 +7,9 @@ Brain3 lets you interact with your local markdown vault (aka "second brain") thr
 
 I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, in particular via voice dictation. 
 
-Putting an AI assistant in front of a second brain brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas. 
+Putting an AI assistant in front of a second brain brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas.  
 
-Think of it like a **high-capacity memory system that you fully control** and can use with any AI assistant.
+Think of it like a **high-capacity memory system that you fully control** and can use with any AI assistant.  It's not quite [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), but the plan is to take it that direction.  
 
 Brain3 is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for third-party connectors, such as:
 
@@ -25,7 +25,7 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 - Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
 - 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) that is updated regularly for new releases. 
 - 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
-- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian-compatible (but Obsidian not required)
+- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian and LLMWiki compatible (but neither are required)
 - <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
 - 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
 
@@ -383,9 +383,8 @@ The runtime status screen now reports whether the container is actually `Ready` 
 
 ## Roadmap
 
-* Create a documentation website
 * Improve search accuracy
-* Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search
+* Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
 
