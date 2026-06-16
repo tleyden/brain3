@@ -5,17 +5,19 @@ Brain3 lets you interact with your local markdown vault (aka "second brain") thr
 
 **Why This Exists**
 
-I built this so I could access my Obsidian markdown vault from the Claude mobile app, via text chat and voice dictation.
+I built this so I could access my Obsidian markdown vault direclty from the Claude mobile app, in particular via voice dictation. 
 
-The interface feels quite powerful and seamless. For example, as you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.**
+Putting an AI assistant front-end to a second brain brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas. 
 
-It is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for 3rd-party connectors, such as:
+Think of it like a **high capacity memory system that you have full control over**, and is fully portable to any AI assistant.
+
+Brain3 is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for 3rd-party connectors, such as:
 
 * <img height="20" src="docs/logos/claude.svg" alt="Claude"> Claude (🌐/🖥️/📱)
 * <img height="20" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT (🌐/🖥️/📱)
 * <img height="20" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai (🖥️) - supports local models such as Gemma4.  
 
-Brain3 itself runs locally or on your cloud Virtual Private Server (VPS) in the command line as a Terminal UI (TUI) for now, but it will also be available as a standalone desktop menu bar app.  See the [roadmap](#roadmap) below for more details.
+Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Server (VPS) if you have one.  It runs in the command line as a Terminal UI (TUI).  
 
 ## Features
 
