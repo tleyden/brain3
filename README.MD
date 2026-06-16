@@ -145,21 +145,6 @@ Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
 
 </details>
 
-<details>
-<summary><img height="16" src="docs/logos/jan.png" alt="Jan.ai"> <strong>Other MCP-Compatible AI Apps</strong></summary>
-
-Most MCP-compatible AI applications require the same information displayed in Brain3's MCP Config Settings screen:
-
-- Server URL
-- Client ID
-- Client Secret
-
-After connecting, complete the OAuth sign-in flow using the **Username** and **Password** shown on that screen.
-
-Refer to your AI application's documentation for client-specific setup instructions.
-
-</details>
-
 Now you're ready to access your markdown vault through your AI.
 
 ## Advanced Configuration Options
