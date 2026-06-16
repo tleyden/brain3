@@ -669,6 +669,10 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
                 "bridge".to_string()
             };
             lines.push(key_value_line("Container network", network));
+            lines.push(key_value_line(
+                "Vault path",
+                container.vault_path.display().to_string(),
+            ));
         }
 
         if let Some(url) = &runtime.public_url {
@@ -1178,6 +1182,7 @@ mod tests {
             "Container image: ghcr.io/tleyden/brain3-mcp-vault-tools:{CURRENT_RELEASE}"
         )));
         assert!(text.contains("Container runtime: Docker"));
+        assert!(text.contains("Vault path: /missing/vault"));
         assert!(text.contains("Vault path does not exist"));
         assert!(text.contains("Gateway:  Not started"));
     }
