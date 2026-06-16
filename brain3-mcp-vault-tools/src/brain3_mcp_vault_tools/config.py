@@ -12,6 +12,7 @@ def _env_bool(name: str, default: bool = False) -> bool:
 VAULT_PATH = Path(os.environ.get("B3_VAULT_PATH", os.path.expanduser("~/Obsidian/MyVault")))
 VAULT_MCP_HOST = os.environ.get("B3_VAULT_MCP_HOST", "127.0.0.1")
 VAULT_MCP_PORT = int(os.environ.get("B3_VAULT_MCP_PORT", "8420"))
+VAULT_MCP_LOG_LEVEL = os.environ.get("B3_VAULT_MCP_LOG_LEVEL", "INFO").strip().upper()
 
 _extra = os.environ.get("B3_VAULT_MCP_ALLOWED_HOSTS", "")
 VAULT_MCP_EXTRA_ALLOWED_HOSTS: list[str] = [host.strip() for host in _extra.split(",") if host.strip()]

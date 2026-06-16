@@ -55,6 +55,9 @@ pub async fn ensure_mcp_container(
     if startup.isolation_strategy.is_some() {
         env_vars.push(("B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS".into(), "true".into()));
     }
+    if let Some(ref level) = startup.mcp_log_level {
+        env_vars.push(("B3_VAULT_MCP_LOG_LEVEL".into(), level.clone()));
+    }
 
     let mut bind_mounts = vec![
         BindMount {

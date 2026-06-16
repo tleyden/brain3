@@ -20,6 +20,7 @@ from .config import (
     UPSTREAM_SHARED_SECRET_HEADER,
     VAULT_MCP_EXTRA_ALLOWED_HOSTS,
     VAULT_MCP_HOST,
+    VAULT_MCP_LOG_LEVEL,
     VAULT_MCP_PORT,
     VAULT_PATH,
 )
@@ -52,6 +53,24 @@ from .tools.write import (
 )
 
 logger = logging.getLogger(__name__)
+
+TRACE = 5
+logging.addLevelName(TRACE, "TRACE")
+
+_LOG_LEVELS = {
+    "TRACE": TRACE,
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "WARN": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+
+
+def _resolve_log_level(name: str) -> int:
+    return _LOG_LEVELS.get(name.strip().upper(), logging.INFO)
+
 
 frontmatter_index = FrontmatterIndex()
 DEFAULT_ALLOWED_HOSTS = [
@@ -215,13 +234,43 @@ class InboundRequestLoggingMiddleware:
             self.allowed_hosts,
         )
 
+        trace_enabled = logger.isEnabledFor(TRACE)
+        request_body_chunks: list[bytes] = []
+
+        async def receive_wrapper() -> Message:
+            message = await receive()
+            if trace_enabled and message["type"] == "http.request":
+                request_body_chunks.append(message.get("body", b""))
+                if not message.get("more_body", False):
+                    logger.log(
+                        TRACE,
+                        "MCP request body method=%s path=%s body=%s",
+                        scope.get("method", "<unknown>"),
+                        path,
+                        b"".join(request_body_chunks).decode("utf-8", errors="replace"),
+                    )
+            return message
+
+        response_body_chunks: list[bytes] = []
+
         async def send_wrapper(message: Message) -> None:
             nonlocal response_status
             if message["type"] == "http.response.start":
                 response_status = message["status"]
+            if trace_enabled and message["type"] == "http.response.body":
+                response_body_chunks.append(message.get("body", b""))
+                if not message.get("more_body", False):
+                    logger.log(
+                        TRACE,
+                        "MCP response body method=%s path=%s status=%s body=%s",
+                        scope.get("method", "<unknown>"),
+                        path,
+                        response_status,
+                        b"".join(response_body_chunks).decode("utf-8", errors="replace"),
+                    )
             await send(message)
 
-        await self.app(scope, receive, send_wrapper)
+        await self.app(scope, receive_wrapper, send_wrapper)
 
         log = logger.warning if response_status == 421 else logger.info
         log(
@@ -254,6 +303,7 @@ class GuardedFastMCP(FastMCP):
 def _start_process_resources() -> None:
     """Start process-scoped resources before serving requests."""
     logger.info(f"Starting vault MCP server. Vault: {VAULT_PATH}")
+    logger.info(f"Log level: {VAULT_MCP_LOG_LEVEL}")
     logger.info(
         "Transport security bind_host=%s bind_port=%s allowed_hosts=%s extra_allowed_hosts=%s allow_self_ip_hosts=%s detected_self_ips=%s",
         VAULT_MCP_HOST,
@@ -503,7 +553,7 @@ def vault_delete(path: str, confirm: bool = False) -> str:
 def main() -> None:
     """Run the authless MCP server over Streamable HTTP."""
     logging.basicConfig(
-        level=logging.INFO,
+        level=_resolve_log_level(VAULT_MCP_LOG_LEVEL),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
