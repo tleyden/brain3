@@ -273,8 +273,7 @@ fn load_container_startup_config(
     let container_port = env_var_or("B3_CONTAINER_MCP_PORT", "8420")
         .parse::<u16>()
         .map_err(|e| ConfigError::Invalid(format!("B3_CONTAINER_MCP_PORT: {e}")))?;
-    // Disabled by default since this is still experimental
-    let network_isolated = env_bool("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", false);
+    let network_isolated = env_bool("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", true);
     validate_network_isolation_support(runtime, network_isolated)?;
 
     let isolation_strategy = if network_isolated {
