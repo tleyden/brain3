@@ -1267,6 +1267,7 @@ mod tests {
                     isolation_strategy: Some(brain3_core::domain::model::ContainerNetworkIsolationStrategy::DiscoverContainerIp),
                     network_name: "brain3-mcp-net".into(),
                     dev_mount_source: None,
+                    mcp_log_level: None,
                 }),
                 tunnel: None,
             }),

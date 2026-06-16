@@ -293,7 +293,7 @@ def vault_search(
             "results": matches,
             "total_matches": len(matches),
             "truncated": truncated,
-        })
+        }, default=str)
     except ValueError as e:
         return json.dumps({"error": str(e)})
     except Exception as e:
@@ -336,7 +336,7 @@ def vault_search_frontmatter(
             "results": formatted,
             "total": len(formatted),
             "truncated": truncated,
-        })
+        }, default=str)
     except Exception as e:
         logger.error(f"vault_search_frontmatter error: {e}")
         return json.dumps({"error": str(e)})

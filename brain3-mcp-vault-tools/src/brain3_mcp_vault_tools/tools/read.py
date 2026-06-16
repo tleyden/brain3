@@ -81,7 +81,7 @@ def vault_read(
             "returned_start_line": returned_start_line,
             "returned_end_line": returned_end_line,
             "has_trailing_newline": content.endswith("\n"),
-        })
+        }, default=str)
     except ValueError as e:
         return json.dumps({"error": str(e), "path": path})
     except FileNotFoundError:
@@ -118,4 +118,4 @@ def vault_batch_read(paths: list[str], include_content: bool = True) -> str:
             results.append({"path": path, "error": str(e)})
             missing += 1
 
-    return json.dumps({"files": results, "found": found, "missing": missing})
+    return json.dumps({"files": results, "found": found, "missing": missing}, default=str)

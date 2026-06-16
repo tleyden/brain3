@@ -309,6 +309,11 @@ fn load_container_startup_config(
         .filter(|s| !s.trim().is_empty())
         .map(PathBuf::from);
 
+    let mcp_log_level = env::var("B3_VAULT_MCP_LOG_LEVEL")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
     Ok(Some(ContainerStartupConfig {
         runtime,
         image,
@@ -320,6 +325,7 @@ fn load_container_startup_config(
         container_port,
         isolation_strategy,
         dev_mount_source,
+        mcp_log_level,
     }))
 }
 

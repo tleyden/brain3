@@ -25,15 +25,15 @@ Brain3 is designed to support open standards and is compatible with **any AI ass
 
 Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Server (VPS) if you have one.  It runs in the command line as a Terminal UI (TUI).  
 
-## Features
+**Use Cases**
 
-- 🔐 Your markdown vault data stays 100% local and private
-- Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
-- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) that is updated regularly for new releases. 
-- 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
-- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian and LLMWiki compatible (but neither are required)
-- <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
-- 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
+Use Brain3 for anything you'd typically use a second brain for:
+
+1. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
+2. Capture your research efforts when trying to understand a problem, or come up with a novel design
+3. Comparing new ideas with existing notes
+4. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
+5. Anything related to organizing, planning, decision-making and general knowledge management
 
 ## Screenshots - using brain3 from Claude Mobile
 
@@ -49,6 +49,17 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 <a href="docs/screenshots/tui_screenshot.png">
   <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
 </a>
+
+## Features
+
+- 🔐 Your markdown vault data stays 100% local and private
+- Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
+- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) that is updated regularly for new releases. 
+- 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
+- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian and LLMWiki compatible (but neither are required)
+- <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
+- 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
+
 
 ## Requirements
 
@@ -144,11 +155,11 @@ This installs `brain3` from the `v0.1.7` release.
 brain3
 ```
 
-On first run, Brain3 launches an interactive setup wizard that walks you through vault selection, credential creation, and dependency checks.
+On first run, Brain3 launches an interactive setup wizard.
 
-On subsequent runs, Brain3 goes straight to the runtime status screen.
+Run it in a tool like [tmux](https://github.com/tmux/tmux/wiki) to keep it running in the background, even if your current shell exits. 
 
-If you want a stable hostname on your own Cloudflare-managed domain instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
+If you want a stable hostname on your own Cloudflare-managed domain (recommended) instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
 
 ### Quick Start Step 3: Connect your AI app
 
@@ -293,6 +304,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`. New installs default to the Brain3 release-matched tag; `:latest` is still published but must be chosen explicitly. |
 | `B3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
 | `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` | `true` | Keep the managed MCP container on an internal-only network with no default outbound route. Set to `false` only as a compatibility fallback if Docker/macOS internal networking is broken on your VPS or runtime. |
+| `B3_VAULT_MCP_LOG_LEVEL` | `INFO` | Log level forwarded to the MCP server running inside the container. Set to `TRACE` to log the full body of every request/response sent to and from the MCP server, for debugging. |
 
 </details>
 
