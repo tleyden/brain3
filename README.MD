@@ -29,7 +29,7 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 - <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
 - 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
 
-## Screenshots (w/ Claude Mobile)
+## Screenshots - using brain3 from Claude Mobile
 
 <table><tr>
 <td><img width="280" alt="Image" src="docs/screenshots/screenshot-2.png" /></td>
@@ -38,6 +38,11 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 <td colspan="2" align="center">Chatting w/ Brain3 MCP and showing tool calls</td>
 </tr></table>
 
+## Screenshots - Admin Termimal UI (TUI)
+
+<a href="docs/screenshots/tui_screenshot.png">
+  <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
+</a>
 
 ## Requirements
 
