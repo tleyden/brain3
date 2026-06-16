@@ -185,6 +185,10 @@ Follow the instructions below for your AI client.
 <details>
 <summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT</strong></summary>
 
+<a href="docs/screenshots/ChatGPTConfig.png">
+  <img height="400" alt="ChatGPT connector configuration screenshot" src="docs/screenshots/ChatGPTConfig.png" />
+</a>
+
 1. Open **Settings → Connectors → Create Connector**.
 2. Select **Custom MCP Server**.
 3. Copy the **Server URL**, **Client ID**, and **Client Secret** from Brain3's MCP Config Settings screen.
@@ -197,6 +201,10 @@ Once authorization succeeds, Brain3 will be available as a connector in ChatGPT.
 
 <details>
 <summary><img height="16" src="docs/logos/claude.svg" alt="Claude"> <strong>Claude</strong></summary>
+
+<a href="docs/screenshots/ClaudeConfig.png">
+  <img height="400" alt="Claude connector configuration screenshot" src="docs/screenshots/ClaudeConfig.png" />
+</a>
 
 1. Open **Settings → Connectors → Add Custom Connector**.
 2. Enter the **Server URL** shown in Brain3.
