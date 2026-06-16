@@ -2,20 +2,28 @@
 <p align="center">
   <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
   <br/>
-  Access your second brain via your favorite AI assistant using MCP
+  MCP server for your local markdown vault -- works with Claude, ChatGPT, or any MCP-compatible AI
   <br/>
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-Brain3 lets you interact with your local markdown vault (aka "second brain") through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
+Brain3 lets you interact with your local markdown vault through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
 
 **Why This Exists**
 
 I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, in particular via voice dictation. 
 
-Putting an AI assistant in front of a second brain brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas.  
+Putting an AI assistant in front of your markdown vault brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas.  
 
 Think of it like a **high-capacity memory system that you fully control** and can use with any AI assistant.  It's not quite [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), but the plan is to take it that direction.  
+
+**Remote MCP, by necessity**
+
+Brain3 is a **remote MCP server that runs on your own machine**. Your vault never leaves your hardware -- but the connection from your AI assistant to Brain3 is remote, because that's the only connection model Claude and ChatGPT currently support for third-party MCP connectors.
+
+That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable endpoint, and OAuth2.1/PKCE is what Claude and ChatGPT require before they'll connect to any remote MCP server. None of this is incidental complexity -- it's the minimum required to plug into the AI assistant ecosystem as a first-class connector.
+
+If you trust Cloudflare (see the privacy section), Brain3 is as close to local-first as the current MCP ecosystem allows.
 
 Brain3 is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for third-party connectors, such as:
 
@@ -27,7 +35,7 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 
 **Use Cases**
 
-Use Brain3 for anything you'd typically use a second brain for:
+Use Brain3 to interact with your local notes through any AI assistant:
 
 1. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
 2. Capture your research efforts when trying to understand a problem, or come up with a novel design
@@ -57,7 +65,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 - 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
 - <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian and LLMWiki compatible (but neither are required)
 - <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
-- 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
+- 🚯 **Not AI Slop** -- this project uses coding agents but maintains a high quality bar through regular manual review and testing.
 
 
 ## Requirements
@@ -150,7 +158,7 @@ curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.8/install.sh | sh
 
 This installs `brain3` from the `v0.1.8` release.
 
-### Quick Start Step 2: Start Brain3
+### Quick Start Step 2: Run the Brain3 TUI app
 
 In your terminal, run: 
 
@@ -163,6 +171,8 @@ On first run, Brain3 launches an interactive setup wizard.
 <a href="docs/screenshots/SetupWizardScreenshot.png">
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
+
+Follow the on-screen instructions to complete the setup, it should hopefully be self-explanatory.  After the setup is complete, it will continue running and will be ready to use.
 
 To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
 
@@ -421,9 +431,10 @@ The runtime status screen now reports whether the container is actually `Ready` 
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
 
+
 ## Credits 
 
-* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as actual code used in the MCP server itself as a starting point.
+* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) was the inspiration and contributed code to the MCP server layer. Brain3's additions: human and AI security reviews, container-based filesystem isolation so the MCP process never has direct host access, and a Rust host process to reduce attack surface.  I contributed a few [issues](https://github.com/jimprosser/obsidian-web-mcp/issues/29) and [PRs](https://github.com/jimprosser/obsidian-web-mcp/pull/25) to the project.
 
 
 ## License 
