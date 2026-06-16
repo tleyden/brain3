@@ -155,11 +155,11 @@ This installs `brain3` from the `v0.1.7` release.
 brain3
 ```
 
-On first run, Brain3 launches an interactive setup wizard that walks you through vault selection, credential creation, and dependency checks.
+On first run, Brain3 launches an interactive setup wizard.
 
-On subsequent runs, Brain3 goes straight to the runtime status screen.
+Run it in a tool like [tmux](https://github.com/tmux/tmux/wiki) to keep it running in the background, even if your current shell exits. 
 
-If you want a stable hostname on your own Cloudflare-managed domain instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
+If you want a stable hostname on your own Cloudflare-managed domain (recommended) instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
 
 ### Quick Start Step 3: Connect your AI app
 
