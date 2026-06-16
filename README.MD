@@ -35,14 +35,13 @@ Use Brain3 for anything you'd typically use a second brain for:
 4. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
 5. Anything related to organizing, planning, decision-making and general knowledge management
 
-## Screenshots - using brain3 from Claude Mobile
+<div align="center">
 
-<table><tr>
-<td><img width="280" alt="Image" src="docs/screenshots/screenshot-2.png" /></td>
-<td><img width="280" alt="Image" src="docs/screenshots/screenshot-1.png" /></td>
-</tr><tr>
-<td colspan="2" align="center">Chatting w/ Brain3 MCP and showing tool calls</td>
-</tr></table>
+https://github.com/user-attachments/assets/345512bb-5743-4698-90c3-275596a1c585
+
+<em>Sample Weekly Planning Session With ChatGPT and Brain3</em>
+
+</div>
 
 ## Screenshots - Admin Terminal UI (TUI)
 
