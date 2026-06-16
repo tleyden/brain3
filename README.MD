@@ -7,11 +7,11 @@
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-Brain3 lets you interact with your local markdown vault through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.  It runs as a remote MCP server that runs on your own machine (see [Privacy & Security](#privacy--security) for why).
+Brain3 lets you interact with your local markdown vault through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.  It runs as a remote MCP server that lives on your own machine (see [Privacy & Security](#privacy--security) for why).
 
 **Why This Exists**
 
-I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, and in particular so I could access it using voice dictation.  
+I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, and in particular so I could do so using voice dictation.  
 
 Think of it as a **high-capacity memory system you fully control**: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
 
@@ -99,7 +99,7 @@ Now run it:
 brain3
 ```
 
-and it should an interactive setup wizard.
+and it should launch an interactive setup wizard.
 
 <a href="docs/screenshots/SetupWizardScreenshot.png">
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
