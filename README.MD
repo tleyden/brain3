@@ -84,10 +84,12 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 
 ## Quick Start
 
-### <img height="16" src="docs/logos/apple.svg" alt="macOS"> macOS Prerequisites
+### <img height="16" src="docs/logos/apple.svg" alt="macOS"> Install macOS Prerequisites
 
-- Container runtime: `brew install container && brew services start container` ([you can also use Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/))
+- Container runtime: `brew install container && brew services start container`
 - Cloudflare Tunnel: `brew install cloudflared`
+
+macOS container recommended, but you can also use [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
 
 ### <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux Prerequisites
 
