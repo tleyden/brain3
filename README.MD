@@ -111,15 +111,7 @@ You need to configure your favorite AI to add a connector to Brain3.  So far it'
 
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
-Brain3 displays all the connection information you need:
-
-- Server URL
-- Client ID
-- Client Secret
-- Username
-- Password
-
-Follow the instructions below for your AI client.
+Brain3 displays all the connection information you need.  Follow the instructions below for your AI client.
 
 <details>
 <summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT</strong></summary>
