@@ -150,7 +150,7 @@ curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.8/install.sh | sh
 
 This installs `brain3` from the `v0.1.8` release.
 
-### Quick Start Step 2: Run the setup wizard
+### Quick Start Step 2: Run the Brain3 TUI app
 
 In your terminal, run: 
 
@@ -164,7 +164,7 @@ On first run, Brain3 launches an interactive setup wizard.
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
 
-Follow the on-screen instructions to complete the setup, it should hopefully be self-explanatory.
+Follow the on-screen instructions to complete the setup, it should hopefully be self-explanatory.  After the setup is complete, it will continue running and will be ready to use.
 
 To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
 
