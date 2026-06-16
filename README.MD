@@ -150,7 +150,7 @@ curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.8/install.sh | sh
 
 This installs `brain3` from the `v0.1.8` release.
 
-### Quick Start Step 2: Start Brain3
+### Quick Start Step 2: Run the setup wizard
 
 In your terminal, run: 
 
@@ -163,6 +163,8 @@ On first run, Brain3 launches an interactive setup wizard.
 <a href="docs/screenshots/SetupWizardScreenshot.png">
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
+
+Follow the on-screen instructions to complete the setup, it should hopefully be self-explanatory.
 
 To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
 
@@ -420,6 +422,7 @@ The runtime status screen now reports whether the container is actually `Ready` 
 * Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
+
 
 ## Credits 
 
