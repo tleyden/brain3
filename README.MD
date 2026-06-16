@@ -46,14 +46,16 @@ Use Brain3 to interact with your local notes through any AI assistant:
 
 ## Quick Start
 
-### <img height="16" src="docs/logos/apple.svg" alt="macOS"> Install macOS Prerequisites
+### Install Prerequisites
+
+#### <img height="16" src="docs/logos/apple.svg" alt="macOS"> macOS
 
 - Container runtime: `brew install container && brew services start container`
 - Cloudflare Tunnel: `brew install cloudflared`
 
 macOS container recommended, but you can also use [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
 
-### <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux Prerequisites
+#### <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux
 
 <details>
 <summary>Ubuntu/Debian install commands</summary>
@@ -103,7 +105,7 @@ and it should an interactive setup wizard.
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
 
-### Connect it your AI app
+### Configure your AI to add a connector to Brain3
 
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
@@ -167,8 +169,6 @@ Refer to your AI application's documentation for client-specific setup instructi
 </details>
 
 Once connected, you can ask your AI to search, organize, summarize, and edit your notes directly through Brain3.
-
-
 
 ## Advanced Configuration Options
 
