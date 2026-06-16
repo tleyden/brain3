@@ -9,9 +9,7 @@
 
 Brain3 lets you interact with your local markdown vault through Claude, ChatGPT or any AI assistant that supports the Model Context Protocol (MCP) standard.
 
-**Why This Exists**
-
-I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, and in particular so I could do so using voice dictation.  
+**Why This Exists**  I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, and in particular so I could do so using voice dictation.  
 
 Think of it as a **high-capacity memory system you fully control**: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
 

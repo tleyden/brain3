@@ -5,51 +5,19 @@
 **Scope:** Full codebase — OAuth2 gateway, Cloudflare tunnel, local network / container exposure, default credentials, host process trust boundaries  
 **Codebase version:** 0.1.7
 
+> **See also:** [Potential Security Risks](docs/POTENTIAL_SECURITY_RISKS.md) — tracked items deferred from this audit and items under investigation.
+
 ---
 
 ## Executive Summary
 
-The HIGH-severity finding from the prior audit (v0.1.6) — the MCP container having unrestricted outbound internet access — is **resolved in v0.1.7**. Network isolation (`B3_CONTAINER_INTERNAL_NETWORK_ISOLATION`) is now `true` by default in both the first-run setup wizard and the config-file fallback, so a fresh install gets a container with no outbound route and its own dedicated Docker/`container` network (also resolving the related peer-container exposure finding, 3.8, as a side effect). A previously tracked tunnel-lifecycle risk (dangling `cloudflared` process after an unclean exit) is also confirmed resolved — see [Changes Since Prior Audit](#changes-since-prior-audit-v016--v017).
-
-This audit also formalizes two **architecture-level risks that are not new but were not previously called out explicitly**: the Rust gateway process itself is unsandboxed (no filesystem or network jail — see finding 6.3), and Brain3 implements its own OAuth2.1 server rather than using an established library (finding 6.4). Neither is being fixed in this pass; they're documented so the trade-off is explicit. A new finding (4.9) documents that generated passwords lack symbol/uppercase character classes; this is also deferred, not fixed, per the operator's request.
-
-The remaining open surface is unchanged from v0.1.6 and is mostly medium-severity hardening gaps. The most impactful remaining issues are: the `resolve_base_url` host header injection (finding 1.3), `redirect_uri` not being allowlisted (finding 1.4), the upstream shared secret defaulting to a predictable `/tmp` path (finding 3.4), and the install script lacking checksum verification (finding 5.1).
-
-All README security claims were re-validated against the current code. The container isolation claim, previously qualified, is now fully accurate. One claim — "Constant-time comparison for all secret and token checks" — remains partially overstated due to an early-exit on length mismatch in `constant_time_eq` (finding 1.6, unchanged from v0.1.6).
-
----
-
-## Changes Since Prior Audit (v0.1.6 → v0.1.7)
-
-### ✅ RESOLVED — 3.7 / 3.8: MCP Container Unrestricted Outbound Access / Default-Bridge Exposure
-
-Network isolation infrastructure (`docker network create --internal`, `container network create --internal` on macOS) already existed in v0.1.6 but defaulted to `false` everywhere — the setup wizard (`crates/core/src/application/first_run_setup.rs`) wrote `container_network_isolated: false` into every new `.env` with the comment "disabled by default since this is still experimental," and the config-loading fallback (`crates/platform/src/config/env_file.rs`) used the same `false` default for any `.env` missing the variable. The `.env.template` shipped with the repo claimed `true` was the default, but neither code path actually applied it — a discrepancy this audit caught and fixed.
-
-Both defaults are now `true`. A fresh install gets a container with no default outbound route, placed on a dedicated internal network rather than the shared default bridge. Verified via `cargo test` (full suite, both crates) and by re-reading `docker.rs`'s `run()`, which attaches `--network <internal>` whenever `isolation_strategy` is set.
-
-### ✅ RESOLVED — Dangling Cloudflare Tunnel on Unclean Shutdown
-
-Previously tracked as an open item in `POTENTIAL_SECURITY_RISKS.md` (not in this audit). Verified present in current code: `crates/platform/src/tunnel/cloudflare_quick.rs` and `cloudflare_named.rs` write a PID file (`lifecycle::write_pid_file`), set `kill_on_drop(true)` on the spawned `cloudflared` child process, configure `PR_SET_PDEATHSIG` on Linux, and call `lifecycle::graceful_kill` on shutdown. The checklist item has been removed from `POTENTIAL_SECURITY_RISKS.md`.
-
-### ℹ️ Status Change — 6.2: `SECURITY.MD` Stub
-
-The stub file `docs/SECURITY.MD` referenced in the v0.1.6 audit no longer exists — it was deleted rather than filled in. The underlying gap (no vulnerability disclosure policy or documented threat model at a discoverable path) remains; see updated finding 6.2.
-
-### ✅ RESOLVED — 1.1: Static Non-Expiring Access Token *(carried forward from v0.1.5 → v0.1.6, still resolved)*
-
-The static `.env`-loaded access token is gone. `token_exchange.rs` calls `generate_secure_token()` on every successful authorization code exchange, stores the result in the SQLite `access_tokens` table with an `expires_at` timestamp, and returns a refresh token alongside the access token. The proxy (`proxy_mcp.rs`) validates the token against the store, checks expiry, and checks that the token kind is `access` (not `refresh`). Refresh tokens are revoked on use and replaced with a new pair.
-
-### ✅ RESOLVED — 1.2: No Rate Limiting on Auth Endpoints *(carried forward, still resolved)*
-
-`crates/platform/src/http/rate_limit.rs`'s `OAuthRateLimiter` (backed by `governor`) enforces 20 burst attempts per IP with one token replenished every 45 seconds (~20/15 min) on `POST /oauth/authorize` and `POST /oauth/token`. Client IP is extracted preferentially from `CF-Connecting-IP`, with `X-Forwarded-For` as a fallback.
+As of v0.1.7, Brain3 has no HIGH-severity open findings. The prior HIGH finding (MCP container unrestricted outbound internet access) was resolved in this version. All remaining open issues are MEDIUM or LOW. The most impactful open findings are host header injection in `resolve_base_url` (M-1), `redirect_uri` not allowlisted (M-2), upstream secret stored in a predictable `/tmp` path (M-8), and the install script lacking checksum verification (M-11). The gateway process remains unsandboxed (M-12) — a known architectural trade-off documented here but not targeted for this pass.
 
 ---
 
 ## Threat Model
 
 ### Architecture & Trust Boundaries
-
-This diagram intentionally simplifies the prior version. The goal is to make the handful of boundaries that actually matter easy to reason about, rather than enumerating every internal data flow.
 
 ```mermaid
 graph TD
@@ -72,11 +40,11 @@ graph TD
 
 | # | Boundary | Why it matters |
 |---|---|---|
-| B1 | Internet ↔ Cloudflare Edge | Cloudflare sees plaintext (TLS terminates there) — a trusted third party, not zero-trust. See the Cloudflare Tunnels section below. |
-| B2 | Cloudflare Edge ↔ Rust Gateway | **Primary attack surface, by architectural necessity.** The tunnel must terminate at the gateway, not the container, because OAuth/token validation lives in the gateway. This is the only process directly reachable from the internet — and it is also the process holding every secret and (per B5) unrestricted host access. |
+| B1 | Internet ↔ Cloudflare Edge | Cloudflare sees plaintext (TLS terminates there) — a trusted third party, not zero-trust. |
+| B2 | Cloudflare Edge ↔ Rust Gateway | **Primary attack surface, by architectural necessity.** The tunnel must terminate at the gateway, not the container, because OAuth/token validation lives in the gateway. This is the only process directly reachable from the internet — and it also holds every secret and (per B5) unrestricted host access. |
 | B3 | Gateway ↔ MCP Container | Loopback-only + upstream shared secret (`x-brain3-upstream-secret`). The host *could* read the vault directly (same filesystem, no kernel-level barrier) but no code path does — the container is the only mechanism Brain3 itself uses to touch vault data. |
-| B4 | Container ↔ Host filesystem | Container has no egress by default (`B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true`, finding 3.7/3.8 resolved) and can only reach the bind-mounted vault and upstream-secret directories — nothing else on the host. |
-| B5 | Gateway process ↔ rest of the host | **Not currently a boundary at all.** The gateway runs as a normal, unsandboxed OS process: no filesystem jail (chroot/Landlock), no network egress restriction, no capability dropping. If the gateway is compromised by any means — a malicious dependency, a logic bug in the hand-rolled OAuth implementation, anything — the attacker has the same access as the user account running it: the entire host, not just the vault. Unlike the container (B4), there is no containment here today. See findings 6.3 and 6.4. |
+| B4 | Container ↔ Host filesystem | Container has no egress by default (`B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true`) and can only reach the bind-mounted vault and upstream-secret directories — nothing else on the host. |
+| B5 | Gateway process ↔ rest of the host | **Not currently a boundary at all.** The gateway runs as a normal, unsandboxed OS process: no filesystem jail, no network egress restriction, no capability dropping. If the gateway is compromised, the attacker has the same access as the user account running it. See M-12. |
 
 ### Threat Actors
 
@@ -84,17 +52,17 @@ graph TD
 |---|---|---|---|
 | Remote unauthenticated attacker | B2 (Cloudflare tunnel) | Steal vault data, forge/steal OAuth tokens, enumerate the server | Mitigated by OAuth2.1 + PKCE + rate limiting, not by sandboxing |
 | Compromised or malicious AI platform | Holds valid OAuth client credentials | Abuse legitimate MCP tool calls to exfiltrate or corrupt vault data | Bounded to whatever the MCP vault tools expose |
-| Supply-chain attacker — **container dependencies** | Malicious Python package in the MCP container image | RCE inside the container | **Yes** — blocked at B4: no egress, mount-only filesystem access (finding 3.7/3.8 resolved) |
-| Supply-chain attacker — **Rust host dependencies** | Malicious or compromised crate in the gateway's dependency tree | RCE in the unsandboxed gateway process → read/exfiltrate **any file the host user can access**, not just the vault | **No** — full host access; this is the gap named in B5 / finding 6.3 |
-| Protocol-logic attacker against the custom OAuth2.1 server | B2, sends malformed or adversarial requests to the hand-rolled implementation | Trigger unintended behavior (auth bypass, state confusion, token issuance for the wrong identity, etc.) via a logic bug. Rust's memory safety rules out buffer overflows, use-after-free, and similar — it does **not** rule out logic flaws specific to a protocol implementation that wasn't built on a battle-tested library | Partially — PKCE, rate limiting, and constant-time checks reduce blast radius, but a novel logic bug is not ruled out by the language. See finding 6.4 |
-| Local/LAN actor | B2/B3, only if loopback binding were ever misconfigured | Bypass OAuth entirely by talking to the gateway or container directly | Mitigated today by hardcoded `127.0.0.1` binds (findings 3.1, 3.2) |
+| Supply-chain attacker — **container dependencies** | Malicious Python package in the MCP container image | RCE inside the container | **Yes** — blocked at B4: no egress, mount-only filesystem access |
+| Supply-chain attacker — **Rust host dependencies** | Malicious or compromised crate in the gateway's dependency tree | RCE in the unsandboxed gateway process → read/exfiltrate **any file the host user can access** | **No** — full host access; see M-12 |
+| Protocol-logic attacker against the custom OAuth2.1 server | B2, sends malformed or adversarial requests | Trigger auth bypass, state confusion, or token issuance for wrong identity via a logic bug | Partially — PKCE, rate limiting, and constant-time checks reduce blast radius; see M-13 |
+| Local/LAN actor | B2/B3, only if loopback binding were misconfigured | Bypass OAuth entirely by talking to the gateway or container directly | Mitigated by hardcoded `127.0.0.1` binds |
 
 ### Assets
 
 | Asset | Sensitivity | Location |
 |---|---|---|
 | Vault markdown files | HIGH — personal knowledge base | Host filesystem (bind-mounted rw into container; also directly readable by the unsandboxed gateway process, see B5) |
-| Everything else on the host (other files, processes, credentials reachable by the user account) | HIGH — not Brain3-specific, but in scope because B5 is not a boundary | Host filesystem / OS, reachable if the gateway process is compromised |
+| Everything else on the host | HIGH — not Brain3-specific, but in scope because B5 is not a boundary | Host filesystem / OS, reachable if the gateway process is compromised |
 | OAuth client secret | HIGH — grants token issuance | `~/.brain3/.env` (`0600`) |
 | Brain3 password | HIGH — gate to OAuth login | `~/.brain3/.env` (`0600`) |
 | Upstream shared secret | MEDIUM — gates direct MCP access | Host filesystem (default `/tmp`) |
@@ -103,13 +71,43 @@ graph TD
 
 ---
 
-## 1. OAuth2 Gateway — Findings
+## Open Findings
 
-### 1.3 🟡 MEDIUM — `resolve_base_url` Trusts Client-Supplied Headers Without Validation
+### Summary
+
+| ID | Severity | Area | Finding |
+|---|---|---|---|
+| M-1 | 🟡 MEDIUM | OAuth2 | Host header injection in `resolve_base_url` |
+| M-2 | 🟡 MEDIUM | OAuth2 | `redirect_uri` not allowlisted |
+| M-3 | 🟡 MEDIUM | OAuth2 | 5-minute auth code lifetime; no session binding |
+| M-4 | 🟡 MEDIUM | OAuth2 | `constant_time_eq` leaks secret length via early exit |
+| M-5 | 🟡 MEDIUM | Tunnel | Quick tunnel disables all hostname enforcement |
+| M-6 | 🟡 MEDIUM | Tunnel | Cloudflare credentials file permissions not verified |
+| M-7 | 🟡 MEDIUM | Container | Vault bind-mount is read-write |
+| M-8 | 🟡 MEDIUM | Container | Upstream secret stored in `/tmp` with predictable name |
+| M-9 | 🟡 MEDIUM | Credentials | Default username is predictable (`"admin"`) |
+| M-10 | 🟡 MEDIUM | Credentials | 7-character secret prefix logged in tracing output |
+| M-11 | 🟡 MEDIUM | Install | Binary installed without checksum verification |
+| M-12 | 🟡 MEDIUM | Architecture | Gateway process is unsandboxed — full host access if compromised |
+| M-13 | 🟡 MEDIUM | Architecture | Hand-rolled OAuth2.1 implementation carries inherent protocol-logic risk |
+| L-1 | 🟢 LOW | OAuth2 | No background cleanup of expired auth codes |
+| L-2 | 🟢 LOW | OAuth2 | No Content-Security-Policy or security headers on login page |
+| L-3 | 🟢 LOW | OAuth2 | `state` parameter not required or validated |
+| L-4 | 🟢 LOW | OAuth2 | `GET /oauth/authorize` not rate-limited |
+| L-5 | 🟢 LOW | Tunnel | `cloudflared` binary located via PATH — no integrity check |
+| L-6 | 🟢 LOW | Container | No seccomp/AppArmor profile applied to MCP container |
+| L-7 | 🟢 LOW | Container | No resource limits on MCP container |
+| L-8 | 🟢 LOW | Credentials | Generated passwords lack symbol/uppercase character classes *(deferred)* |
+| L-9 | 🟢 LOW | HTTP | `/health` endpoint unauthenticated and externally reachable |
+| L-10 | 🟢 LOW | Ops | No vulnerability disclosure policy |
+
+---
+
+### M-1 🟡 MEDIUM — Host Header Injection in `resolve_base_url`
 
 **Files:** `crates/platform/src/http/oauth_handlers.rs` (L19-30), `crates/platform/src/http/mcp_handlers.rs` (L17-28)
 
-Both handlers still contain:
+Both handlers contain:
 ```rust
 fn resolve_base_url(headers: &HeaderMap) -> String {
     let proto = headers
@@ -127,13 +125,13 @@ fn resolve_base_url(headers: &HeaderMap) -> String {
 
 This function trusts `X-Forwarded-Proto` and `X-Forwarded-Host` from any request without comparing them against the configured `expected_host`. A malicious request can set `X-Forwarded-Host: evil.attacker.com`, causing the OAuth authorization server metadata to advertise attacker-controlled endpoints — a Host Header Injection / OAuth Redirect Manipulation primitive.
 
-When `B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=true` and a named tunnel or direct origin hostname is configured, the MCP proxy path correctly calls `validate_host()`. However, that check does not gate the URL construction used in metadata responses or login redirects. Quick-tunnel mode disables hostname enforcement entirely (see finding 2.1), making this issue more impactful in the common default configuration.
+When `B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=true` and a named tunnel or direct origin hostname is configured, the MCP proxy path correctly calls `validate_host()`. However, that check does not gate the URL construction used in metadata responses or login redirects. Quick-tunnel mode disables hostname enforcement entirely (see M-5), making this issue more impactful in the common default configuration.
 
 **Recommendation:** For canonical URL construction (metadata documents, redirect target assembly), use the configured `expected_host` rather than request-supplied headers. Forwarded headers should only be used for request-local context like logging.
 
 ---
 
-### 1.4 🟡 MEDIUM — `redirect_uri` Not Allowlisted
+### M-2 🟡 MEDIUM — `redirect_uri` Not Allowlisted
 
 **File:** `crates/core/src/domain/oauth.rs` (L64-66)
 
@@ -154,7 +152,7 @@ The single-client model (`client_id` is validated) provides partial mitigation, 
 
 ---
 
-### 1.5 🟡 MEDIUM — Auth Code Lifetime is 5 Minutes; No Session Binding
+### M-3 🟡 MEDIUM — Auth Code Lifetime is 5 Minutes; No Session Binding
 
 **File:** `crates/core/src/domain/oauth.rs` (L10)
 
@@ -168,7 +166,7 @@ Five minutes exceeds the ~60–120 second lifetime common in practice. The auth 
 
 ---
 
-### 1.6 🟡 MEDIUM — `constant_time_eq` Leaks Secret Length via Early Exit
+### M-4 🟡 MEDIUM — `constant_time_eq` Leaks Secret Length via Early Exit
 
 **File:** `crates/core/src/domain/oauth.rs` (L89-94)
 
@@ -189,61 +187,7 @@ The README claims "Constant-time comparison for all secret and token checks" —
 
 ---
 
-### 1.7 🟢 LOW — No Background Cleanup of Expired Auth Codes
-
-**File:** `crates/platform/src/auth_code_store/in_memory.rs`
-
-`cleanup_expired()` is triggered only at `issue_code` and `token_exchange` time. Under high abuse, expired codes accumulate in memory. This is a minor concern given that code issuance requires valid credentials, and the rate limiter now throttles the attack surface considerably.
-
-**Recommendation:** Spawn a background Tokio task that calls `cleanup_expired()` every 60 seconds.
-
----
-
-### 1.8 🟢 LOW — No Content-Security-Policy or Security Headers on Login Page
-
-**File:** `crates/platform/src/http/templates.rs`, `crates/platform/src/http/router.rs`
-
-The login HTML page is served without:
-- `Content-Security-Policy` (XSS mitigation)
-- `X-Frame-Options` (clickjacking protection)
-- `Referrer-Policy` (prevents OAuth `state`/`code` leakage via referrer)
-- `X-Content-Type-Options`
-
-The login form embeds hidden fields containing `redirect_uri` and `code_challenge`, so XSS on this page would be especially damaging.
-
-**Recommendation:** Add a `tower_http::set_header::SetResponseHeaderLayer` for HTML responses. Minimum:
-```
-Content-Security-Policy: default-src 'self'; style-src 'self'; img-src 'self' data:
-X-Frame-Options: DENY
-X-Content-Type-Options: nosniff
-Referrer-Policy: no-referrer
-```
-
----
-
-### 1.9 🟢 LOW — `state` Parameter Not Required or Validated
-
-**File:** `crates/platform/src/http/oauth_handlers.rs` (L69)
-
-The `state` parameter is stripped if empty and echoed back, but is never required. An AI client sending no `state` silently proceeds. The OAuth spec relies on client-supplied high-entropy `state` to prevent CSRF; the server cannot enforce this by itself, but it can log a warning when `state` is absent to aid diagnosis.
-
-**Recommendation:** Log a warning when `state` is absent; document that state is required for CSRF protection.
-
----
-
-### 1.10 🟢 LOW — `GET /oauth/authorize` Not Rate-Limited
-
-**File:** `crates/platform/src/http/oauth_handlers.rs` (L104-138)
-
-The `POST /oauth/authorize` and `POST /oauth/token` endpoints are rate-limited (see resolved finding 1.2). However, `GET /oauth/authorize` — which validates the authorization request and renders the login form — is not. Since the GET handler does not process credentials, direct credential brute-force is not possible through it, but an attacker can enumerate valid `client_id` values or probe request validation without cost.
-
-**Recommendation:** Apply the same `OAuthRateLimiter` check to `oauth_authorize_get`. The incremental implementation cost is low.
-
----
-
-## 2. Cloudflare Tunnel — Findings
-
-### 2.1 🟡 MEDIUM — Quick Tunnel Disables All Hostname Enforcement
+### M-5 🟡 MEDIUM — Quick Tunnel Disables All Hostname Enforcement
 
 **File:** `crates/platform/src/config/env_file.rs` (L333-349)
 
@@ -256,7 +200,7 @@ fn resolve_expected_host() -> Result<Option<String>, ConfigError> {
     }
 ```
 
-When `B3_CF_QUICK_TUNNEL=true` (or the default when no named tunnel is configured), the expected host is `None`, so `validate_host()` is a no-op. Any request reaching the gateway with any `Host` header is accepted. This makes the host header injection issue (finding 1.3) more impactful because there is no configured hostname to even compare against.
+When `B3_CF_QUICK_TUNNEL=true` (or the default when no named tunnel is configured), the expected host is `None`, so `validate_host()` is a no-op. Any request reaching the gateway with any `Host` header is accepted. This makes the host header injection issue (M-1) more impactful because there is no configured hostname to even compare against.
 
 This is architecturally inherent to quick tunnels (the URL changes on every restart), but the downstream consequences are under-documented.
 
@@ -264,7 +208,7 @@ This is architecturally inherent to quick tunnels (the URL changes on every rest
 
 ---
 
-### 2.2 🟡 MEDIUM — Cloudflare Credentials File Permissions Not Verified
+### M-6 🟡 MEDIUM — Cloudflare Credentials File Permissions Not Verified
 
 **File:** `crates/platform/src/tunnel/cloudflare_setup.rs` (L100-108)
 
@@ -282,47 +226,7 @@ The Cloudflare named tunnel credentials file grants full control of the named tu
 
 ---
 
-### 2.3 🟢 LOW — `cloudflared` Binary Located via PATH — No Integrity Check
-
-**File:** `crates/platform/src/tunnel/cloudflare_setup.rs` (L6-13)
-
-The `cloudflared` binary is resolved via `which cloudflared` over the shell `PATH`. A PATH-hijacking attack (a malicious `cloudflared` earlier in `PATH`) would route all tunnel traffic through an attacker-controlled process. The risk is limited to local privilege escalation scenarios but is worth documenting.
-
-**Recommendation:** Check that the resolved binary path is under a trusted directory (e.g., `/usr/local/bin`, `/opt/homebrew/bin`). Document this as a local privilege escalation surface.
-
----
-
-## 3. Local Network / Container Isolation — Findings
-
-### 3.1 ✅ GOOD — Gateway Binds to Loopback Only
-
-**File:** `crates/platform/src/config/env_file.rs` (L104)
-
-```rust
-host: "127.0.0.1".to_string(),
-```
-
-The gateway is hard-coded to bind to `127.0.0.1`. There is no env var to override this. The gateway is not accessible from the LAN by default. ✅
-
----
-
-### 3.2 ✅ GOOD — MCP Container Port Bound to 127.0.0.1
-
-**File:** `crates/platform/src/container/startup.rs` (L82-86)
-
-```rust
-port_mappings: vec![PortMapping {
-    host_address: "127.0.0.1".into(),
-    host_port: startup.host_port,
-    container_port: startup.container_port,
-}],
-```
-
-The container's published port maps to `127.0.0.1` only, equivalent to `docker run -p 127.0.0.1:8420:8420`. The MCP container is not reachable from the LAN. ✅
-
----
-
-### 3.3 🟡 MEDIUM — MCP Container Vault Mount Is Read-Write
+### M-7 🟡 MEDIUM — MCP Container Vault Mount Is Read-Write
 
 **File:** `crates/platform/src/container/startup.rs` (L48-53)
 
@@ -340,7 +244,7 @@ The vault is mounted read-write into the MCP container. If the container is comp
 
 ---
 
-### 3.4 🟡 MEDIUM — Upstream Secret Stored in `/tmp` with Predictable Name
+### M-8 🟡 MEDIUM — Upstream Secret Stored in `/tmp` with Predictable Name
 
 **File:** `crates/platform/src/config/env_file.rs` (L78-81)
 
@@ -353,7 +257,7 @@ let upstream_secret_file = PathBuf::from(env_var_or(
 
 The default path is predictable. The file is created with `0600` permissions, so other users cannot read it, but:
 
-1. Symlink attack: if an attacker creates `/tmp/brain3-mcp-upstream-secret` as a symlink before Brain3 starts, the `path.exists()` check in `upstream_secret.rs` returns `true` and the attacker-controlled symlink target is read as the shared secret.
+1. **Symlink attack**: if an attacker creates `/tmp/brain3-mcp-upstream-secret` as a symlink before Brain3 starts, the `path.exists()` check in `upstream_secret.rs` returns `true` and the attacker-controlled symlink target is read as the shared secret.
 2. On multi-user systems, other local users can observe the file's existence and creation time.
 
 **Recommendation:**
@@ -363,59 +267,7 @@ The default path is predictable. The file is created with `0600` permissions, so
 
 ---
 
-### 3.5 🟢 LOW — No Seccomp/AppArmor Profile Applied to MCP Container
-
-**File:** `crates/platform/src/container/startup.rs`
-
-The `ContainerConfig` does not set any seccomp profile, AppArmor label, or capability-dropping flags. The container runs with Docker's default seccomp profile, which is better than nothing but does not restrict to the minimal syscall set needed by an MCP server.
-
-**Recommendation:** Add `--security-opt seccomp=/path/to/profile.json` and `--cap-drop ALL` to the Docker adapter. This becomes more important if arbitrary MCP tool containers are ever supported.
-
----
-
-### 3.6 🟢 LOW — No Resource Limits on MCP Container
-
-**File:** `crates/core/src/domain/model.rs`, `crates/platform/src/container/docker.rs`
-
-`ContainerConfig` has no CPU, memory, or PID limit fields. A compromised or buggy MCP tool could exhaust host resources.
-
-**Recommendation:** Add optional `memory_limit`, `cpu_limit`, and `pids_limit` fields to `ContainerConfig` and apply them via `--memory`, `--cpus`, `--pids-limit` in the adapters.
-
----
-
-### 3.7 ✅ RESOLVED (v0.1.7) — MCP Container Outbound Internet Access
-
-**Files:** `crates/platform/src/container/docker.rs`, `crates/platform/src/container/macos_container.rs`, `crates/platform/src/config/env_file.rs`, `crates/core/src/application/first_run_setup.rs`
-
-The isolation mechanism (create an `--internal` Docker/`container` network, attach the MCP container to it) was already implemented in v0.1.6 but defaulted to `false` in both the place that matters: the setup wizard wrote `container_network_isolated: false` into every new install's `.env`, and the config loader's fallback for a missing env var was also `false`. The `.env.template` document already claimed `true`, but no code path applied it.
-
-As of this audit, both defaults are flipped to `true`:
-- `crates/core/src/application/first_run_setup.rs` — fresh installs now get `container_network_isolated: true`.
-- `crates/platform/src/config/env_file.rs` — `env_bool("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", true)`.
-
-Verified in `docker.rs::run()`: when `isolation_strategy` is set, the container is started with `--network <internal-network>`, and `prepare_network_isolation()` creates that network with `docker network create --internal` before the container starts. The macOS `container` adapter mirrors this. `validate_network_isolation_support()` still guards the one known-incompatible combination (`B3_CONTAINER_RUNTIME=docker` on macOS) with a clear startup error directing the operator to use `macos-container` instead.
-
-Full `cargo test` (both crates) passes with the new defaults. This is a greenfield product with no installed base, so no migration path was added for pre-existing `.env` files — not applicable.
-
----
-
-### 3.8 ✅ RESOLVED (v0.1.7) — MCP Container Shared Default Bridge
-
-**File:** `crates/platform/src/container/docker.rs`
-
-This was always a side effect of 3.7: without `--network`, Docker places the container on the shared default bridge, reachable by any other container on that bridge at its container IP. Since the container is now placed on a dedicated `--internal` network by default (3.7), other containers cannot reach it unless explicitly joined to that same named network. No separate code change was needed.
-
----
-
-## 4. Default Credentials and Secrets — Audit
-
-### 4.1 ✅ GOOD — No Hardcoded Default Passwords
-
-The password field starts empty in the setup draft and the setup wizard either generates a 24-character cryptographically random password or requires user input. The server refuses to start if `B3_PASSWORD` is empty (`require_nonempty` in `env_file.rs`). ✅
-
----
-
-### 4.2 🟡 MEDIUM — Default Username is `"admin"` — Predictable
+### M-9 🟡 MEDIUM — Default Username is `"admin"` — Predictable
 
 **File:** `crates/core/src/domain/setup.rs` (L7)
 
@@ -429,50 +281,7 @@ The username is not a secret in an OAuth login form, but `"admin"` removes one l
 
 ---
 
-### 4.3 ✅ GOOD — Client Secret and Tokens Generated with CSPRNG
-
-```rust
-// crates/platform/src/setup/system.rs
-fn generate_secret_hex(&self, num_bytes: usize) -> Result<String, SetupError> {
-    let mut bytes = vec![0u8; num_bytes];
-    rand::rng().fill_bytes(&mut bytes);
-    // hex encode
-}
-```
-
-With `DEFAULT_GENERATED_SECRET_BYTES = 32`, this produces 256-bit random secrets (64 hex chars). The RNG is `rand::rng()` (ChaCha12 seeded from `getrandom`/OS CSPRNG). Per-session access tokens are generated the same way in `generate_secure_token()`. ✅
-
----
-
-### 4.4 ✅ GOOD — Generated Passwords Use Cryptographic Randomness
-
-```rust
-fn generate_password(&self, length: usize) -> Result<String, SetupError> {
-    rand::rng().sample_iter(rand::distr::Alphanumeric).take(length).collect()
-}
-```
-
-`DEFAULT_GENERATED_PASSWORD_LENGTH = 24` characters of base-62 alphanumeric ≈ 143 bits of entropy. ✅
-
----
-
-### 4.5 ✅ GOOD — Upstream Shared Secret Is 380-bit CSPRNG
-
-**File:** `crates/platform/src/config/upstream_secret.rs` (L46-50)
-
-```rust
-let secret: String = rand::rng()
-    .sample_iter(rand::distr::Alphanumeric)
-    .take(64)
-    .map(char::from)
-    .collect();
-```
-
-64 base-62 characters ≈ 380 bits of entropy. ✅
-
----
-
-### 4.6 🟡 MEDIUM — 7-Character Secret Prefix Logged in Tracing Output
+### M-10 🟡 MEDIUM — 7-Character Secret Prefix Logged in Tracing Output
 
 **File:** `crates/platform/src/config/upstream_secret.rs` (L26-27, L63-64)
 
@@ -494,55 +303,7 @@ The first 7 characters of the upstream shared secret are written to the tracing 
 
 ---
 
-### 4.7 ✅ GOOD — `.env` File Written with `0600` Permissions
-
-**File:** `crates/platform/src/setup/system.rs` (L193-202)
-
-```rust
-#[cfg(unix)]
-{
-    use std::os::unix::fs::PermissionsExt;
-    fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).await …
-}
-```
-
-The `.env` file containing all secrets is written owner-read-only. ✅
-
----
-
-### 4.8 ✅ GOOD — Refresh Token Rotation Implemented
-
-**File:** `crates/core/src/application/token_exchange.rs` (L209-216)
-
-```rust
-self.token_store.revoke(refresh_token).await.map_err(|error| { … })?;
-```
-
-On a successful refresh token exchange, the old refresh token is revoked before the new pair is issued. This prevents replay of a captured refresh token.
-
-Default refresh token lifetime is 90 days (`DEFAULT_REFRESH_TOKEN_LIFETIME_SECS = 90 * 24 * 60 * 60`). This is long but expected for OAuth sessions; the operator can reduce it via `B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS`. ✅
-
----
-
-### 4.9 🟢 LOW — Generated Passwords Lack Symbol/Uppercase Character Classes
-
-**File:** `crates/platform/src/setup/system.rs` (L163-172)
-
-```rust
-fn generate_password(&self, length: usize) -> Result<String, SetupError> {
-    rand::rng().sample_iter(rand::distr::Alphanumeric).take(length).collect()
-}
-```
-
-`rand::distr::Alphanumeric` draws from a 62-character set (`[A-Za-z0-9]`) but case is not separately controlled — the practical concern raised is that the generator does not guarantee a mix of symbol/uppercase/lowercase/digit classes the way many password-complexity policies expect. At `DEFAULT_GENERATED_PASSWORD_LENGTH = 24`, the actual entropy (~143 bits) is already far beyond what's brute-forceable, so this is a low-severity, mostly cosmetic/compliance gap rather than a practical weakness — tracked in [`docs/POTENTIAL_SECURITY_RISKS.md`](POTENTIAL_SECURITY_RISKS.md).
-
-**Recommendation:** Sample from a combined alphanumeric + symbol distribution, or explicitly mix character classes, if matching common password-policy expectations matters. **Deferred — not fixed in this pass per operator instruction; tracked as an open item.**
-
----
-
-## 5. Install Script — Findings
-
-### 5.1 🟡 MEDIUM — Install Script Fetches Binary Over HTTPS Without Checksum Verification
+### M-11 🟡 MEDIUM — Install Script Fetches Binary Without Checksum Verification
 
 **File:** `scripts/install.sh`
 
@@ -562,59 +323,234 @@ The install script downloads and executes a binary from S3 without verifying a S
 
 ---
 
-## 6. Miscellaneous Findings
-
-### 6.1 🟢 LOW — `/health` Endpoint Unauthenticated and Externally Reachable
-
-**File:** `crates/platform/src/http/router.rs` (L33), `crates/platform/src/http/health.rs`
-
-```rust
-.route("/health", get(health))
-```
-
-The `/health` endpoint returns `{"status": "ok"}` without authentication. Through the Cloudflare tunnel, an external observer can determine that Brain3 is running and confirm the server fingerprint. This is minor — health endpoints are commonly public — but it enables passive reconnaissance.
-
-**Recommendation:** Accept as intended behavior and document it, or restrict `/health` to loopback-only access.
-
----
-
-### 6.2 🟢 LOW — No Vulnerability Disclosure Policy
-
-**File:** *(none — `docs/SECURITY.MD`, previously a stub, has since been deleted entirely)*
-
-There is no vulnerability disclosure policy, contact for security reports, or discoverable threat-model document at a path GitHub or researchers would expect (e.g. a root-level `SECURITY.md`). This audit's threat model (above) covers the documentation gap in substance, but it isn't surfaced where a security researcher would look first.
-
-**Recommendation:** Add a `SECURITY.md` at the repo root (GitHub surfaces this automatically in the repo's "Security" tab) with a contact email or private GitHub issue template, a link to this audit's threat model, and the supported scope.
-
----
-
-### 6.3 🟡 MEDIUM — Gateway Process Is Unsandboxed (Threat Model B5)
+### M-12 🟡 MEDIUM — Gateway Process Is Unsandboxed (Threat Model B5)
 
 **Files:** N/A — this is an absence of a control, not a specific code location
 
-The Rust gateway runs as a normal OS process with no filesystem jail (chroot/Landlock on Linux, sandbox-exec/App Sandbox on macOS), no network egress restriction, and no capability dropping. The MCP container (B4) is deliberately confined to bind-mounted directories with no outbound network access; the gateway that fronts it has no equivalent containment. If the gateway process is compromised by any means — a malicious or vulnerable Rust dependency, a logic bug in the hand-rolled OAuth implementation (finding 6.4), or any other RCE vector — the attacker inherits the full filesystem and network access of the user account running Brain3, not just the vault.
+The Rust gateway runs as a normal OS process with no filesystem jail (chroot/Landlock on Linux, sandbox-exec/App Sandbox on macOS), no network egress restriction, and no capability dropping. The MCP container (B4) is deliberately confined to bind-mounted directories with no outbound network access; the gateway that fronts it has no equivalent containment. If the gateway process is compromised by any means — a malicious or vulnerable Rust dependency, a logic bug in the hand-rolled OAuth implementation (M-13), or any other RCE vector — the attacker inherits the full filesystem and network access of the user account running Brain3, not just the vault.
 
-This is a known, accepted trade-off documented here for the first time rather than a regression — the host process needs broad access today (reading the vault for the rare direct-access path, talking to `cloudflared`, talking to the container runtime API) and no sandboxing work has been scoped.
+This is a known, accepted trade-off documented here rather than a regression — the host process needs broad access today (reading the vault for the rare direct-access path, talking to `cloudflared`, talking to the container runtime API) and no sandboxing work has been scoped.
 
-**Recommendation (not undertaken in this pass):** Filesystem restriction is the more tractable option — Landlock (Linux 5.13+) or a macOS sandbox profile could restrict the gateway to only the paths it actually needs (`.env`, the SQLite token DB, the upstream secret file, the Cloudflare credentials directory) without touching the vault directly. Network egress restriction is harder, since the gateway legitimately needs outbound access to manage `cloudflared` and the container runtime; scoping this is a future investigation, not a quick fix.
+**Recommendation (deferred):** Filesystem restriction is the more tractable option — Landlock (Linux 5.13+) or a macOS sandbox profile could restrict the gateway to only the paths it actually needs (`.env`, the SQLite token DB, the upstream secret file, the Cloudflare credentials directory) without touching the vault directly. Network egress restriction is harder; this is a future investigation, not a quick fix.
 
 ---
 
-### 6.4 🟡 MEDIUM — Custom OAuth2.1 Server Implementation Carries Inherent Protocol-Logic Risk
+### M-13 🟡 MEDIUM — Custom OAuth2.1 Server Implementation Carries Inherent Protocol-Logic Risk
 
 **Files:** `crates/core/src/domain/oauth.rs`, `crates/platform/src/http/oauth_handlers.rs`, `crates/core/src/application/token_exchange.rs`
 
-Brain3 implements its own OAuth2.1 authorization server (authorize, token exchange, PKCE, refresh rotation) rather than building on an established, widely-audited server-side OAuth library. Rust's memory safety rules out entire bug classes — buffer overflows, use-after-free, data races — but it provides no protection against protocol-level logic errors specific to this implementation: subtle deviations from RFC 6749/9700, edge cases in state handling, or auth-bypass conditions that a maintained library, audited by a much wider community, might already have caught.
+Brain3 implements its own OAuth2.1 authorization server (authorize, token exchange, PKCE, refresh rotation) rather than building on an established, widely-audited server-side OAuth library. Rust's memory safety rules out entire bug classes — buffer overflows, use-after-free, data races — but it provides no protection against protocol-level logic errors: subtle deviations from RFC 6749/9700, edge cases in state handling, or auth-bypass conditions that a maintained library might already have caught.
 
-The existing controls (mandatory PKCE, rate limiting, constant-time comparisons, single static client) reduce the blast radius of most classes of attack, and several of this audit's open findings (1.3–1.6) are specific instances of this broader risk. This finding exists to name the category explicitly rather than leave it implicit.
+The existing controls (mandatory PKCE, rate limiting, constant-time comparisons, single static client) reduce the blast radius of most classes of attack, and several open findings (M-1 through M-4) are specific instances of this broader risk.
 
 **Recommendation:** No action proposed in this pass beyond what's already tracked in section 1. Worth revisiting if/when the OAuth surface grows (e.g. multiple clients, dynamic registration) — at that point, the cost/benefit of a vetted library changes.
 
 ---
 
-## README Validation & Suggested Updates
+### L-1 🟢 LOW — No Background Cleanup of Expired Auth Codes
 
-All security claims in the README were verified against the current codebase. Results:
+**File:** `crates/platform/src/auth_code_store/in_memory.rs`
+
+`cleanup_expired()` is triggered only at `issue_code` and `token_exchange` time. Under high abuse, expired codes accumulate in memory. This is a minor concern given that code issuance requires valid credentials, and the rate limiter throttles the attack surface considerably.
+
+**Recommendation:** Spawn a background Tokio task that calls `cleanup_expired()` every 60 seconds.
+
+---
+
+### L-2 🟢 LOW — No Content-Security-Policy or Security Headers on Login Page
+
+**Files:** `crates/platform/src/http/templates.rs`, `crates/platform/src/http/router.rs`
+
+The login HTML page is served without:
+- `Content-Security-Policy` (XSS mitigation)
+- `X-Frame-Options` (clickjacking protection)
+- `Referrer-Policy` (prevents OAuth `state`/`code` leakage via referrer)
+- `X-Content-Type-Options`
+
+The login form embeds hidden fields containing `redirect_uri` and `code_challenge`, so XSS on this page would be especially damaging.
+
+**Recommendation:** Add a `tower_http::set_header::SetResponseHeaderLayer` for HTML responses. Minimum:
+```
+Content-Security-Policy: default-src 'self'; style-src 'self'; img-src 'self' data:
+X-Frame-Options: DENY
+X-Content-Type-Options: nosniff
+Referrer-Policy: no-referrer
+```
+
+---
+
+### L-3 🟢 LOW — `state` Parameter Not Required or Validated
+
+**File:** `crates/platform/src/http/oauth_handlers.rs` (L69)
+
+The `state` parameter is stripped if empty and echoed back, but is never required. An AI client sending no `state` silently proceeds. The OAuth spec relies on client-supplied high-entropy `state` to prevent CSRF; the server cannot enforce this by itself, but it can log a warning when `state` is absent to aid diagnosis.
+
+**Recommendation:** Log a warning when `state` is absent; document that state is required for CSRF protection.
+
+---
+
+### L-4 🟢 LOW — `GET /oauth/authorize` Not Rate-Limited
+
+**File:** `crates/platform/src/http/oauth_handlers.rs` (L104-138)
+
+`POST /oauth/authorize` and `POST /oauth/token` are rate-limited, but `GET /oauth/authorize` — which validates the authorization request and renders the login form — is not. Since the GET handler does not process credentials, direct credential brute-force is not possible through it, but an attacker can enumerate valid `client_id` values or probe request validation without cost.
+
+**Recommendation:** Apply the same `OAuthRateLimiter` check to `oauth_authorize_get`. The incremental implementation cost is low.
+
+---
+
+### L-5 🟢 LOW — `cloudflared` Binary Located via PATH — No Integrity Check
+
+**File:** `crates/platform/src/tunnel/cloudflare_setup.rs` (L6-13)
+
+The `cloudflared` binary is resolved via `which cloudflared` over the shell `PATH`. A PATH-hijacking attack (a malicious `cloudflared` earlier in `PATH`) would route all tunnel traffic through an attacker-controlled process. The risk is limited to local privilege escalation scenarios.
+
+**Recommendation:** Check that the resolved binary path is under a trusted directory (e.g., `/usr/local/bin`, `/opt/homebrew/bin`). Document this as a local privilege escalation surface.
+
+---
+
+### L-6 🟢 LOW — No Seccomp/AppArmor Profile Applied to MCP Container
+
+**File:** `crates/platform/src/container/startup.rs`
+
+The `ContainerConfig` does not set any seccomp profile, AppArmor label, or capability-dropping flags. The container runs with Docker's default seccomp profile, which is better than nothing but does not restrict to the minimal syscall set needed by an MCP server.
+
+**Recommendation:** Add `--security-opt seccomp=/path/to/profile.json` and `--cap-drop ALL` to the Docker adapter. This becomes more important if arbitrary MCP tool containers are ever supported.
+
+---
+
+### L-7 🟢 LOW — No Resource Limits on MCP Container
+
+**Files:** `crates/core/src/domain/model.rs`, `crates/platform/src/container/docker.rs`
+
+`ContainerConfig` has no CPU, memory, or PID limit fields. A compromised or buggy MCP tool could exhaust host resources.
+
+**Recommendation:** Add optional `memory_limit`, `cpu_limit`, and `pids_limit` fields to `ContainerConfig` and apply them via `--memory`, `--cpus`, `--pids-limit` in the adapters.
+
+---
+
+### L-8 🟢 LOW — Generated Passwords Lack Symbol/Uppercase Character Classes *(deferred)*
+
+**File:** `crates/platform/src/setup/system.rs` (L163-172)
+
+```rust
+fn generate_password(&self, length: usize) -> Result<String, SetupError> {
+    rand::rng().sample_iter(rand::distr::Alphanumeric).take(length).collect()
+}
+```
+
+`rand::distr::Alphanumeric` draws from a 62-character set (`[A-Za-z0-9]`). At `DEFAULT_GENERATED_PASSWORD_LENGTH = 24`, the actual entropy (~143 bits) is already far beyond what's brute-forceable, so this is a cosmetic/compliance gap rather than a practical weakness. Tracked in [Potential Security Risks](docs/POTENTIAL_SECURITY_RISKS.md).
+
+**Recommendation:** Sample from a combined alphanumeric + symbol distribution, or explicitly mix character classes, if matching common password-policy expectations matters. **Deferred — not fixed in this pass per operator instruction.**
+
+---
+
+### L-9 🟢 LOW — `/health` Endpoint Unauthenticated and Externally Reachable
+
+**Files:** `crates/platform/src/http/router.rs` (L33), `crates/platform/src/http/health.rs`
+
+```rust
+.route("/health", get(health))
+```
+
+The `/health` endpoint returns `{"status": "ok"}` without authentication. Through the Cloudflare tunnel, an external observer can determine that Brain3 is running and confirm the server fingerprint. Health endpoints are commonly public, but this enables passive reconnaissance.
+
+**Recommendation:** Accept as intended behavior and document it, or restrict `/health` to loopback-only access.
+
+---
+
+### L-10 🟢 LOW — No Vulnerability Disclosure Policy
+
+**File:** *(none — `docs/SECURITY.MD`, previously a stub, has been deleted and not replaced)*
+
+There is no vulnerability disclosure policy, contact for security reports, or discoverable threat-model document at a path GitHub or researchers would expect (e.g. a root-level `SECURITY.md`). This audit's threat model covers the documentation gap in substance, but it isn't surfaced where a security researcher would look first.
+
+**Recommendation:** Add a `SECURITY.md` at the repo root (GitHub surfaces this automatically in the repo's "Security" tab) with a contact email or private GitHub issue template, a link to this audit's threat model, and the supported scope.
+
+---
+
+## Prioritized Remediation Order
+
+1. **M-1** Fix `resolve_base_url` to use configured hostname — prevents host header injection across OAuth metadata and MCP protected-resource metadata.
+2. **M-2** Allowlist `redirect_uri` — blocks open redirects and code interception; straightforward config addition.
+3. **M-8** Move upstream secret out of `/tmp` — easy default path change plus symlink guard.
+4. **M-10** Replace partial secret logging with `elide_secret` — one-line fix per log call.
+5. **M-11** Add checksum verification to install script — supply chain hygiene.
+6. **M-6** Verify Cloudflare credentials file permissions — startup check, low effort.
+7. **M-3** Reduce auth code lifetime to 60s — one-constant change.
+8. **L-2** Add CSP/security headers — middleware layer addition.
+9. **L-4** Rate-limit `GET /oauth/authorize` — reuse existing `OAuthRateLimiter`.
+10. **M-9** Change default username from `"admin"` — one-constant change in `setup.rs`.
+11. **L-8** Strengthen generated password character classes — deferred by operator request; revisit later.
+12. **M-12** Scope gateway-process sandboxing — larger investigation (Landlock/sandbox-exec for filesystem restriction); revisit once the rest of this list is clear.
+13. **L-10** Add a root-level `SECURITY.md` — disclosure policy and a pointer to this audit's threat model.
+
+M-13 (custom OAuth2.1 implementation risk) has no standalone remediation — it is mitigated incrementally as M-1 through M-4 are addressed.
+
+---
+
+<details>
+<summary>✅ Confirmed Good Controls</summary>
+
+The following were audited and found to be correctly implemented.
+
+| Area | Control | Notes |
+|---|---|---|
+| OAuth2 | Static non-expiring access token — eliminated | `token_exchange.rs` issues a fresh 256-bit token per session with `expires_at`; proxy validates token kind and expiry |
+| OAuth2 | Rate limiting on auth/token endpoints | `OAuthRateLimiter` (backed by `governor`): 20 burst / ~20 per 15 min per IP on `POST /oauth/authorize` and `POST /oauth/token` |
+| Network | Gateway binds to loopback only | Hard-coded `127.0.0.1` in `env_file.rs`; no env var override exists |
+| Network | MCP container port bound to `127.0.0.1` | `docker run -p 127.0.0.1:PORT:PORT` equivalent; container not reachable from LAN |
+| Container | MCP container internal-only network (no egress) | `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` defaults to `true` in both setup wizard and config loader as of v0.1.7 |
+| Credentials | No hardcoded default passwords | Setup wizard generates or requires a password; server refuses to start if `B3_PASSWORD` is empty |
+| Credentials | Client secret and tokens generated with 256-bit CSPRNG | `rand::rng()` (ChaCha12 / OS CSPRNG), 32 bytes → 64 hex chars |
+| Credentials | Generated passwords use 143-bit CSPRNG | 24 base-62 alphanumeric characters |
+| Credentials | Upstream shared secret is 380-bit CSPRNG | 64 base-62 alphanumeric characters |
+| Credentials | `.env` written with `0600` permissions | `std::fs::Permissions::from_mode(0o600)` applied after write |
+| Credentials | Refresh token rotation | Old refresh token revoked before new pair issued; prevents replay of captured refresh tokens |
+| OAuth2 | Only pre-registered client gets tokens | `client_id` validated by constant-time comparison at every step; no dynamic registration |
+| OAuth2 | PKCE S256 enforced by default | `B3_OAUTH2_PKCE_REQUIRED` defaults to `true` |
+| OAuth2 | Auth codes are single-use | `take()` atomically removes the code on first exchange |
+| OAuth2 | Bearer-token validation on all `/mcp` routes | `proxy_mcp.rs` validates token existence, expiry, and kind before proxying |
+| OAuth2 | Host validation returns HTTP 421 | `validate_host()` called in `proxy_mcp.rs` and `protected_resource_metadata` (named tunnel mode) |
+| OAuth2 | Upstream shared secret rejects direct bypass | `x-brain3-upstream-secret` header injected by gateway; container checks it |
+
+</details>
+
+---
+
+<details>
+<summary>📋 Changes From Prior Releases</summary>
+
+### v0.1.6 → v0.1.7
+
+#### ✅ RESOLVED — MCP Container Unrestricted Outbound Access / Default-Bridge Exposure
+
+Network isolation infrastructure (`docker network create --internal`, `container network create --internal` on macOS) already existed in v0.1.6 but defaulted to `false` everywhere — the setup wizard (`crates/core/src/application/first_run_setup.rs`) wrote `container_network_isolated: false` into every new `.env`, and the config-loading fallback (`crates/platform/src/config/env_file.rs`) used the same `false` default for any `.env` missing the variable. The `.env.template` shipped with the repo claimed `true` was the default, but neither code path actually applied it.
+
+As of v0.1.7, both defaults are `true`. A fresh install gets a container with no default outbound route, placed on a dedicated internal network rather than the shared default bridge. Verified via `cargo test` (full suite, both crates) and by re-reading `docker.rs`'s `run()`, which attaches `--network <internal>` whenever `isolation_strategy` is set. The macOS `container` adapter mirrors this. `validate_network_isolation_support()` guards the one known-incompatible combination (`B3_CONTAINER_RUNTIME=docker` on macOS) with a clear startup error.
+
+#### ✅ RESOLVED — Dangling Cloudflare Tunnel on Unclean Shutdown
+
+Previously tracked in `POTENTIAL_SECURITY_RISKS.md`. Resolved: `crates/platform/src/tunnel/cloudflare_quick.rs` and `cloudflare_named.rs` write a PID file (`lifecycle::write_pid_file`), set `kill_on_drop(true)` on the spawned `cloudflared` child process, configure `PR_SET_PDEATHSIG` on Linux, and call `lifecycle::graceful_kill` on shutdown. The checklist item has been removed from `POTENTIAL_SECURITY_RISKS.md`.
+
+### v0.1.5 → v0.1.6
+
+#### ✅ RESOLVED — Static Non-Expiring Access Token
+
+The static `.env`-loaded access token is gone. `token_exchange.rs` calls `generate_secure_token()` on every successful authorization code exchange, stores the result in the SQLite `access_tokens` table with an `expires_at` timestamp, and returns a refresh token alongside the access token. The proxy (`proxy_mcp.rs`) validates the token against the store, checks expiry, and checks that the token kind is `access` (not `refresh`). Refresh tokens are revoked on use and replaced with a new pair.
+
+#### ✅ RESOLVED — No Rate Limiting on Auth Endpoints
+
+`crates/platform/src/http/rate_limit.rs`'s `OAuthRateLimiter` (backed by `governor`) enforces 20 burst attempts per IP with one token replenished every 45 seconds (~20/15 min) on `POST /oauth/authorize` and `POST /oauth/token`. Client IP is extracted preferentially from `CF-Connecting-IP`, with `X-Forwarded-For` as a fallback.
+
+</details>
+
+---
+
+<details>
+<summary>📋 README Claim Validation</summary>
+
+All security claims in the README were verified against the current codebase (v0.1.7).
 
 | README Claim | Status | Notes |
 |---|---|---|
@@ -628,82 +564,22 @@ All security claims in the README were verified against the current codebase. Re
 | Bearer-token validation on all `/mcp` routes | ✅ Accurate | `proxy_mcp.rs` validates token existence, expiry, and kind before proxying |
 | Host validation returns HTTP 421 | ✅ Accurate | `validate_host()` is called in `proxy_mcp.rs` and `protected_resource_metadata` |
 | Upstream shared secret rejects direct bypass | ✅ Accurate | `x-brain3-upstream-secret` header is injected and the container checks it |
-| Constant-time comparison for all checks | ⚠️ Partially accurate | `constant_time_eq` short-circuits on length mismatch, leaking secret byte length (see finding 1.6, unchanged) |
-| Rust host process | ✅ Accurate | Note: this audit's threat model (B5, finding 6.3) clarifies that "minimizes attack surface" does not mean the process is sandboxed — Rust prevents memory-safety bugs, not all RCE vectors, and the process has full ambient host access if compromised |
-| Container-based filesystem isolation plus internal-only networking by default | ✅ Accurate (upgraded from "partially accurate") | Now correctly reflects the code: `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` defaults to `true` in both the setup wizard and config loader as of v0.1.7 (finding 3.7 resolved) |
+| Constant-time comparison for all checks | ⚠️ Partially accurate | `constant_time_eq` short-circuits on length mismatch, leaking secret byte length (see M-4) |
+| Rust host process minimizes attack surface | ✅ Accurate (with caveat) | Rust prevents memory-safety bugs, not all RCE vectors. The process has full ambient host access if compromised — see M-12 |
+| Container-based filesystem isolation plus internal-only networking by default | ✅ Accurate | `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` defaults to `true` in both setup wizard and config loader as of v0.1.7 |
 | Cloudflare tunnels with TLS | ✅ Accurate | Both quick and named tunnel paths are implemented |
-| OAuth2.1 with PKCE; no open registration (DCR/CIMD disabled) | ✅ Accurate | Confirmed no `/oauth/register` route exists in `router.rs`; `oauth_register_route_is_not_exposed` integration test passes |
+| OAuth2.1 with PKCE; no open registration (DCR/CIMD disabled) | ✅ Accurate | No `/oauth/register` route exists in `router.rs`; `oauth_register_route_is_not_exposed` integration test passes |
 
-**Still-pending README additions** (carried forward from v0.1.6, not yet added by the maintainer; this audit only re-confirms they remain accurate and outstanding):
+**Pending README additions** (not yet added by the maintainer):
 
-1. **Per-session short-lived tokens** — Every OAuth login issues a fresh 256-bit access token with a 1-hour lifetime (default), persisted in SQLite. The prior static token model is gone.
+1. **Per-session short-lived tokens** — Every OAuth login issues a fresh 256-bit access token with a 1-hour lifetime (default), persisted in SQLite.
 2. **Refresh token rotation** — The refresh token is rotated on every use; the old token is revoked before the new pair is issued.
 3. **Per-IP rate limiting on credential endpoints** — `POST /oauth/authorize` and `POST /oauth/token` are limited to 20 attempts per 15 minutes per client IP. Cloudflare's `CF-Connecting-IP` header is used for accurate IP identification behind the tunnel.
 
-**Suggested README configuration table addition (still outstanding):**
+**Suggested configuration table addition:**
 
 | Variable | Default | Description |
 |---|---|---|
 | `B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS` | `7776000` | Lifetime of issued refresh tokens in seconds (default: 90 days) |
 
----
-
-## Summary Table
-
-| # | Severity | Area | Finding | Status |
-|---|----------|------|---------|--------|
-| 1.1 | ✅ RESOLVED | OAuth2 | Static, non-expiring access token | Fixed in v0.1.6 |
-| 1.2 | ✅ RESOLVED | OAuth2 | No rate limiting on auth/token endpoints | Fixed in v0.1.6 |
-| 1.3 | 🟡 MEDIUM | OAuth2 | Host header injection in `resolve_base_url` | Open |
-| 1.4 | 🟡 MEDIUM | OAuth2 | `redirect_uri` not allowlisted | Open |
-| 1.5 | 🟡 MEDIUM | OAuth2 | 5-minute auth code lifetime; no session binding | Open |
-| 1.6 | 🟡 MEDIUM | OAuth2 | `constant_time_eq` leaks secret length | Open |
-| 1.7 | 🟢 LOW | OAuth2 | No background cleanup of expired auth codes | Open |
-| 1.8 | 🟢 LOW | OAuth2 | No CSP or security headers on login HTML | Open |
-| 1.9 | 🟢 LOW | OAuth2 | `state` parameter not required or validated | Open |
-| 1.10 | 🟢 LOW | OAuth2 | `GET /oauth/authorize` not rate-limited | Open |
-| 2.1 | 🟡 MEDIUM | Tunnel | Quick tunnel disables all hostname enforcement | Open |
-| 2.2 | 🟡 MEDIUM | Tunnel | Cloudflare credentials file permissions not verified | Open |
-| 2.3 | 🟢 LOW | Tunnel | `cloudflared` binary not integrity-checked | Open |
-| 3.1 | ✅ GOOD | Network | Gateway binds to loopback only | — |
-| 3.2 | ✅ GOOD | Network | Container port bound to 127.0.0.1 | — |
-| 3.3 | 🟡 MEDIUM | Container | Vault bind-mount is read-write | Open |
-| 3.4 | 🟡 MEDIUM | Container | Upstream secret stored in `/tmp` with predictable name | Open |
-| 3.5 | 🟢 LOW | Container | No seccomp / capability-dropping profile | Open |
-| 3.6 | 🟢 LOW | Container | No CPU/memory resource limits | Open |
-| 3.7 | ✅ RESOLVED | Container | MCP container had unrestricted outbound internet access | Fixed in v0.1.7 |
-| 3.8 | ✅ RESOLVED | Container | MCP container on default bridge — reachable from peer containers | Fixed in v0.1.7 (side effect of 3.7) |
-| 4.1 | ✅ GOOD | Credentials | No hardcoded default passwords | — |
-| 4.2 | 🟡 MEDIUM | Credentials | Default username is predictable (`"admin"`) | Open |
-| 4.3 | ✅ GOOD | Credentials | Secrets generated with 256-bit CSPRNG | — |
-| 4.4 | ✅ GOOD | Credentials | Passwords are 143-bit CSPRNG | — |
-| 4.5 | ✅ GOOD | Credentials | Upstream secret is 380-bit CSPRNG | — |
-| 4.6 | 🟡 MEDIUM | Credentials | 7-char secret prefix logged in tracing output | Open |
-| 4.7 | ✅ GOOD | Credentials | `.env` written with `0600` permissions | — |
-| 4.8 | ✅ GOOD | Credentials | Refresh token rotation implemented | — |
-| 4.9 | 🟢 LOW | Credentials | Generated passwords lack symbol/uppercase character classes | Open — deferred by operator request |
-| 5.1 | 🟡 MEDIUM | Install | Binary installed without checksum verification | Open |
-| 6.1 | 🟢 LOW | HTTP | `/health` unauthenticated and externally reachable | Open |
-| 6.2 | 🟢 LOW | Ops | No vulnerability disclosure policy (`SECURITY.MD` stub deleted, never replaced) | Open |
-| 6.3 | 🟡 MEDIUM | Architecture | Gateway process is unsandboxed — full host access if compromised (threat model B5) | Open — documented, not fixed |
-| 6.4 | 🟡 MEDIUM | Architecture | Hand-rolled OAuth2.1 implementation carries inherent protocol-logic risk | Open — documented, not fixed |
-
----
-
-## Prioritized Remediation Order
-
-1. **Fix `resolve_base_url` to use configured hostname** (1.3) — prevents host header injection across OAuth metadata and MCP protected-resource metadata. Now the highest-impact open finding following 3.7/3.8's resolution.
-2. **Allowlist `redirect_uri`** (1.4) — blocks open redirects and code interception; straightforward config addition.
-3. **Move upstream secret out of `/tmp`** (3.4) — easy default path change plus symlink guard.
-4. **Replace partial secret logging with `elide_secret`** (4.6) — one-line fix per log call.
-5. **Add checksum verification to install script** (5.1) — supply chain hygiene.
-6. **Verify Cloudflare credentials file permissions** (2.2) — startup check, low effort.
-7. **Reduce auth code lifetime to 60s** (1.5) — one-constant change.
-8. **Add CSP/security headers** (1.8) — middleware layer addition.
-9. **Rate-limit `GET /oauth/authorize`** (1.10) — reuse existing `OAuthRateLimiter`.
-10. **Change default username from `"admin"`** (4.2) — one-constant change in `setup.rs`.
-11. **Strengthen generated password character classes** (4.9) — deferred by operator request; revisit later.
-12. **Scope gateway-process sandboxing** (6.3) — larger investigation (Landlock/sandbox-exec for filesystem restriction), not a quick fix; revisit once the rest of this list is clear.
-13. **Add a root-level `SECURITY.md`** (6.2) — disclosure policy and a pointer to this audit's threat model.
-
-Finding 6.4 (custom OAuth2.1 implementation risk) has no standalone remediation — it's mitigated incrementally as findings in section 1 are addressed.
+</details>
