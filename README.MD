@@ -87,7 +87,7 @@ sudo apt-get install cloudflared
 ```
 </details>
 
-### Install + run the Brain3 Terminal UI (TUI) app
+### Install and run Brain3
 
 ```bash
 curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.1.8/install.sh | sh
@@ -105,7 +105,9 @@ and it should an interactive setup wizard.
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
 
-### Configure your AI to add a connector to Brain3
+### Configure your AI 
+
+You need to configure your favorite AI to add a connector to Brain3.  So far it's been tested with both ChatGPT and Claude, on web, desktop and mobile.
 
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
