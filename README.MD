@@ -35,14 +35,13 @@ Use Brain3 for anything you'd typically use a second brain for:
 4. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
 5. Anything related to organizing, planning, decision-making and general knowledge management
 
-## Screenshots - using brain3 from Claude Mobile
+<div align="center">
 
-<table><tr>
-<td><img width="280" alt="Image" src="docs/screenshots/screenshot-2.png" /></td>
-<td><img width="280" alt="Image" src="docs/screenshots/screenshot-1.png" /></td>
-</tr><tr>
-<td colspan="2" align="center">Chatting w/ Brain3 MCP and showing tool calls</td>
-</tr></table>
+https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
+
+<em>Sample Weekly Planning Session With ChatGPT and Brain3</em>
+
+</div>
 
 ## Screenshots - Admin Terminal UI (TUI)
 
@@ -68,8 +67,10 @@ Use Brain3 for anything you'd typically use a second brain for:
 * AI Assistant (e.g. <img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT, <img height="16" src="docs/logos/claude.svg" alt="Claude"> Claude, etc) 
 * 🏠 If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to how OpenClaw works (got mac mini?).
 
+## Privacy & Security
+
 <details>
-<summary>🔒 Privacy & Security Details</summary>
+<summary>🔒 View Privacy & Security Details</summary>
 
 - 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) available, which will be done regularly on releases.  The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
 - 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
@@ -151,13 +152,19 @@ This installs `brain3` from the `v0.1.8` release.
 
 ### Quick Start Step 2: Start Brain3
 
+In your terminal, run: 
+
 ```bash
-brain3
+$ brain3
 ```
 
 On first run, Brain3 launches an interactive setup wizard.
 
-Run it in a tool like [tmux](https://github.com/tmux/tmux/wiki) to keep it running in the background, even if your current shell exits. 
+<a href="docs/screenshots/SetupWizardScreenshot.png">
+  <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
+</a>
+
+To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
 
 If you want a stable hostname on your own Cloudflare-managed domain (recommended) instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
 
@@ -178,6 +185,10 @@ Follow the instructions below for your AI client.
 <details>
 <summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT</strong></summary>
 
+<a href="docs/screenshots/ChatGPTConfig.png">
+  <img height="400" alt="ChatGPT connector configuration screenshot" src="docs/screenshots/ChatGPTConfig.png" />
+</a>
+
 1. Open **Settings → Connectors → Create Connector**.
 2. Select **Custom MCP Server**.
 3. Copy the **Server URL**, **Client ID**, and **Client Secret** from Brain3's MCP Config Settings screen.
@@ -190,6 +201,10 @@ Once authorization succeeds, Brain3 will be available as a connector in ChatGPT.
 
 <details>
 <summary><img height="16" src="docs/logos/claude.svg" alt="Claude"> <strong>Claude</strong></summary>
+
+<a href="docs/screenshots/ClaudeConfig.png">
+  <img height="400" alt="Claude connector configuration screenshot" src="docs/screenshots/ClaudeConfig.png" />
+</a>
 
 1. Open **Settings → Connectors → Add Custom Connector**.
 2. Enter the **Server URL** shown in Brain3.
