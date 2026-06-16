@@ -13,11 +13,7 @@ Brain3 lets you interact with your local markdown vault through Claude, ChatGPT 
 
 I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, and in particular so I could access it using voice dictation.  
 
-The nice thing about integrating tightly with AI is that you can save ideas to your vault mid-conversation and pull stored context back in whenever you need it, without switching apps.
-
-Think of it as a high-capacity memory system you fully control: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
-
-
+Think of it as a **high-capacity memory system you fully control**: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
 
 <div align="center">
 
