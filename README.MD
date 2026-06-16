@@ -17,21 +17,13 @@ Putting an AI assistant in front of your markdown vault brings it to a whole new
 
 Think of it like a **high-capacity memory system that you fully control** and can use with any AI assistant.  It's not quite [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), but the plan is to take it that direction.  
 
-**Remote MCP, by necessity**
-
-Brain3 is a **remote MCP server that runs on your own machine**. Your vault never leaves your hardware -- but the connection from your AI assistant to Brain3 is remote, because that's the only connection model Claude and ChatGPT currently support for third-party MCP connectors.
-
-That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable endpoint, and OAuth2.1/PKCE is what Claude and ChatGPT require before they'll connect to any remote MCP server. None of this is incidental complexity -- it's the minimum required to plug into the AI assistant ecosystem as a first-class connector.
-
-If you trust Cloudflare (see the privacy section), Brain3 is as close to local-first as the current MCP ecosystem allows.
-
 Brain3 is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for third-party connectors, such as:
 
 * <img height="20" src="docs/logos/claude.svg" alt="Claude"> Claude (🌐/🖥️/📱)
 * <img height="20" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT (🌐/🖥️/📱)
 * <img height="20" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai (🖥️) - supports local models such as Gemma4.  
 
-Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Server (VPS) if you have one.  It runs in the command line as a Terminal UI (TUI).  
+Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Server (VPS) if you have one. It runs as a remote MCP server that runs on your own machine (see [Privacy & Security](#privacy--security) for why), and you administer it from the command line via a Terminal UI (TUI).  
 
 **Use Cases**
 
@@ -89,7 +81,11 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 - <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
 - You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
 
-### Cloudflare Tunnels
+### Remote MCP & Cloudflare Tunnels
+
+Brain3 is a **remote MCP server that runs on your own machine**. Your vault never leaves your hardware -- but the connection from your AI assistant to Brain3 is remote, because that's the only connection model Claude and ChatGPT currently support for third-party MCP connectors.  (at least AFAIK, file an issue if you know otherwise)
+
+That somewhat annoying constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable endpoint, and OAuth2.1/PKCE is what Claude and ChatGPT require before they'll connect to any remote MCP server. 
 
 - ⚠️ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
 - Tunnels are cleaned up automatically when Brain3 stops.
