@@ -5,13 +5,13 @@ Brain3 lets you interact with your local markdown vault (aka "second brain") thr
 
 **Why This Exists**
 
-I built this so I could access my Obsidian markdown vault direclty from the Claude mobile app, in particular via voice dictation. 
+I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, in particular via voice dictation. 
 
-Putting an AI assistant front-end to a second brain brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas. 
+Putting an AI assistant in front of a second brain brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas. 
 
-Think of it like a **high capacity memory system that you have full control over**, and is fully portable to any AI assistant.
+Think of it like a **high-capacity memory system that you fully control** and can use with any AI assistant.
 
-Brain3 is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for 3rd-party connectors, such as:
+Brain3 is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for third-party connectors, such as:
 
 * <img height="20" src="docs/logos/claude.svg" alt="Claude"> Claude (🌐/🖥️/📱)
 * <img height="20" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT (🌐/🖥️/📱)
@@ -22,11 +22,11 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 ## Features
 
 - 🔐 Your markdown vault data stays 100% local and private
-- Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native MacOS container technology](https://github.com/apple/container) to reduce the attack surface
-- 🛡️ Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) available, which will be done regularly on releases.
+- Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
+- 🛡️ Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) that is updated regularly for new releases. 
 - 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
 - <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian-compatible (but Obsidian not required)
-- <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on MacOS and Linux
+- <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
 - 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
 
 ## Screenshots - using brain3 from Claude Mobile
@@ -38,7 +38,7 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 <td colspan="2" align="center">Chatting w/ Brain3 MCP and showing tool calls</td>
 </tr></table>
 
-## Screenshots - Admin Termimal UI (TUI)
+## Screenshots - Admin Terminal UI (TUI)
 
 <a href="docs/screenshots/tui_screenshot.png">
   <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
@@ -46,7 +46,7 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 
 ## Requirements
 
-* OS: <img height="16" src="docs/logos/apple.svg" alt="macOS"> MacOS, <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux - MS Windows would work in theory, but I don't have a testing machine.
+* OS: <img height="16" src="docs/logos/apple.svg" alt="macOS"> macOS, <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux - MS Windows should also work, I'm looking for people to help test.
 * <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Cloudflare Tunnel - but no account needed, and it's a one-liner install.
 * AI Assistant (e.g. <img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT, <img height="16" src="docs/logos/claude.svg" alt="Claude"> Claude, etc) 
 * 🏠 If you want it to be accessible 24/7, you'll need a dedicated home computer or cloud server (VPS), similar to how OpenClaw works (got mac mini?).
@@ -220,7 +220,7 @@ Named tunnels are also known to be more reliable and less likely to suffer rate 
 Brain3's normal first-run setup configures the app and defaults to a Cloudflare quick tunnel. Named tunnel provisioning is a separate guided flow:
 
 1. Run `brain3` once and complete the normal interactive setup wizard.
-2. Create a free Cloudflare account at [cloudflare.com](https://cloudflare.com
+2. Create a (free) Cloudflare account at [cloudflare.com](https://cloudflare.com)
 3. Install `cloudflared` if it is not already available — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
 4. In `~/.brain3/.env`, set `B3_CF_TUNNEL_NAME` and `B3_CF_DOMAIN`. Set `B3_CF_TUNNEL_CONFIG_FILE` only if you want a non-default config path; otherwise Brain3 uses `.cloudflared/<tunnel-name>.yml`.
 5. Run the named tunnel provisioning wizard:
