@@ -423,7 +423,7 @@ The runtime status screen now reports whether the container is actually `Ready` 
 
 ## Credits 
 
-* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as actual code used in the MCP server itself as a starting point.
+* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) provided an inspiring starting point, as well as actual code used in the MCP server itself as a starting point.  I contributed a few [issues](https://github.com/jimprosser/obsidian-web-mcp/issues/29) and [PRs](https://github.com/jimprosser/obsidian-web-mcp/pull/25) to the project.
 
 
 ## License 
