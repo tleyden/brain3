@@ -19,3 +19,8 @@ A living checklist of identified security risks. Items are unchecked until a mit
 ## Container Port Exposure (macOS)
 
 - [ ] **Mapped container port accessible to any local process on macOS** — When running the MCP container with a host port mapping on macOS (native containers or Docker Desktop), it is not yet confirmed whether the bound port is accessible to *any* process on the local machine or only to the gateway process. If it is broadly accessible, a local process could bypass OAuth entirely by talking directly to the MCP upstream. Needs investigation.
+
+
+## Use stronger generated passwords
+
+- [ ] **Weakly generated passwords** — the passwords generated in the setup do not contain symbols or uppercase letters, making them easier to guess. 
