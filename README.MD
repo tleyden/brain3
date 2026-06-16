@@ -51,7 +51,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 ## Features
 
-- 🔐 Your markdown vault data stays 100% local and private
+- 🔐 Your markdown vault data stays 100% local and private (note: it's exposed to your AI assistant via a [Cloudflare Tunnel](#remote-mcp--cloudflare-tunnels))
 - Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
 - 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) that is updated regularly for new releases. 
 - 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
