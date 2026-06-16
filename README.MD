@@ -152,13 +152,19 @@ This installs `brain3` from the `v0.1.8` release.
 
 ### Quick Start Step 2: Start Brain3
 
+In your terminal, run: 
+
 ```bash
-brain3
+$ brain3
 ```
 
 On first run, Brain3 launches an interactive setup wizard.
 
-Run it in a tool like [tmux](https://github.com/tmux/tmux/wiki) to keep it running in the background, even if your current shell exits. 
+<a href="docs/screenshots/SetupWizardScreenshot.png">
+  <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
+</a>
+
+To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
 
 If you want a stable hostname on your own Cloudflare-managed domain (recommended) instead of the default quick tunnel, use the separate named tunnel flow in [Advanced Configuration](#named-cloudflare-tunnel-on-your-domain) after first-run setup.
 
