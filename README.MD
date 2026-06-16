@@ -164,9 +164,9 @@ Refer to your AI application's documentation for client-specific setup instructi
 
 Once connected, you can ask your AI to search, organize, summarize, and edit your notes directly through Brain3.
 
-## Advanced Configuration Options
-
 To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
+
+## Advanced Configuration Options
 
 <details>
 <summary><img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain (recommended)</summary>
@@ -308,12 +308,7 @@ Once connected, your AI app has access to these vault tools:
 
 ## Developers / Contributors
 
-<details>
-<summary><strong>Install Prerequisites</strong></summary>
-
-Refer to the [Quick Start](#quick-start) prerequisites above.
-
-</details>
+See the [Quick Start](#quick-start) prerequisites above before continuing.
 
 <details>
 <summary><strong>Clone and build from source</strong></summary>
