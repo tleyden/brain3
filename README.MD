@@ -25,15 +25,14 @@ Brain3 is designed to support open standards and is compatible with **any AI ass
 
 Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Server (VPS) if you have one.  It runs in the command line as a Terminal UI (TUI).  
 
-## Features
+**Use Cases**
 
-- 🔐 Your markdown vault data stays 100% local and private
-- Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
-- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) that is updated regularly for new releases. 
-- 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
-- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian and LLMWiki compatible (but neither are required)
-- <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
-- 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
+Pretty much anything you'd typically use a second brain for:
+
+1. Tracking ideas, notes, and research
+2. Comparing new ideas with existing notes
+3. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
+4. Anything related to organizing, planning, decision-making and general knowledge management
 
 ## Screenshots - using brain3 from Claude Mobile
 
@@ -49,6 +48,17 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 <a href="docs/screenshots/tui_screenshot.png">
   <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
 </a>
+
+## Features
+
+- 🔐 Your markdown vault data stays 100% local and private
+- Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
+- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) that is updated regularly for new releases. 
+- 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
+- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian and LLMWiki compatible (but neither are required)
+- <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
+- 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
+
 
 ## Requirements
 
