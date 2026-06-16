@@ -198,7 +198,7 @@ brain3.yourdomain.com {
 <details>
 <summary>🔒 View Privacy & Security Details</summary>
 
-- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) available, which will be done regularly on releases.  The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
+- 🛡️ Includes an [AI security audit](SECURITY_AUDIT.md) available, which will be done regularly on releases.  The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
 - 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
 - <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem isolation plus internal-only networking by default; no other host directories are mounted unless you enable dev mode
 - <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS; `cloudflared` creates outbound-only connections so Brain3 does not need a publicly routable IP
