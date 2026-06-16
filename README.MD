@@ -7,9 +7,9 @@ Brain3 lets you interact with your local markdown vault (aka "second brain") thr
 
 I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, in particular via voice dictation. 
 
-Putting an AI assistant in front of a second brain brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas. 
+Putting an AI assistant in front of a second brain brings it to a whole new level of convenience and user experience (UX). As you discover new ideas with your AI assistant, you can **quickly save those ideas to your markdown vault without switching contexts.** You can also easily pull in any context stored in your second brain directly into your current chat, creating a persistent fetch-develop-store loop for your ideas.  
 
-Think of it like a **high-capacity memory system that you fully control** and can use with any AI assistant.
+Think of it like a **high-capacity memory system that you fully control** and can use with any AI assistant.  It's not quite [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f), but the plan is to take it that direction.  
 
 Brain3 is designed to support open standards and is compatible with **any AI assistant that supports the MCP standard** for third-party connectors, such as:
 
@@ -23,9 +23,9 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 
 - 🔐 Your markdown vault data stays 100% local and private
 - Uses <img height="16" src="docs/logos/docker.svg" alt="Docker"> [Docker](https://www.docker.com) and <img height="16" src="docs/logos/apple.svg" alt="Apple"> [Native macOS container technology](https://github.com/apple/container) to reduce the attack surface
-- 🛡️ Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) that is updated regularly for new releases. 
+- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) that is updated regularly for new releases. 
 - 🎙️ Compatible with native voice dictation features in Claude and ChatGPT.
-- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian-compatible (but Obsidian not required)
+- <img height="16" src="docs/logos/obsidian.svg" alt="Obsidian"> Obsidian and LLMWiki compatible (but neither are required)
 - <img height="16" src="docs/logos/iterm2.svg" alt="iTerm2"> Runs in the command line as a Terminal UI (TUI), tested on macOS and Linux
 - 🚯 **Not AI Slop** - I'm using coding agents, but I'm following the [bettervibe best practices](https://bettervibe.org/guide/) (of which I'm a co-author) to ensure that the quality bar stays high.
 
@@ -54,7 +54,7 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 <details>
 <summary>🔒 Privacy & Security Details</summary>
 
-- 🛡️ Includes an [AI security audit](docs/security_audit_claude_sonnet_4_6.md) available, which will be done regularly on releases.
+- 🛡️ Includes an [AI security audit](docs/SECURITY_AUDIT_LATEST.md) available, which will be done regularly on releases.  The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
 - 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
 - <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem isolation plus internal-only networking by default; no other host directories are mounted unless you enable dev mode
 - <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS; `cloudflared` creates outbound-only connections so Brain3 does not need a publicly routable IP
@@ -84,10 +84,12 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 
 ## Quick Start
 
-### <img height="16" src="docs/logos/apple.svg" alt="macOS"> macOS Prerequisites
+### <img height="16" src="docs/logos/apple.svg" alt="macOS"> Install macOS Prerequisites
 
-- Container runtime: `brew install container && brew services start container` ([you can also use Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/))
+- Container runtime: `brew install container && brew services start container`
 - Cloudflare Tunnel: `brew install cloudflared`
+
+macOS container recommended, but you can also use [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
 
 ### <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux Prerequisites
 
@@ -381,9 +383,8 @@ The runtime status screen now reports whether the container is actually `Ready` 
 
 ## Roadmap
 
-* Create a documentation website
 * Improve search accuracy
-* Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search
+* Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
 
