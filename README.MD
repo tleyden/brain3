@@ -27,12 +27,13 @@ Brain3 itself runs locally on your laptop, or on your cloud Virtual Private Serv
 
 **Use Cases**
 
-Pretty much anything you'd typically use a second brain for:
+Use Brain3 for anything you'd typically use a second brain for:
 
-1. Tracking ideas, notes, and research
-2. Comparing new ideas with existing notes
-3. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
-4. Anything related to organizing, planning, decision-making and general knowledge management
+1. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
+2. Capture your research efforts when trying to understand a problem, or come up with a novel design
+3. Comparing new ideas with existing notes
+4. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
+5. Anything related to organizing, planning, decision-making and general knowledge management
 
 ## Screenshots - using brain3 from Claude Mobile
 
