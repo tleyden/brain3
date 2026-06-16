@@ -107,8 +107,6 @@ and it should launch an interactive setup wizard.
 
 ### Configure your AI 
 
-You need to configure your favorite AI to add a connector to Brain3.  So far it's been tested with both ChatGPT and Claude, on web, desktop and mobile.
-
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
 Brain3 displays all the connection information you need.  Follow the instructions below for your AI client.
@@ -162,11 +160,11 @@ Refer to your AI application's documentation for client-specific setup instructi
 
 </details>
 
-Once connected, you can ask your AI to search, organize, summarize, and edit your notes directly through Brain3.
-
-To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
+Now you're ready to access your markdown vault through your AI.
 
 ## Advanced Configuration Options
+
+To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
 
 <details>
 <summary><img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain (recommended)</summary>
