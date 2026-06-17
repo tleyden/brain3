@@ -160,7 +160,7 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 <details>
 <summary>OpenClaw/Hermes Pros and Cons</summary>
 
-| Pros | Cons |
+| ✅ Pros | 🔴 Cons |
 |------|------|
 | Maximum flexibility | Anthropic does not allow subscription use with OpenClaw |
 | Can access local resources | Direct AI API Key use can get extremely costly |
@@ -177,7 +177,7 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 <details>
 <summary>Brain3 Pros and Cons</summary>
 
-| Pros | Cons |
+| ✅ Pros | 🔴 Cons |
 |------|------|
 | Will *always work* with AI provider subscription based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
 | AI native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
