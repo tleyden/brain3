@@ -9,7 +9,7 @@
 
 I built this to access my Obsidian vault from the Claude mobile app, primarily via voice dictation.
 
-Think of it as a **high-capacity memory system you fully control**: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
+With your AI having read/write access to your local markdown vault, you can save ideas mid-conversation and pull them back in later, without switching apps.
 
 <div align="center">
 
@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 ## Security and Privacy 
 
-⚠️ From a security perspective, this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review either. See [Privacy & Security Details](#privacy--security) below.
+⚠️ From a security perspective, this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review. See [Privacy & Security Details](#privacy--security) below.
 
 ## Quick Start
 
@@ -259,7 +259,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 ### Security Audit and Known Security Risks
 
 - Known potential security risks are listed in the [Known Security Risks](#known-security-risks) section below.
-- I used Claude to generate a [security audit](SECURITY_AUDIT.md) and have already fixed a few high severity security issues, some of which it had called out. I'm hoping to get some human reviewers to look at it on top of this.
+- There is a preliminary AI-based [security audit](SECURITY_AUDIT.md) available. If you are a security engineer and willing to volunteer some time, please reach out.
 
 ### Data Security
 
