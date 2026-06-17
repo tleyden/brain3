@@ -20,15 +20,12 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 </div>
 
 <details>
-<summary><strong>Common Use Cases</strong></summary>
+<summary><strong>Use Cases</strong></summary>
 
-Use Brain3 to interact with your local notes through any AI assistant:
-
-1. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
-2. Capture your research efforts when trying to understand a problem, or come up with a novel design
-3. Comparing new ideas with existing notes
-4. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
-5. Anything related to organizing, planning, decision-making and general knowledge management
+1. Capture research and design thinking as you work through a problem
+2. Compare new ideas against existing notes
+3. Planning at any scale -- daily todos up to quarterly goals, such as Cal Newport's [Multi-Scale Planning system](https://www.youtube.com/watch?v=3FipKTzkTD4)
+4. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
 
 </details>
 
@@ -38,7 +35,9 @@ Use Brain3 to interact with your local notes through any AI assistant:
   <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
 </a>
 
+## Security and Privacy 
 
+⚠️ From a security perspective this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review either. See [Privacy & Security Details](#privacy--security) below.
 
 ## Quick Start
 
@@ -198,37 +197,62 @@ brain3.yourdomain.com {
 <details>
 <summary>🔒 View Privacy & Security Details</summary>
 
-- 🛡️ Includes an [AI security audit](SECURITY_AUDIT.md) available, which will be done regularly on releases.  The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
-- 🔒 Data isolation - the AI sees only the parts of your vault exposed through your prompts; your vault is never uploaded to any Brain3-managed cloud service
-- <img height="16" src="docs/logos/docker.svg" alt="Docker"> <img height="16" src="docs/logos/apple.svg" alt="Apple"> Container-based filesystem isolation plus internal-only networking by default; no other host directories are mounted unless you enable dev mode
-- <img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Secure Cloudflare tunnels with TLS; `cloudflared` creates outbound-only connections so Brain3 does not need a publicly routable IP
-- <img height="16" src="docs/logos/oauth.svg" alt="OAuth"> OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens — no open registration (DCR/CIMD disabled)
-- 🦀 Host process written in Rust to minimize attack surface and reduce several classes of vulnerabilities
-- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the battle-tested FastMCP server framework
-- You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
-
 ### Remote MCP & Cloudflare Tunnels
 
-Brain3 is a **remote MCP server that runs on your own machine**. Your vault never leaves your hardware -- but the connection from your AI assistant to Brain3 is remote, because that's the only connection model Claude and ChatGPT currently support for third-party MCP connectors.  (at least AFAIK, file an issue if you know otherwise)
+Brain3 is a **remote MCP server that runs on your own machine**. 
 
-That somewhat annoying constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable endpoint, and OAuth2.1/PKCE is what Claude and ChatGPT require before they'll connect to any remote MCP server. 
+Major AI apps like Claude and ChatGPT currently require remote MCP connectors to be publicly accessible on the internet via TLS + OAuth2.1/PKCE in order to be configured via their UI and accessible across all of their supported apps (web, mobile, desktop).
+
+While there are ways to use purely local MCP, Brain3 is designed to be used as a remote MCP so that it can be easily accessible from AI.  This unfortunately makes the system quite complex and risky when trying to run it locally, but I don't know of any other way to do it.  Please file an issue if you know otherwise.    
+
+That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable TLS endpoint, and OAuth2.1/PKCE is used for auth, with a locally configured username and password.  
 
 - ⚠️ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
 - Tunnels are cleaned up automatically when Brain3 stops.
 
-### Authentication & Authorization
+### Security Audit and Known Security Risks
 
+- Known potential security risks are listed in the [Known Security Risks](#known-security-risks) section below.
+- I used Claude to generate a [security audit](SECURITY_AUDIT.md) and have already fixed a few high severity security issues, some of which it had called out. I'm hoping to get some human reviewers to look at it on top of this.
+
+### Data Security
+
+- Container isolation ensures that the **MCP server only sees the directory that you specify** in the config. The container bind-mount is the enforced path boundary — the MCP server cannot read files outside your vault directory, even if instructed to (e.g. a prompt asking it to read `../../../etc/passwd` will fail at the filesystem level).
+- Your **vault is never uploaded** to any cloud service.
+
+### Network layer security + Auth
+
+- The container uses **internal-only networking by default** and cannot make outbound connections to the public internet.  
+- Your machine doesn't need a "hole poked in the firewall" since it uses **outbound-only Cloudflare tunnel connections**.  However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security. 
+- It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is **no open registration** as both Dynamic Client Registration (DCR) and Client ID Meta Documents (CIMD) are disabled.
 - Client secret is required at token exchange (`client_secret_post`).
 - Auth codes are single-use and expire after 5 minutes.
+- Every login issues a **fresh 256-bit access token** (1-hour lifetime by default), stored in a local SQLite database.
+- **Refresh token rotation** — the refresh token is replaced on every use; the old token is immediately revoked.
+- **Per-IP rate limiting** on credential endpoints: `POST /oauth/authorize` and `POST /oauth/token` are capped at 20 attempts per 15 minutes per IP. Cloudflare's `CF-Connecting-IP` header is used for accurate IP identification behind the tunnel.
+- Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.
+- **Host validation rejects unexpected hostnames** (HTTP 421) when a public hostname is configured. NOTE: this only works with Cloudflare tunnels associated with a DNS record, which is the recommended configuration.
+- Constant-time comparison for secret and token value checks (secret *length* is not hidden — see [security audit](SECURITY_AUDIT.md) M-4).
 
-### Request Integrity
+### Miscellaneous
 
-- Bearer-token validation on all `/mcp` routes.
-- Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured.
-- Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
-- Constant-time comparison for all secret and token checks.
+- 🦀 The host process is written in Rust which avoids several classes of vulnerabilities, like buffer overflow attacks.
+- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the well-known FastMCP server framework. 
+- You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
+- The full source code for both the Brain3 gateway and the MCP server is available on GitHub in this repo.
 
 </details>
+
+### Known Security Risks
+
+- **Prompt injection** — not mitigated by Brain3; the MCP server has no egress and runs in an isolated container network, but be careful what directory you point it at or what is in your vault.
+- **Tampered release binaries** — release assets on S3/GitHub are not yet signed or checksummed, so a compromised distribution path could serve a modified binary.
+- **Container port exposure (macOS)** — it is not yet confirmed whether the mapped container port is accessible only to the gateway or to any local process, which could allow OAuth bypass.
+- **Weak generated passwords** — setup-generated passwords contain no symbols or uppercase letters.
+- **No process sandboxing** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
+- **Hand-rolled OAuth 2.1** — Brain3 implements OAuth 2.1 itself rather than using a battle-tested library; Rust memory safety does not prevent protocol-level logic bugs. See `docs/SECURITY_AUDIT_LATEST.md` §6.4.
+- **Plaintext secret storage** — all secrets (password, client secret, upstream shared secret) are stored in plaintext in `~/.brain3/.env` (file permissions are `0600`, but no encryption at rest).
+- **No hostname validation in default (quick tunnel) mode** — hostname validation (HTTP 421 on unexpected `Host` headers) only works with named Cloudflare tunnels tied to a DNS record. The default quick tunnel setup currently disables it entirely. 
 
 
 ## Configuration Reference
@@ -353,7 +377,7 @@ The runtime status screen now reports whether the container is actually `Ready` 
 
 ## Roadmap
 
-* Improve search accuracy
+* Improve search accuracy, right now it's pretty basic.
 * Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
@@ -361,7 +385,7 @@ The runtime status screen now reports whether the container is actually `Ready` 
 
 ## Credits 
 
-* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) was the inspiration and contributed code to the MCP server layer. Brain3's additions: human and AI security reviews, container-based filesystem isolation so the MCP process never has direct host access, and a Rust host process to reduce attack surface.  I contributed a few [issues](https://github.com/jimprosser/obsidian-web-mcp/issues/29) and [PRs](https://github.com/jimprosser/obsidian-web-mcp/pull/25) to the project.
+* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) was the inspiration and contributed code to the MCP server layer. Brain3 mainly adds container-based isolation.
 
 
 ## License 
