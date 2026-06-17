@@ -11,7 +11,7 @@ Give your AI access to a local markdown vault. Save an idea mid-conversation and
 
 The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
 
-One caveat up front: MCP connectors connect to a remote server, so Brain3 exposes a local endpoint over a Cloudflare tunnel. Your files stay local, but the service is reachable from the internet while it's running. See [Privacy & Security Details](#privacy--security) before running this on sensitive data. 
+One caveat up front: MCP connectors connect to a remote server, so Brain3 exposes a local endpoint over a Cloudflare tunnel. Your files stay local, but the service is reachable from the internet while it's running. See [Privacy & Security](#privacy--security) before running this on sensitive data. 
 
 <div align="center">
 
@@ -144,7 +144,7 @@ Now you're ready to access your markdown vault through your AI.
 
 ## Roadmap
 
-* Improve search accuracy, right now it's pretty basic.
+* Improve search accuracy — currently full-text keyword search with no fuzzy or semantic matching, so exact terms work best.
 * Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
@@ -164,11 +164,10 @@ Routes your AI through a messaging app to reach local resources, often requiring
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Maximum flexibility | Anthropic does not allow subscription use with OpenClaw, and direct AI API key use can get extremely costly |
-| Can access local resources | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
-| Vibrant plugin system | Most messaging apps don't support token streaming, so you need to wait for the full response |
-| No direct internet access to laptop — only indirect access via chat apps like WhatsApp | If you start conversations in a native AI app, you have to then switch to your messaging app to chat with your agent |
-| Local memories, with self-improving learning loops | |
+| Can access local resources | Anthropic does not allow subscription use with OpenClaw, and direct AI API key use can get extremely costly |
+| Plugin system | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
+| No direct internet access to laptop — only indirect access via chat apps like WhatsApp | Most messaging apps don't support token streaming, so you need to wait for the full response |
+| Local memories, with the agent able to update its own notes over time | If you start conversations in a native AI app, you have to then switch to your messaging app to chat with your agent |
 
 </details>
 
@@ -183,12 +182,12 @@ Connects your vault directly to your AI via MCP, works with your existing Claude
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Will *always work* with AI provider subscription-based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
+| Works with subscription billing, not just API keys | Requires publicly accessible network endpoint via Cloudflare tunnel |
 | AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
 | Will immediately work when real-time voice conversation is enabled for MCP | For certain tasks, an additional local agent might be required, increasing latency further |
 | | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
 | No need to leave the app context you're already in | |
-| Fully portable across any AI that supports MCP standard | |
+| Portable across any AI that supports the MCP standard | |
 
 </details>
 
