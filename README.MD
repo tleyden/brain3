@@ -149,11 +149,11 @@ Now you're ready to access your markdown vault through your AI.
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
 
-## Comparison with other agent frameworks 
+## Comparing with other agent frameworks 
 
 While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](https://github.com/nousresearch/hermes-agent) also make it easy to chat with your markdown vault, there is a fundamental difference in architecture and cost model.
 
-**OpenClaw and Hermes Agent Architecture**
+**OpenClaw and Hermes Agent**
 
 <img width="600" alt="OpenClaw and Hermes Agent Architecture" src="docs/screenshots/hermes_openclaw_architecture.png" />
 
@@ -170,7 +170,7 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 
 </details>
 
-**Brain3 Architecture**
+**Brain3**
 
 <img width="600" alt="Brain3 Architecture" src="docs/screenshots/brain3_simplified_architecture.png" />
 
@@ -182,7 +182,8 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 | Will *always work* with AI provider subscription-based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
 | AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
 | Will immediately work when real-time voice conversation is enabled for MCP | For certain tasks, an additional local agent might be required, increasing latency further |
-| No need to leave the app context you're already in | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
+| | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
+| No need to leave the app context you're already in | |
 | Fully portable across any AI that supports MCP standard | |
 
 </details>
