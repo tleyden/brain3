@@ -11,10 +11,6 @@
 
 Think of it as a **high-capacity memory system you fully control**: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
 
-**Security and Privacy Notice** 
-
-From a security perspective this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review either. See [Privacy & Security Details](#privacy--security) below.
-
 <div align="center">
 
 https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
@@ -42,7 +38,9 @@ Use Brain3 to interact with your local notes through any AI assistant:
   <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
 </a>
 
+## Security and Privacy 
 
+⚠️ From a security perspective this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review either. See [Privacy & Security Details](#privacy--security) below.
 
 ## Quick Start
 
