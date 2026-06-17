@@ -153,9 +153,12 @@ Now you're ready to access your markdown vault through your AI.
 
 While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](https://github.com/nousresearch/hermes-agent) also make it easy to chat with your markdown vault, there is a fundamental difference in architecture and cost model.
 
-**How OpenClaw and Hermes Agent Work**
+**OpenClaw and Hermes Agent Architecture**
 
-![OpenClaw and Hermes Agent Architecture](docs/screenshots/hermes_openclaw_architecture.png)
+<img width="600" alt="OpenClaw and Hermes Agent Architecture" src="docs/screenshots/hermes_openclaw_architecture.png" />
+
+<details>
+<summary>Pros and Cons</summary>
 
 | Pros | Cons |
 |------|------|
@@ -165,7 +168,25 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 | No direct internet access to laptop — only indirect access via chat apps like WhatsApp | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
 | Local memories, with learning self-improving loops | |
 
+</details>
 
+**Brain3 Architecture**
+
+<img width="600" alt="Brain3 Architecture" src="docs/screenshots/docs/screenshots/brain3_simplified_architecture.png" />
+
+<details>
+<summary>Pros and Cons</summary>
+
+| Pros | Cons |
+|------|------|
+| Will *always work* with AI provider subscription based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
+| AI native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
+| Eventually realtime voice conversation will be supported | For certain tasks, an additional agent might be required running locally on the machine, increasing latency further |
+| Consistent app experience | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
+| No need to leave the context you're already in | |
+| Fully portable and "drop-in ready" to any AI that supports MCP standard, no new connectors required | |
+
+</details>
 
 ## Advanced Configuration Options
 
