@@ -7,9 +7,11 @@
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-I built this to access my Obsidian vault from the Claude mobile app, primarily via voice dictation.
+Give your AI access to a local markdown vault. Save an idea mid-conversation and pull it back later, without switching apps or losing context. Use your AI's built-in voice dictation when you'd rather talk than type.
 
-With your AI having read/write access to your local markdown vault, you can save ideas mid-conversation and pull them back in later, without switching apps.
+The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
+
+One caveat up front: MCP connectors connect to a remote server, so Brain3 exposes a local endpoint over a Cloudflare tunnel. Your files stay local, but the service is reachable from the internet while it's running. See [Privacy & Security](#privacy--security) before running this on sensitive data. 
 
 <div align="center">
 
@@ -35,9 +37,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
   <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
 </a>
 
-## Security and Privacy 
 
-⚠️ From a security perspective, this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review. See [Privacy & Security Details](#privacy--security) below.
 
 ## Quick Start
 
@@ -144,7 +144,7 @@ Now you're ready to access your markdown vault through your AI.
 
 ## Roadmap
 
-* Improve search accuracy, right now it's pretty basic.
+* Improve search accuracy — currently full-text keyword search with no fuzzy or semantic matching, so exact terms work best.
 * Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
@@ -164,11 +164,10 @@ Routes your AI through a messaging app to reach local resources, often requiring
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Maximum flexibility | Anthropic does not allow subscription use with OpenClaw, and direct AI API key use can get extremely costly |
-| Can access local resources | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
-| Vibrant plugin system | Most messaging apps don't support token streaming, so you need to wait for the full response |
-| No direct internet access to laptop — only indirect access via chat apps like WhatsApp | If you start conversations in a native AI app, you have to then switch to your messaging app to chat with your agent |
-| Local memories, with self-improving learning loops | |
+| Can access local resources | Anthropic does not allow subscription use with OpenClaw, and direct AI API key use can get extremely costly |
+| Plugin system | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
+| No direct internet access to laptop — only indirect access via chat apps like WhatsApp | Most messaging apps don't support token streaming, so you need to wait for the full response |
+| Local memories, with the agent able to update its own notes over time | If you start conversations in a native AI app, you have to then switch to your messaging app to chat with your agent |
 
 </details>
 
@@ -183,12 +182,12 @@ Connects your vault directly to your AI via MCP, works with your existing Claude
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Will *always work* with AI provider subscription-based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
+| Works with subscription billing, not just API keys | Requires publicly accessible network endpoint via Cloudflare tunnel |
 | AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
 | Will immediately work when real-time voice conversation is enabled for MCP | For certain tasks, an additional local agent might be required, increasing latency further |
 | | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
 | No need to leave the app context you're already in | |
-| Fully portable across any AI that supports MCP standard | |
+| Portable across any AI that supports the MCP standard | |
 
 </details>
 
