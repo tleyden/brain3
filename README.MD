@@ -213,23 +213,22 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 ### Security Audit and Known Security Risks
 
 - The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
-- I used Claude to generate a [security audit](SECURITY_AUDIT.md) and have already fixed a few high severity security issues, some of which it had called out.  I'm hoping to get human reviewers on top of this, but this seemed like a good starting point. If you know of any 3rd party tools or services that can perform accurate security audits, please file an issue.
+- I used Claude to generate a [security audit](SECURITY_AUDIT.md) and have already fixed a few high severity security issues, some of which it had called out. I'm hoping to get some human reviewers to look at it on top of this.
 
 ### Data Security
 
-- Container isolation ensures that the MCP server only sees the directory that you specify in the config.
-- Your vault is never uploaded to any cloud service.  
+- Container isolation ensures that the **MCP server only sees the directory that you specify** in the config.
+- Your **vault is never uploaded** to any cloud service.    
 
 ### Network layer security + Auth
 
-- The container uses internal-only networking by default and cannot make outbound connections to the public internet.  
-- Your machine doesn't need a "hole poked in the firewall" since it uses outbound-only Cloudflare tunnel connections.  However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security. 
-- It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is no open registration as both Dynamic Client Registrion (DCR) and Client ID Meta Documeents (CIMD) are disabled.
+- The container uses **internal-only networking by default** and cannot make outbound connections to the public internet.  
+- Your machine doesn't need a "hole poked in the firewall" since it uses **outbound-only Cloudflare tunnel connections**.  However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security. 
+- It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is **no open registration** as both Dynamic Client Registrion (DCR) and Client ID Meta Documeents (CIMD) are disabled.
 - Client secret is required at token exchange (`client_secret_post`).
 - Auth codes are single-use and expire after 5 minutes.
-- Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.  The MCP container rejects direct calls that bypass Brain3
-- Host validation rejects unexpected hostnames (HTTP 421) when a public hostname is configured. This only works with Cloudflare tunnels associated with a DNS record, which is the recommended configuration.
-- Upstream shared secret injected by Brain3 so the MCP container rejects direct calls that bypass Brain3.
+- Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.  
+- **Host validation rejects unexpected hostnames** (HTTP 421) when a public hostname is configured. NOTE: this only works with Cloudflare tunnels associated with a DNS record, which is the recommended configuration.
 - Constant-time comparison for all secret and token checks.
 
 ### Miscellaneous
