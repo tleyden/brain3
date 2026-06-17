@@ -186,8 +186,7 @@ Connects your vault directly to your AI via MCP, works with your existing Claude
 | Works with subscription billing, not just API keys | Requires publicly accessible network endpoint via Cloudflare tunnel |
 | AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
 | Will immediately work when real-time voice conversation is enabled for MCP | For certain tasks, an additional local agent might be required, increasing latency further |
-| | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
-| No need to leave the app context you're already in | |
+| No need to leave the app context you're already in | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
 | Portable across any AI that supports the MCP standard | |
 
 </details>
