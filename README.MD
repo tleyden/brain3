@@ -162,12 +162,11 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Maximum flexibility | Anthropic does not allow subscription use with OpenClaw |
-| Can access local resources | Direct AI API key use can get extremely costly |
-| Vibrant plugin system | Uses chat apps that were meant for humans, not agents |
+| Maximum flexibility | Anthropic does not allow subscription use with OpenClaw, and direct AI API key use can get extremely costly |
+| Can access local resources | |
+| Vibrant plugin system | |
 | No direct internet access to laptop — only indirect access via chat apps like WhatsApp | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
-| Local memories, with self-improving learning loops | |
-| | Most messaging apps don't support token streaming, so you need to wait for the full response |
+| Local memories, with self-improving learning loops | Most messaging apps don't support token streaming, so you need to wait for the full response |
 | | If you start conversations in a native AI app, you have to then switch to your messaging app to chat with your agent |
 
 </details>
