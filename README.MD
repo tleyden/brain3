@@ -237,7 +237,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 ### Miscellaneous
 
 - 🦀 The host process is written in Rust which avoids several classes of vulnerabilities, like buffer overflow attacks.
-- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the FastMCP server framework, which is actively being developed and has undergone peer review. 
+- <img height="16" src="docs/logos/fastmcp.svg" alt="FastMCP"> The MCP server running in the container uses the well-known FastMCP server framework. 
 - You retain full control and can stop Brain3, disable the tunnel, or disconnect your AI app whenever you choose
 - The full source code for both the Brain3 gateway and the MCP server is available on GitHub in this repo.
 
