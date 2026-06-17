@@ -7,9 +7,9 @@
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-I built this to access my Obsidian vault from the Claude mobile app, primarily via voice dictation.
+Give your AI access to a local markdown vault. Save an idea mid-conversation and pull it back later, without switching apps or losing context. Use your AI's built-in voice dictation when you'd rather talk than type.
 
-With your AI having read/write access to your local markdown vault, you can save ideas mid-conversation and pull them back in later, without switching apps.
+The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
 
 <div align="center">
 
@@ -35,9 +35,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
   <img width="600" alt="Brain3 admin terminal UI screenshot" src="docs/screenshots/tui_screenshot.png" />
 </a>
 
-## Security and Privacy 
 
-⚠️ From a security perspective, this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review. See [Privacy & Security Details](#privacy--security) below.
 
 ## Quick Start
 
@@ -141,6 +139,10 @@ Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
 </details>
 
 Now you're ready to access your markdown vault through your AI.
+
+## Security and Privacy 
+
+⚠️ Brain3 exposes a local service over a Cloudflare tunnel, which carries real security tradeoffs. The OAuth 2.1 implementation is currently hand-rolled rather than built on a battle-tested library. See [Privacy & Security Details](#privacy--security) before running this on sensitive data. 
 
 ## Roadmap
 
