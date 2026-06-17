@@ -240,6 +240,10 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 
 </details>
 
+### Known Security Risks
+
+- Prompt injection attacks are not generally mitigated by Brain3, other than the fact that the MCP server has zero egress to the public internet and is locked down into an internal container network by default.  Be careful what directory you point it out, or what is in your markdown vault.  
+- 
 
 ## Configuration Reference
 
