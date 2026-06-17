@@ -181,10 +181,9 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 |------|------|
 | Will *always work* with AI provider subscription-based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
 | AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
-| Eventually, real-time voice conversation will be supported | For certain tasks, an additional local agent might be required, increasing latency further |
-| Consistent app experience | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
-| No need to leave the context you're already in | |
-| Fully portable and "drop-in ready" to any AI that supports MCP standard, no new connectors required | |
+| Will immediately work when real-time voice conversation is enabled for MCP | For certain tasks, an additional local agent might be required, increasing latency further |
+| No need to leave the app context you're already in | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
+| Fully portable across any AI that supports MCP standard | |
 
 </details>
 
