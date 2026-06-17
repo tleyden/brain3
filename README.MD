@@ -148,6 +148,7 @@ Now you're ready to access your markdown vault through your AI.
 * Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
+* Support alternative tunneling options such as Tailscale and ngrok
 
 ## Comparing overall design vs. OpenClaw & Hermes
 
@@ -239,7 +240,6 @@ brain3.yourdomain.com {
 ```
 
 </details>
-
 
 ## Privacy & Security
 
