@@ -20,15 +20,12 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 </div>
 
 <details>
-<summary><strong>Common Use Cases</strong></summary>
+<summary><strong>Use Cases</strong></summary>
 
-Use Brain3 to interact with your local notes through any AI assistant:
-
-1. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
-2. Capture your research efforts when trying to understand a problem, or come up with a novel design
-3. Comparing new ideas with existing notes
-4. Quarterly, Weekly, and Daily Planning, such as Cal Newport's Multi-Scale Planning system ([youtube link](https://www.youtube.com/watch?v=3FipKTzkTD4))
-5. Anything related to organizing, planning, decision-making and general knowledge management
+1. Capture research and design thinking as you work through a problem
+2. Compare new ideas against existing notes
+3. Planning at any scale -- daily todos up to quarterly goals, such as Cal Newport's [Multi-Scale Planning system](https://www.youtube.com/watch?v=3FipKTzkTD4)
+4. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
 
 </details>
 
