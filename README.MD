@@ -9,7 +9,7 @@
 
 I built this to access my Obsidian vault from the Claude mobile app, primarily via voice dictation.
 
-Think of it as a **high-capacity memory system you fully control**: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
+With your AI having read/write access to your local markdown vault, you can save ideas mid-conversation and pull them back in later, without switching apps.
 
 <div align="center">
 
@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 ## Security and Privacy 
 
-⚠️ From a security perspective, this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review either. See [Privacy & Security Details](#privacy--security) below.
+⚠️ From a security perspective, this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review. See [Privacy & Security Details](#privacy--security) below.
 
 ## Quick Start
 
@@ -149,30 +149,34 @@ Now you're ready to access your markdown vault through your AI.
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
 
-## Comparison with other agent frameworks 
+## Comparing overall design vs. OpenClaw & Hermes
 
 While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](https://github.com/nousresearch/hermes-agent) also make it easy to chat with your markdown vault, there is a fundamental difference in architecture and cost model.
 
-**OpenClaw and Hermes Agent Architecture**
+**OpenClaw and Hermes Agent**
 
 <img width="600" alt="OpenClaw and Hermes Agent Architecture" src="docs/screenshots/hermes_openclaw_architecture.png" />
+
+Routes your AI through a messaging app to reach local resources, often requiring direct API key use rather than subscription billing, which can get costly.
 
 <details>
 <summary>OpenClaw/Hermes Pros and Cons</summary>
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Maximum flexibility | Anthropic does not allow subscription use with OpenClaw |
-| Can access local resources | Direct AI API key use can get extremely costly |
-| Vibrant plugin system | Uses chat apps that were meant for humans, not agents |
-| No direct internet access to laptop — only indirect access via chat apps like WhatsApp | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
+| Maximum flexibility | Anthropic does not allow subscription use with OpenClaw, and direct AI API key use can get extremely costly |
+| Can access local resources | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
+| Vibrant plugin system | Most messaging apps don't support token streaming, so you need to wait for the full response |
+| No direct internet access to laptop — only indirect access via chat apps like WhatsApp | If you start conversations in a native AI app, you have to then switch to your messaging app to chat with your agent |
 | Local memories, with self-improving learning loops | |
 
 </details>
 
-**Brain3 Architecture**
+**Brain3**
 
 <img width="600" alt="Brain3 Architecture" src="docs/screenshots/brain3_simplified_architecture.png" />
+
+Connects your vault directly to your AI via MCP, works with your existing Claude or ChatGPT subscription, and you never leave your native AI app.
 
 <details>
 <summary>Brain3 Pros and Cons</summary>
@@ -181,10 +185,10 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 |------|------|
 | Will *always work* with AI provider subscription-based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
 | AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
-| Eventually, real-time voice conversation will be supported | For certain tasks, an additional local agent might be required, increasing latency further |
-| Consistent app experience | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
-| No need to leave the context you're already in | |
-| Fully portable and "drop-in ready" to any AI that supports MCP standard, no new connectors required | |
+| Will immediately work when real-time voice conversation is enabled for MCP | For certain tasks, an additional local agent might be required, increasing latency further |
+| | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
+| No need to leave the app context you're already in | |
+| Fully portable across any AI that supports MCP standard | |
 
 </details>
 
@@ -259,7 +263,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 ### Security Audit and Known Security Risks
 
 - Known potential security risks are listed in the [Known Security Risks](#known-security-risks) section below.
-- I used Claude to generate a [security audit](SECURITY_AUDIT.md) and have already fixed a few high severity security issues, some of which it had called out. I'm hoping to get some human reviewers to look at it on top of this.
+- There is a preliminary AI-based [security audit](SECURITY_AUDIT.md) available. If you are a security engineer and willing to volunteer some time, please reach out.
 
 ### Data Security
 
