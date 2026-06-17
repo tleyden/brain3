@@ -7,7 +7,7 @@
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-**Why This Exists.**  I built this so I could access my Obsidian markdown vault directly from the Claude mobile app, and in particular so I could do so using voice dictation.  
+I built this to access my Obsidian vault from the Claude mobile app, primarily via voice dictation.
 
 Think of it as a **high-capacity memory system you fully control**: save ideas to your vault mid-conversation, pull stored context back in, and keep a persistent loop between your notes and your AI.
 
@@ -37,7 +37,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 ## Security and Privacy 
 
-⚠️ From a security perspective this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review either. See [Privacy & Security Details](#privacy--security) below.
+⚠️ From a security perspective, this is *high risk* as it exposes a local service publicly over an open Cloudflare tunnel. While it is behind OAuth 2.1, it is not using a well-known open-source OAuth library and could potentially be compromised. The codebase has not undergone any formal security review either. See [Privacy & Security Details](#privacy--security) below.
 
 ## Quick Start
 
@@ -48,7 +48,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 - Container runtime: `brew install container && brew services start container`
 - Cloudflare Tunnel: `brew install cloudflared`
 
-macOS container recommended, but you can also use [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
+macOS container is recommended, but you can also use [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
 
 #### <img height="16" src="docs/logos/linux.svg" alt="Linux"> Linux
 
@@ -94,7 +94,7 @@ Now run it:
 brain3
 ```
 
-and it should launch an interactive setup wizard.
+It should launch an interactive setup wizard.
 
 <a href="docs/screenshots/SetupWizardScreenshot.png">
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
@@ -163,10 +163,10 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 | ✅ Pros | 🔴 Cons |
 |------|------|
 | Maximum flexibility | Anthropic does not allow subscription use with OpenClaw |
-| Can access local resources | Direct AI API Key use can get extremely costly |
+| Can access local resources | Direct AI API key use can get extremely costly |
 | Vibrant plugin system | Uses chat apps that were meant for humans, not agents |
 | No direct internet access to laptop — only indirect access via chat apps like WhatsApp | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
-| Local memories, with learning self-improving loops | |
+| Local memories, with self-improving learning loops | |
 
 </details>
 
@@ -179,9 +179,9 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Will *always work* with AI provider subscription based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
-| AI native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
-| Eventually realtime voice conversation will be supported | For certain tasks, an additional agent might be required running locally on the machine, increasing latency further |
+| Will *always work* with AI provider subscription-based billing | Requires publicly accessible network endpoint via Cloudflare tunnel |
+| AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
+| Eventually, real-time voice conversation will be supported | For certain tasks, an additional local agent might be required, increasing latency further |
 | Consistent app experience | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
 | No need to leave the context you're already in | |
 | Fully portable and "drop-in ready" to any AI that supports MCP standard, no new connectors required | |
