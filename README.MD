@@ -11,6 +11,8 @@ Give your AI access to a local markdown vault. Save an idea mid-conversation and
 
 The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
 
+One caveat up front: MCP connectors connect to a remote server, so Brain3 exposes a local endpoint over a Cloudflare tunnel. Your files stay local, but the service is reachable from the internet while it's running. See [Privacy & Security Details](#privacy--security) before running this on sensitive data. 
+
 <div align="center">
 
 https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
@@ -139,10 +141,6 @@ Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
 </details>
 
 Now you're ready to access your markdown vault through your AI.
-
-## Security and Privacy 
-
-⚠️ Brain3 exposes a local service over a Cloudflare tunnel, which carries real security tradeoffs. The OAuth 2.1 implementation is currently hand-rolled rather than built on a battle-tested library. See [Privacy & Security Details](#privacy--security) before running this on sensitive data. 
 
 ## Roadmap
 
