@@ -158,7 +158,7 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 <img width="600" alt="OpenClaw and Hermes Agent Architecture" src="docs/screenshots/hermes_openclaw_architecture.png" />
 
 <details>
-<summary>Pros and Cons</summary>
+<summary>OpenClaw/Hermes Pros and Cons</summary>
 
 | Pros | Cons |
 |------|------|
@@ -172,10 +172,10 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 
 **Brain3 Architecture**
 
-<img width="600" alt="Brain3 Architecture" src="docs/screenshots/docs/screenshots/brain3_simplified_architecture.png" />
+<img width="600" alt="Brain3 Architecture" src="docs/screenshots/brain3_simplified_architecture.png" />
 
 <details>
-<summary>Pros and Cons</summary>
+<summary>Brain3 Pros and Cons</summary>
 
 | Pros | Cons |
 |------|------|
