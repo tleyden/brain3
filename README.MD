@@ -142,6 +142,31 @@ Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
 
 Now you're ready to access your markdown vault through your AI.
 
+## Roadmap
+
+* Improve search accuracy, right now it's pretty basic.
+* Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
+* NotebookLM features
+* Desktop menu bar app with full system tray integration + GUI
+
+## Comparison with other agent frameworks 
+
+While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](https://github.com/nousresearch/hermes-agent) also make it easy to chat with your markdown vault, there is a fundamental difference in architecture and cost model.
+
+**How OpenClaw and Hermes Agent Work**
+
+![OpenClaw and Hermes Agent Architecture](docs/screenshots/hermes_openclaw_architecture.png)
+
+| Pros | Cons |
+|------|------|
+| Maximum flexibility | Anthropic does not allow subscription use with OpenClaw |
+| Can access local resources | Direct AI API Key use can get extremely costly |
+| Vibrant plugin system | Uses chat apps that were meant for humans, not agents |
+| No direct internet access to laptop — only indirect access via chat apps like WhatsApp | Inconsistent user interfaces, for example WhatsApp does not have native AI transcription and relies on OS |
+| Local memories, with learning self-improving loops | |
+
+
+
 ## Advanced Configuration Options
 
 To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
@@ -374,13 +399,6 @@ On an already configured install, `--container-tag` overrides the MCP container 
 The runtime status screen now reports whether the container is actually `Ready` or `Failed` after startup verification. If the container exits early, Brain3 shows the failure summary and log path instead of incorrectly reporting a successful start.
 
 </details>
-
-## Roadmap
-
-* Improve search accuracy, right now it's pretty basic.
-* Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
-* NotebookLM features
-* Desktop menu bar app with full system tray integration + GUI
 
 
 ## Credits 
