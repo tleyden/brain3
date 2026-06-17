@@ -224,7 +224,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 
 - The container uses **internal-only networking by default** and cannot make outbound connections to the public internet.  
 - Your machine doesn't need a "hole poked in the firewall" since it uses **outbound-only Cloudflare tunnel connections**.  However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security. 
-- It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is **no open registration** as both Dynamic Client Registrion (DCR) and Client ID Meta Documeents (CIMD) are disabled.
+- It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is **no open registration** as both Dynamic Client Registration (DCR) and Client ID Meta Documents (CIMD) are disabled.
 - Client secret is required at token exchange (`client_secret_post`).
 - Auth codes are single-use and expire after 5 minutes.
 - Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.  
@@ -242,8 +242,13 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 
 ### Known Security Risks
 
-- Prompt injection attacks are not generally mitigated by Brain3, other than the fact that the MCP server has zero egress to the public internet and is locked down into an internal container network by default.  Be careful what directory you point it out, or what is in your markdown vault.  
-- 
+- **Prompt injection** — not mitigated by Brain3; the MCP server has no egress and runs in an isolated container network, but be careful what directory you point it at or what is in your vault.
+- **Tampered release binaries** — release assets on S3/GitHub are not yet signed or checksummed, so a compromised distribution path could serve a modified binary.
+- **Container port exposure (macOS)** — it is not yet confirmed whether the mapped container port is accessible only to the gateway or to any local process, which could allow OAuth bypass.
+- **Weak generated passwords** — setup-generated passwords contain no symbols or uppercase letters.
+- **No process sandboxing** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
+- **Hand-rolled OAuth 2.1** — Brain3 implements OAuth 2.1 itself rather than using a battle-tested library; Rust memory safety does not prevent protocol-level logic bugs. See `docs/SECURITY_AUDIT_LATEST.md` §6.4.
+
 
 ## Configuration Reference
 
