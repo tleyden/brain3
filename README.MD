@@ -149,7 +149,7 @@ Now you're ready to access your markdown vault through your AI.
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
 
-## Comparing with other agent frameworks 
+## Comparing overall design vs. OpenClaw & Hermes
 
 While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](https://github.com/nousresearch/hermes-agent) also make it easy to chat with your markdown vault, there is a fundamental difference in architecture and cost model.
 
