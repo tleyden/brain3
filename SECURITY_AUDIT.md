@@ -5,7 +5,7 @@
 **Scope:** Full codebase — OAuth2 gateway, Cloudflare tunnel, local network / container exposure, default credentials, host process trust boundaries  
 **Codebase version:** 0.1.7
 
-> **See also:** [Potential Security Risks](docs/POTENTIAL_SECURITY_RISKS.md) — tracked items deferred from this audit and items under investigation.
+> **See also:** [Known Security Risks](README.MD#known-security-risks) — tracked items deferred from this audit and items under investigation.
 
 ---
 
@@ -439,7 +439,7 @@ fn generate_password(&self, length: usize) -> Result<String, SetupError> {
 }
 ```
 
-`rand::distr::Alphanumeric` draws from a 62-character set (`[A-Za-z0-9]`). At `DEFAULT_GENERATED_PASSWORD_LENGTH = 24`, the actual entropy (~143 bits) is already far beyond what's brute-forceable, so this is a cosmetic/compliance gap rather than a practical weakness. Tracked in [Potential Security Risks](docs/POTENTIAL_SECURITY_RISKS.md).
+`rand::distr::Alphanumeric` draws from a 62-character set (`[A-Za-z0-9]`). At `DEFAULT_GENERATED_PASSWORD_LENGTH = 24`, the actual entropy (~143 bits) is already far beyond what's brute-forceable, so this is a cosmetic/compliance gap rather than a practical weakness. Tracked in [Known Security Risks](README.MD#known-security-risks).
 
 **Recommendation:** Sample from a combined alphanumeric + symbol distribution, or explicitly mix character classes, if matching common password-policy expectations matters. **Deferred — not fixed in this pass per operator instruction.**
 

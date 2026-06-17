@@ -212,13 +212,13 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 
 ### Security Audit and Known Security Risks
 
-- The known potential security risks are documented in [docs/POTENTIAL_SECURITY_RISKS.md](docs/POTENTIAL_SECURITY_RISKS.md).
+- Known potential security risks are listed in the [Known Security Risks](#known-security-risks) section below.
 - I used Claude to generate a [security audit](SECURITY_AUDIT.md) and have already fixed a few high severity security issues, some of which it had called out. I'm hoping to get some human reviewers to look at it on top of this.
 
 ### Data Security
 
-- Container isolation ensures that the **MCP server only sees the directory that you specify** in the config.
-- Your **vault is never uploaded** to any cloud service.    
+- Container isolation ensures that the **MCP server only sees the directory that you specify** in the config. The container bind-mount is the enforced path boundary — the MCP server cannot read files outside your vault directory, even if instructed to (e.g. a prompt asking it to read `../../../etc/passwd` will fail at the filesystem level).
+- Your **vault is never uploaded** to any cloud service.
 
 ### Network layer security + Auth
 
@@ -227,9 +227,12 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 - It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is **no open registration** as both Dynamic Client Registration (DCR) and Client ID Meta Documents (CIMD) are disabled.
 - Client secret is required at token exchange (`client_secret_post`).
 - Auth codes are single-use and expire after 5 minutes.
-- Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.  
+- Every login issues a **fresh 256-bit access token** (1-hour lifetime by default), stored in a local SQLite database.
+- **Refresh token rotation** — the refresh token is replaced on every use; the old token is immediately revoked.
+- **Per-IP rate limiting** on credential endpoints: `POST /oauth/authorize` and `POST /oauth/token` are capped at 20 attempts per 15 minutes per IP. Cloudflare's `CF-Connecting-IP` header is used for accurate IP identification behind the tunnel.
+- Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.
 - **Host validation rejects unexpected hostnames** (HTTP 421) when a public hostname is configured. NOTE: this only works with Cloudflare tunnels associated with a DNS record, which is the recommended configuration.
-- Constant-time comparison for all secret and token checks.
+- Constant-time comparison for secret and token value checks (secret *length* is not hidden — see [security audit](SECURITY_AUDIT.md) M-4).
 
 ### Miscellaneous
 
@@ -248,6 +251,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 - **Weak generated passwords** — setup-generated passwords contain no symbols or uppercase letters.
 - **No process sandboxing** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
 - **Hand-rolled OAuth 2.1** — Brain3 implements OAuth 2.1 itself rather than using a battle-tested library; Rust memory safety does not prevent protocol-level logic bugs. See `docs/SECURITY_AUDIT_LATEST.md` §6.4.
+- **Plaintext secret storage** — all secrets (password, client secret, upstream shared secret) are stored in plaintext in `~/.brain3/.env` (file permissions are `0600`, but no encryption at rest).
 
 
 ## Configuration Reference
