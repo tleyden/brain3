@@ -2,16 +2,16 @@
 <p align="center">
   <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
   <br/>
-  MCP server for your local markdown vault -- works with Claude, ChatGPT, or any MCP-compatible AI
+  Give your AI access to a local markdown vault. Works with Claude, ChatGPT, or any MCP-compatible AI
   <br/>
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-Give your AI access to a local markdown vault. Save an idea mid-conversation and pull it back later, without switching apps or losing context. Use your AI's built-in voice dictation when you'd rather talk than type.
+Save an idea mid-conversation and pull it back later, without switching apps or losing context. Use your AI's built-in voice dictation when you'd rather talk than type.
 
 The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
 
-One caveat up front: MCP connectors connect to a remote server, so Brain3 exposes a local endpoint over a Cloudflare tunnel. Your files stay local, but the service is reachable from the internet while it's running. See [Privacy & Security](#privacy--security) before running this on sensitive data. 
+One caveat up front: Model Context Protocol (MCP) connectors connect to a remote server, so Brain3 exposes a local endpoint over a Cloudflare tunnel. Your files stay local, but the service is reachable from the internet while it's running. See [Privacy & Security](#privacy--security) before running this on sensitive data. 
 
 <div align="center">
 
@@ -148,6 +148,7 @@ Now you're ready to access your markdown vault through your AI.
 * Add [LLMWiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) features to auto-summarize, organize, and improve search based on [Astro-Han/karpathy-llm-wiki](https://github.com/Astro-Han/karpathy-llm-wiki)
 * NotebookLM features
 * Desktop menu bar app with full system tray integration + GUI
+* Support alternative tunneling options such as Tailscale and ngrok
 
 ## Comparing overall design vs. OpenClaw & Hermes
 
@@ -239,7 +240,6 @@ brain3.yourdomain.com {
 ```
 
 </details>
-
 
 ## Privacy & Security
 
