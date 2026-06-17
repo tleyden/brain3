@@ -157,6 +157,8 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 
 <img width="600" alt="OpenClaw and Hermes Agent Architecture" src="docs/screenshots/hermes_openclaw_architecture.png" />
 
+Routes your AI through a messaging app to reach local resources, requiring direct API key use rather than subscription billing, which can get costly.
+
 <details>
 <summary>OpenClaw/Hermes Pros and Cons</summary>
 
@@ -173,6 +175,8 @@ While both [OpenClaw](https://github.com/openclaw/openclaw) and [Hermes Agent](h
 **Brain3**
 
 <img width="600" alt="Brain3 Architecture" src="docs/screenshots/brain3_simplified_architecture.png" />
+
+Connects your vault directly to your AI via MCP, works with your existing Claude or ChatGPT subscription, and you never leave your native AI app.
 
 <details>
 <summary>Brain3 Pros and Cons</summary>
