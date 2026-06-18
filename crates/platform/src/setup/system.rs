@@ -9,7 +9,7 @@ use brain3_core::domain::setup::{
     SetupOperatingSystem, SetupPaths,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
-use rand::Rng;
+use rand::RngExt;
 use tokio::fs;
 use tokio::process::Command;
 
@@ -148,7 +148,7 @@ impl SetupSystemPort for PlatformSetupSystem {
     }
 
     fn generate_secret_hex(&self, num_bytes: usize) -> Result<String, SetupError> {
-        use rand::RngCore;
+        use rand::Rng;
 
         let mut bytes = vec![0u8; num_bytes];
         rand::rng().fill_bytes(&mut bytes);

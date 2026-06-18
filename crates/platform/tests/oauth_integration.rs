@@ -190,7 +190,7 @@ impl TestHarness {
         };
 
         let router = build_router(state);
-        (TestServer::new(router).unwrap(), token_store)
+        (TestServer::new(router), token_store)
     }
 }
 
