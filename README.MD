@@ -311,6 +311,10 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 - **No hostname validation in default (quick tunnel) mode** — hostname validation (HTTP 421 on unexpected `Host` headers) only works with named Cloudflare tunnels tied to a DNS record. The default quick tunnel setup currently disables it entirely. 
 
 
+### Reporting Security Issues
+
+Found a vulnerability? [Report it privately](https://github.com/tleyden/brain3/security/advisories/new) — open the repo's Security tab and click **Report a vulnerability**. Please hold public disclosure until a patch is available.
+
 ## Configuration Reference
 
 All configuration is via environment variables, loaded from a `.env` file.
