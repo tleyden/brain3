@@ -22,6 +22,6 @@ urlencoding = "2"
 governor = "0.7"
 
 [dev-dependencies]
-axum-test = "17"
+axum-test = "20"
 time = "=0.3.36"
 tokio = { version = "1", features = ["full"] }
