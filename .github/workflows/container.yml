@@ -7,13 +7,14 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
-  packages: write
+permissions: read-all
 
 jobs:
   container:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
