@@ -8,7 +8,7 @@ brain3-core = { path = "../core" }
 async-trait = "0.1"
 libc = "0.2"
 axum = "0.8"
-tower-http = { version = "0.6", features = ["trace"] }
+tower-http = { version = "0.7", features = ["trace"] }
 anyhow = "1"
 dotenvy = "0.15"
 rand = "0.9"
