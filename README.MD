@@ -1,12 +1,16 @@
 
 <p align="center">
-  <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
-  <br/>
-  Give your AI access to a local markdown vault. Works with Claude, ChatGPT, or any MCP-compatible AI
-  <br/>
   <a href="https://deepwiki.com/tleyden/brain3"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   <img src="https://img.shields.io/coderabbit/prs/github/tleyden/brain3?utm_source=oss&utm_medium=github&utm_campaign=tleyden%2Fbrain3&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews" alt="CodeRabbit Pull Request Reviews">
   <a href="https://snyk.io/test/github/tleyden/brain3"><img src="https://snyk.io/test/github/tleyden/brain3/badge.svg" alt="Known Vulnerabilities"></a>
+</p>
+
+<br/>
+
+<p align="center">
+  <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
+  <br/>
+  Give your AI access to a local markdown vault. Works with Claude, ChatGPT, or any MCP-compatible AI
   <br/>
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
