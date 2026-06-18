@@ -4,6 +4,8 @@
   <br/>
   Give your AI access to a local markdown vault. Works with Claude, ChatGPT, or any MCP-compatible AI
   <br/>
+  <a href="https://deepwiki.com/tleyden/brain3"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+  <br/>
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
