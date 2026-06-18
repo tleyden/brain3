@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use rand::Rng;
+use rand::RngExt;
 
 pub fn read_or_create(path: &Path) -> Result<String> {
     let path_str = path
