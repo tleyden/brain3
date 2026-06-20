@@ -1,9 +1,9 @@
 # Brain3 Security Audit
 
 **Auditor:** Claude Sonnet 4.6  
-**Date:** 2026-06-16  
+**Date:** 2026-06-20  
 **Scope:** Full codebase — OAuth2 gateway, Cloudflare tunnel, local network / container exposure, default credentials, host process trust boundaries  
-**Codebase version:** 0.1.7
+**Codebase version:** 0.1.8
 
 > **See also:** [Known Security Risks](README.MD#known-security-risks) — tracked items deferred from this audit and items under investigation.
 
@@ -97,7 +97,6 @@ graph TD
 | L-5 | 🟢 LOW | Tunnel | `cloudflared` binary located via PATH — no integrity check |
 | L-6 | 🟢 LOW | Container | No seccomp/AppArmor profile applied to MCP container |
 | L-7 | 🟢 LOW | Container | No resource limits on MCP container |
-| L-8 | 🟢 LOW | Credentials | Generated passwords lack symbol/uppercase character classes *(deferred)* |
 | L-9 | 🟢 LOW | HTTP | `/health` endpoint unauthenticated and externally reachable |
 | L-10 | 🟢 LOW | Ops | No vulnerability disclosure policy |
 
@@ -277,7 +276,9 @@ pub const DEFAULT_USERNAME: &str = "admin";
 
 The username is not a secret in an OAuth login form, but `"admin"` removes one layer of defense-in-depth: an attacker who reaches the login page needs only to guess the password. With rate limiting now in place, brute-forcing the password is significantly harder, which reduces the practical severity of this issue.
 
-**Recommendation:** Change `DEFAULT_USERNAME` to `"brain3"` or a random value such as `"user-<4-chars>"`. At minimum, document that users should change the username from `admin` after setup.
+**Partial improvement (v0.1.8):** The setup wizard Auth screen now explicitly tells users "Username defaults to 'admin' — edit the field below to use a different login name." A keyboard-input bug that prevented the letter 'g' from being typed in the Username field was also fixed. `DEFAULT_USERNAME` remains `"admin"` in the codebase; the prompt gives users the opportunity to change it rather than enforcing a different default.
+
+**Recommendation:** Change `DEFAULT_USERNAME` to `"brain3"` or a random value such as `"user-<4-chars>"` to remove the predictable default entirely.
 
 ---
 
@@ -429,19 +430,9 @@ The `ContainerConfig` does not set any seccomp profile, AppArmor label, or capab
 
 ---
 
-### L-8 🟢 LOW — Generated Passwords Lack Symbol/Uppercase Character Classes *(deferred)*
+### ~~L-8~~ ✅ RESOLVED — Generated Passwords Now Include Symbols
 
-**File:** `crates/platform/src/setup/system.rs` (L163-172)
-
-```rust
-fn generate_password(&self, length: usize) -> Result<String, SetupError> {
-    rand::rng().sample_iter(rand::distr::Alphanumeric).take(length).collect()
-}
-```
-
-`rand::distr::Alphanumeric` draws from a 62-character set (`[A-Za-z0-9]`). At `DEFAULT_GENERATED_PASSWORD_LENGTH = 24`, the actual entropy (~143 bits) is already far beyond what's brute-forceable, so this is a cosmetic/compliance gap rather than a practical weakness. Tracked in [Known Security Risks](README.MD#known-security-risks).
-
-**Recommendation:** Sample from a combined alphanumeric + symbol distribution, or explicitly mix character classes, if matching common password-policy expectations matters. **Deferred — not fixed in this pass per operator instruction.**
+**Resolved in v0.1.8.** See [Changes From Prior Releases](#changes-from-prior-releases).
 
 ---
 
@@ -480,10 +471,9 @@ There is no vulnerability disclosure policy, contact for security reports, or di
 7. **M-3** Reduce auth code lifetime to 60s — one-constant change.
 8. **L-2** Add CSP/security headers — middleware layer addition.
 9. **L-4** Rate-limit `GET /oauth/authorize` — reuse existing `OAuthRateLimiter`.
-10. **M-9** Change default username from `"admin"` — one-constant change in `setup.rs`.
-11. **L-8** Strengthen generated password character classes — deferred by operator request; revisit later.
-12. **M-12** Scope gateway-process sandboxing — larger investigation (Landlock/sandbox-exec for filesystem restriction); revisit once the rest of this list is clear.
-13. **L-10** Add a root-level `SECURITY.md` — disclosure policy and a pointer to this audit's threat model.
+10. **M-9** Change `DEFAULT_USERNAME` from `"admin"` — the wizard now prompts users to change it, but the constant itself still defaults to `"admin"`.
+11. **M-12** Scope gateway-process sandboxing — larger investigation (Landlock/sandbox-exec for filesystem restriction); revisit once the rest of this list is clear.
+12. **L-10** Add a root-level `SECURITY.md` — disclosure policy and a pointer to this audit's threat model.
 
 M-13 (custom OAuth2.1 implementation risk) has no standalone remediation — it is mitigated incrementally as M-1 through M-4 are addressed.
 
@@ -503,7 +493,7 @@ The following were audited and found to be correctly implemented.
 | Container | MCP container internal-only network (no egress) | `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` defaults to `true` in both setup wizard and config loader as of v0.1.7 |
 | Credentials | No hardcoded default passwords | Setup wizard generates or requires a password; server refuses to start if `B3_PASSWORD` is empty |
 | Credentials | Client secret and tokens generated with 256-bit CSPRNG | `rand::rng()` (ChaCha12 / OS CSPRNG), 32 bytes → 64 hex chars |
-| Credentials | Generated passwords use 143-bit CSPRNG | 24 base-62 alphanumeric characters |
+| Credentials | Generated passwords use CSPRNG with symbols guaranteed | 24 chars from `[A-Za-z0-9!#%^&*-_+=;:,.?~]` (78-char set); at least one symbol guaranteed via structured generation + Fisher-Yates shuffle |
 | Credentials | Upstream shared secret is 380-bit CSPRNG | 64 base-62 alphanumeric characters |
 | Credentials | `.env` written with `0600` permissions | `std::fs::Permissions::from_mode(0o600)` applied after write |
 | Credentials | Refresh token rotation | Old refresh token revoked before new pair issued; prevents replay of captured refresh tokens |
@@ -520,6 +510,16 @@ The following were audited and found to be correctly implemented.
 
 <details>
 <summary>📋 Changes From Prior Releases</summary>
+
+### v0.1.7 → v0.1.8
+
+#### ✅ RESOLVED — Generated Passwords Lacked Symbol Character Class (L-8)
+
+`generate_password` in `crates/platform/src/setup/system.rs` previously used `rand::distr::Alphanumeric`, drawing only from the 62-character set `[A-Za-z0-9]`. As of v0.1.8 it samples from a 78-character set (`[A-Za-z0-9!#%^&*-_+=;:,.?~]`) and guarantees at least one symbol: the first character is drawn from the symbol-only subset, the remaining 23 from the full charset, then all 24 positions are Fisher-Yates shuffled. The symbols chosen (`!#%^&*-_+=;:,.?~`) are safe in double-quoted env values — `quote_env_value` only needs to escape `\` and `"`, neither of which is in the set. The entry has been removed from the Known Security Risks section of the README.
+
+#### 🔧 PARTIAL IMPROVEMENT — Default Username Prompt (M-9)
+
+The setup wizard Auth screen now explicitly tells users: "Username defaults to 'admin' — edit the field below to use a different login name." A keyboard input bug was also fixed: the `'g'` key was being intercepted to toggle password generation even when the cursor was in the Username or Client ID text fields, preventing users from typing the letter 'g' in those fields. Both issues are in `apps/gateway/src/tui/`. `DEFAULT_USERNAME` itself remains `"admin"` in `crates/core/src/domain/setup.rs` — M-9 stays open until that constant is changed.
 
 ### v0.1.6 → v0.1.7
 
