@@ -13,7 +13,7 @@ brain3-platform = { path = "../../crates/platform" }
 anyhow = "1"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.28"
+crossterm = "0.29"
 ratatui = "0.30"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
