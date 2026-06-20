@@ -50,7 +50,7 @@ wheels = [
 
 [[package]]
 name = "brain3-mcp-vault-tools"
-version = "0.1.8"
+version = "0.1.9"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },
