@@ -190,7 +190,9 @@ async fn event_loop(
                 KeyCode::BackTab | KeyCode::Up => {
                     state.previous_auth_focus();
                 }
-                KeyCode::Char('g') => {
+                KeyCode::Char('g')
+                    if !matches!(state.auth_focus, AuthField::Username | AuthField::ClientId) =>
+                {
                     state.generate_password = !state.generate_password;
                     if state.generate_password && state.auth_focus == AuthField::Password {
                         state.auth_focus = AuthField::Username;

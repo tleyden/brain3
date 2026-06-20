@@ -375,9 +375,9 @@ fn auth_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
     vec![
         muted_line(
-            "Client secret is generated automatically. Access and refresh tokens are issued per session.",
+            "Username defaults to 'admin' — edit the field below to use a different login name.",
         ),
-        muted_line("Username, client ID, and password settings stay local to this machine."),
+        muted_line("Client secret is auto-generated. Password is auto-generated with symbols unless you choose a custom one."),
         blank_line(),
         field_line(
             "Username",
