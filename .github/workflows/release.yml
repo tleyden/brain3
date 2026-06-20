@@ -72,7 +72,7 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: build
+    needs: prepare-assets
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -80,17 +80,18 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
+          name: release-assets
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/*.tar.gz
+          files: artifacts/*
           generate_release_notes: true
 
-  publish-s3:
-    name: Publish to S3
+  prepare-assets:
+    name: Prepare Release Assets
     needs: build
     runs-on: ubuntu-latest
+    permissions: read-all
     steps:
       - uses: actions/checkout@v4
 
@@ -98,6 +99,37 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Generate signed release manifest
+        env:
+          BRAIN3_RELEASE_SIGNING_KEY_PEM_B64: ${{ secrets.BRAIN3_RELEASE_SIGNING_KEY_PEM_B64 }}
+        run: |
+          if [ -z "${BRAIN3_RELEASE_SIGNING_KEY_PEM_B64}" ]; then
+            echo "Missing required secret: BRAIN3_RELEASE_SIGNING_KEY_PEM_B64" >&2
+            exit 1
+          fi
+          printf '%s' "${BRAIN3_RELEASE_SIGNING_KEY_PEM_B64}" | base64 --decode > release-signing-key.pem
+          chmod 600 release-signing-key.pem
+          RELEASE_SIGNING_KEY_FILE="$PWD/release-signing-key.pem" \
+            bash scripts/generate-release-manifest.sh artifacts
+          rm -f release-signing-key.pem
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-assets
+          path: artifacts/*
+
+  publish-s3:
+    name: Publish to S3
+    needs: prepare-assets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          name: release-assets
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:

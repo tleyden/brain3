@@ -47,6 +47,19 @@ upload_file() {
     --region "$AWS_REGION"
 }
 
+upload_metadata_if_present() {
+  local src="$1"
+  local name="$2"
+
+  if [ ! -f "$src" ]; then
+    echo "Warning: $src not found, skipping metadata upload." >&2
+    return
+  fi
+
+  upload_file "$src" "releases/$VERSION/$name"
+  upload_file "$src" "releases/latest/$name"
+}
+
 echo "Uploading $BINARY $VERSION to s3://$BUCKET"
 echo ""
 
@@ -63,6 +76,10 @@ for TARGET in "${TARGETS[@]}"; do
   upload_file "$SRC" "releases/$VERSION/$TARBALL"
   upload_file "$SRC" "releases/latest/$TARBALL"
 done
+
+echo "[release metadata]"
+upload_metadata_if_present "$TARBALLS_DIR/SHA256SUMS" "SHA256SUMS"
+upload_metadata_if_present "$TARBALLS_DIR/SHA256SUMS.sig" "SHA256SUMS.sig"
 
 # Also upload the install script itself to latest/ so users can:
 #   curl https://<bucket>.s3.amazonaws.com/releases/latest/install.sh | sh
