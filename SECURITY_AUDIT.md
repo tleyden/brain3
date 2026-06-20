@@ -3,7 +3,7 @@
 **Auditor:** Claude Sonnet 4.6  
 **Date:** 2026-06-20  
 **Scope:** Full codebase — OAuth2 gateway, Cloudflare tunnel, local network / container exposure, default credentials, host process trust boundaries  
-**Codebase version:** 0.1.8
+**Codebase version:** 0.1.9
 
 > **See also:** [Known Security Risks](README.MD#known-security-risks) — tracked items deferred from this audit and items under investigation.
 
