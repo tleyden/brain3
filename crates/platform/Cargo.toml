@@ -19,7 +19,7 @@ sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "time"] }
 tokio = { version = "1", features = ["sync", "process", "fs"] }
 tracing = "0.1"
 urlencoding = "2"
-governor = "0.7"
+governor = "0.10"
 
 [dev-dependencies]
 axum-test = "20"
