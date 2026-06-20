@@ -167,12 +167,25 @@ impl SetupSystemPort for PlatformSetupSystem {
             ));
         }
 
-        let password: String = rand::rng()
-            .sample_iter(rand::distr::Alphanumeric)
-            .take(length)
-            .map(char::from)
+        const SYMBOLS: &[u8] = b"!#%^&*-_+=;:,.?~";
+        const FULL: &[u8] =
+            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#%^&*-_+=;:,.?~";
+
+        let mut rng = rand::rng();
+
+        // Guarantee at least one symbol, fill the rest from the full charset.
+        let mut bytes: Vec<u8> = std::iter::once(SYMBOLS[rng.random_range(0..SYMBOLS.len())])
+            .chain((1..length).map(|_| FULL[rng.random_range(0..FULL.len())]))
             .collect();
-        Ok(password)
+
+        // Fisher-Yates shuffle so the symbol isn't always at position 0.
+        for i in (1..bytes.len()).rev() {
+            let j = rng.random_range(0..=i);
+            bytes.swap(i, j);
+        }
+
+        String::from_utf8(bytes)
+            .map_err(|e| SetupError::Invalid(e.to_string()))
     }
 
     fn render_env_file(
