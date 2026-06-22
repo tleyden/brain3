@@ -291,6 +291,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 - Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.
 - **Host validation rejects unexpected hostnames** (HTTP 421) when a public hostname is configured. NOTE: this only works with Cloudflare tunnels associated with a DNS record, which is the recommended configuration.
 - Constant-time comparison for secret and token value checks (secret *length* is not hidden — see [security audit](SECURITY_AUDIT.md) M-4).
+- `install.sh` verifies downloaded release tarballs against a signed checksum manifest before extraction.
 
 ### Miscellaneous
 
@@ -304,8 +305,8 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 ### Known Security Risks
 
 - **Prompt injection** — not mitigated by Brain3; the MCP server has no egress and runs in an isolated container network, but be careful what directory you point it at or what is in your vault.
-- **Installer trust still depends on the distribution path** — `install.sh` now verifies a signed checksum manifest before extracting a release tarball, but the default `releases/latest/install.sh` bootstrap is still fetched from the distribution path itself. A version-pinned installer URL would be stronger.
-- **Container port exposure (macOS)** — it is not yet confirmed whether the mapped container port is accessible only to the gateway or to any local process, which could allow OAuth bypass.
+
+- **Container port exposure (macOS)** — it is not yet confirmed whether the mapped container port is accessible only to the gateway or to any local process, which could allow OAuth bypass from locally running malware that could discover the shared secret on the host filesystem.
 - **No sandboxing for host gateway process** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
 - **Plaintext secret storage** — all secrets (password, client secret, upstream shared secret) are stored in plaintext in `~/.brain3/.env` (file permissions are `0600`, but no encryption at rest).
 - **No hostname validation in default (quick tunnel) mode** — hostname validation (HTTP 421 on unexpected `Host` headers) only works with named Cloudflare tunnels tied to a DNS record. The default quick tunnel setup currently disables it entirely. 

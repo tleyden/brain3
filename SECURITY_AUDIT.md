@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-As of v0.1.7, Brain3 has no HIGH-severity open findings. The prior HIGH finding (MCP container unrestricted outbound internet access) was resolved in this version. All remaining open issues are MEDIUM or LOW. The most impactful open findings are host header injection in `resolve_base_url` (M-1), `redirect_uri` not allowlisted (M-2), upstream secret stored in a predictable `/tmp` path (M-8), and the install script lacking checksum verification (M-11). The gateway process remains unsandboxed (M-12) — a known architectural trade-off documented here but not targeted for this pass.
+As of v0.1.7, Brain3 has no HIGH-severity open findings. The prior HIGH finding (MCP container unrestricted outbound internet access) was resolved in this version. All remaining open issues are MEDIUM or LOW. The most impactful open findings are host header injection in `resolve_base_url` (M-1), `redirect_uri` not allowlisted (M-2), upstream secret stored in a predictable `/tmp` path (M-8), and the unsandboxed gateway process (M-12). 
 
 ---
 
@@ -87,7 +87,6 @@ graph TD
 | M-8 | 🟡 MEDIUM | Container | Upstream secret stored in `/tmp` with predictable name |
 | M-9 | 🟡 MEDIUM | Credentials | Default username is predictable (`"admin"`) |
 | M-10 | 🟡 MEDIUM | Credentials | 7-character secret prefix logged in tracing output |
-| M-11 | 🟡 MEDIUM | Install | Binary installed without checksum verification |
 | M-12 | 🟡 MEDIUM | Architecture | Gateway process is unsandboxed — full host access if compromised |
 | M-13 | 🟡 MEDIUM | Architecture | Brain3 still owns key OAuth policy and integration code around `oxide-auth` |
 | L-1 | 🟢 LOW | OAuth2 | No background cleanup of expired auth codes |
@@ -304,23 +303,11 @@ The first 7 characters of the upstream shared secret are written to the tracing 
 
 ---
 
-### M-11 🟡 MEDIUM — Install Script Fetches Binary Without Checksum Verification
+### ~~M-11~~ ✅ RESOLVED — Install Script Verifies Signed Checksum Manifest Before Extraction
 
 **File:** `scripts/install.sh`
 
-```sh
-curl -sSfL "$URL" -o "$TMPDIR/$TARBALL"
-tar -xzf "$TMPDIR/$TARBALL" -C "$TMPDIR"
-chmod +x "$TMPDIR/$BINARY"
-mv "$TMPDIR/$BINARY" "$BIN_DIR/$BINARY"
-```
-
-The install script downloads and executes a binary from S3 without verifying a SHA256 checksum or signature. A compromised S3 bucket, DNS hijack, or CDN cache poisoning could deliver a malicious binary. The `S3_BASE_URL` override env var further widens the surface.
-
-**Recommendation:**
-- Publish a `SHA256SUMS` file alongside release tarballs and verify with `sha256sum -c` in the script.
-- Consider Sigstore/cosign signing for release artifacts.
-- Emit a warning if `S3_BASE_URL` is overridden from the default.
+**Resolved in the current codebase.** `install.sh` now downloads the release tarball together with `SHA256SUMS` and `SHA256SUMS.sig`, verifies the signed manifest with the embedded public key via `openssl dgst -verify`, then checks the tarball's SHA256 before extracting or installing the binary.
 
 ---
 
@@ -477,14 +464,13 @@ There is no vulnerability disclosure policy, contact for security reports, or di
 2. **M-2** Allowlist `redirect_uri` — blocks open redirects and code interception; straightforward config addition.
 3. **M-8** Move upstream secret out of `/tmp` — easy default path change plus symlink guard.
 4. **M-10** Replace partial secret logging with `elide_secret` — one-line fix per log call.
-5. **M-11** Add checksum verification to install script — supply chain hygiene.
-6. **M-6** Verify Cloudflare credentials file permissions — startup check, low effort.
-7. **M-3** Reduce auth code lifetime to 60s — one-constant change.
-8. **L-2** Add CSP/security headers — middleware layer addition.
-9. **L-4** Rate-limit `GET /oauth/authorize` — reuse existing `OAuthRateLimiter`.
-10. **M-9** Change `DEFAULT_USERNAME` from `"admin"` — the wizard now prompts users to change it, but the constant itself still defaults to `"admin"`.
-11. **M-12** Scope gateway-process sandboxing — larger investigation (Landlock/sandbox-exec for filesystem restriction); revisit once the rest of this list is clear.
-12. **L-10** Add a root-level `SECURITY.md` — disclosure policy and a pointer to this audit's threat model.
+5. **M-6** Verify Cloudflare credentials file permissions — startup check, low effort.
+6. **M-3** Reduce auth code lifetime to 60s — one-constant change.
+7. **L-2** Add CSP/security headers — middleware layer addition.
+8. **L-4** Rate-limit `GET /oauth/authorize` — reuse existing `OAuthRateLimiter`.
+9. **M-9** Change `DEFAULT_USERNAME` from `"admin"` — the wizard now prompts users to change it, but the constant itself still defaults to `"admin"`.
+10. **M-12** Scope gateway-process sandboxing — larger investigation (Landlock/sandbox-exec for filesystem restriction); revisit once the rest of this list is clear.
+11. **L-10** Add a root-level `SECURITY.md` — disclosure policy and a pointer to this audit's threat model.
 
 M-13 (Brain3-owned OAuth policy/integration surface) has no standalone remediation beyond keeping that layer small and fixing the concrete findings M-1 through M-4.
 
