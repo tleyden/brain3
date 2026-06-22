@@ -6,7 +6,6 @@ use anyhow::{Context, Result};
 use axum::Router;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
-use oxide_auth::primitives::issuer::TokenMap;
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
@@ -23,7 +22,7 @@ use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
-use brain3_platform::token_store::token_map::TokenMapStore;
+use brain3_platform::token_store::sqlite::{SharedSqliteTokenStore, SqliteTokenStore};
 
 use crate::{apply_runtime_overrides, RuntimeOverrides};
 
@@ -207,10 +206,14 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
     ));
 
     let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
-    let issuer = Arc::new(Mutex::new(TokenMap::new(RandomGenerator::new(32))));
+    let issuer = Arc::new(Mutex::new(
+        SqliteTokenStore::from_path(&config.token_db_path)
+            .context("failed to initialize sqlite OAuth issuer")?,
+    ));
 
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
-    let token_store: Arc<dyn TokenStore> = Arc::new(TokenMapStore::new(Arc::clone(&issuer)));
+    let token_store: Arc<dyn TokenStore> =
+        Arc::new(SharedSqliteTokenStore::new(Arc::clone(&issuer)));
 
     let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
         mcp_proxy,

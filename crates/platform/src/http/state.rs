@@ -2,12 +2,12 @@ use std::sync::Arc;
 
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
-use oxide_auth::primitives::issuer::TokenMap;
 use tokio::sync::Mutex;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::model::GatewayConfig;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
+use crate::token_store::sqlite::SqliteTokenStore;
 
 use super::rate_limit::OAuthRateLimiter;
 use super::registrar::GatewayRegistrar;
@@ -15,7 +15,7 @@ use super::registrar::GatewayRegistrar;
 pub struct AppState<P: McpProxyPort> {
     pub registrar: Arc<GatewayRegistrar>,
     pub authorizer: Arc<Mutex<AuthMap<RandomGenerator>>>,
-    pub issuer: Arc<Mutex<TokenMap<RandomGenerator>>>,
+    pub issuer: Arc<Mutex<SqliteTokenStore>>,
     pub proxy_mcp: Arc<ProxyMcpUseCase<P>>,
     pub config: Arc<GatewayConfig>,
     pub rate_limiter: Arc<OAuthRateLimiter>,

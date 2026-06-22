@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use axum_test::TestServer;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
-use oxide_auth::primitives::issuer::TokenMap;
 use reqwest::Url;
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -20,7 +19,7 @@ use brain3_core::ports::token_store::TokenStore;
 use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
-use brain3_platform::token_store::token_map::TokenMapStore;
+use brain3_platform::token_store::sqlite::{SharedSqliteTokenStore, SqliteTokenStore};
 
 const CLIENT_ID: &str = "brain3-oauth2-client";
 const CLIENT_SECRET: &str = "hardcoded-secret";
@@ -145,11 +144,13 @@ impl TestHarness {
         ));
 
         let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
-        let issuer = Arc::new(Mutex::new(TokenMap::new(RandomGenerator::new(32))));
+        let issuer = Arc::new(Mutex::new(
+            SqliteTokenStore::in_memory().expect("in-memory issuer should initialize"),
+        ));
 
         let proxy = Arc::new(proxy);
         let token_store: Arc<dyn TokenStore> =
-            Arc::new(TokenMapStore::new(Arc::clone(&issuer)));
+            Arc::new(SharedSqliteTokenStore::new(Arc::clone(&issuer)));
 
         let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
             proxy,

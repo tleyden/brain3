@@ -14,7 +14,6 @@ use oxide_auth::frontends::simple::endpoint::Error as OAuthEndpointError;
 use oxide_auth::frontends::simple::extensions::{AddonList, Pkce};
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
-use oxide_auth::primitives::issuer::TokenMap;
 use oxide_auth_async::endpoint::Endpoint as AsyncEndpoint;
 use oxide_auth_async::endpoint::{Extension as AsyncExtension, OwnerSolicitor};
 use oxide_auth_async::endpoint::access_token::AccessTokenFlow;
@@ -28,6 +27,7 @@ use brain3_core::ports::mcp_proxy::McpProxyPort;
 use super::registrar::GatewayRegistrar;
 use super::state::AppState;
 use super::templates::{render_login_form, render_misconfigured_page, LoginFormParams};
+use crate::token_store::sqlite::SqliteTokenStore;
 
 // ---------------------------------------------------------------------------
 // Async endpoint structs
@@ -81,7 +81,7 @@ impl OwnerSolicitor<PostBodyRequest> for GrantSolicitor {
 struct AuthorizeEndpoint<'a> {
     registrar: &'a GatewayRegistrar,
     authorizer: &'a mut AuthMap<RandomGenerator>,
-    issuer: &'a mut TokenMap<RandomGenerator>,
+    issuer: &'a mut SqliteTokenStore,
     solicitor: GrantSolicitor,
     extensions: AddonList,
 }
@@ -129,7 +129,7 @@ impl<'a> AsyncEndpoint<PostBodyRequest> for AuthorizeEndpoint<'a> {
 struct TokenEndpoint<'a> {
     registrar: &'a GatewayRegistrar,
     authorizer: &'a mut AuthMap<RandomGenerator>,
-    issuer: &'a mut TokenMap<RandomGenerator>,
+    issuer: &'a mut SqliteTokenStore,
     extensions: AddonList,
 }
 
