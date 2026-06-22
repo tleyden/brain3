@@ -23,7 +23,7 @@ As of v0.1.7, Brain3 has no HIGH-severity open findings. The prior HIGH finding 
 graph TD
     Internet["Internet (untrusted)\nAI client + any attacker"]
     CF["Cloudflare Edge\nTLS termination — trusted 3rd party"]
-    Gateway["Rust Gateway (host)\nOAuth2.1 (hand-rolled) · static client id/secret\nloopback-only, LAN locked down\n⚠️ UNSANDBOXED — full host access if compromised"]
+    Gateway["Rust Gateway (host)\nOAuth2.1 (oxide-auth based) · static client id/secret\nloopback-only, LAN locked down\n⚠️ UNSANDBOXED — full host access if compromised"]
     Container["MCP Container\ninternal-only network, no egress"]
     Vault["Vault files\n(host filesystem)"]
     HostOther["Everything else on the host\n(other files, processes, credentials)"]
@@ -328,7 +328,7 @@ The install script downloads and executes a binary from S3 without verifying a S
 
 **Files:** N/A — this is an absence of a control, not a specific code location
 
-The Rust gateway runs as a normal OS process with no filesystem jail (chroot/Landlock on Linux, sandbox-exec/App Sandbox on macOS), no network egress restriction, and no capability dropping. The MCP container (B4) is deliberately confined to bind-mounted directories with no outbound network access; the gateway that fronts it has no equivalent containment. If the gateway process is compromised by any means — a malicious or vulnerable Rust dependency, a logic bug in the hand-rolled OAuth implementation (M-13), or any other RCE vector — the attacker inherits the full filesystem and network access of the user account running Brain3, not just the vault.
+The Rust gateway runs as a normal OS process with no filesystem jail (chroot/Landlock on Linux, sandbox-exec/App Sandbox on macOS), no network egress restriction, and no capability dropping. The MCP container (B4) is deliberately confined to bind-mounted directories with no outbound network access; the gateway that fronts it has no equivalent containment. If the gateway process is compromised by any means — a malicious or vulnerable Rust dependency, a logic bug in the oxide-auth-based OAuth integration (M-13), or any other RCE vector — the attacker inherits the full filesystem and network access of the user account running Brain3, not just the vault.
 
 This is a known, accepted trade-off documented here rather than a regression — the host process needs broad access today (reading the vault for the rare direct-access path, talking to `cloudflared`, talking to the container runtime API) and no sandboxing work has been scoped.
 
@@ -336,15 +336,15 @@ This is a known, accepted trade-off documented here rather than a regression —
 
 ---
 
-### M-13 🟡 MEDIUM — Custom OAuth2.1 Server Implementation Carries Inherent Protocol-Logic Risk
+### M-13 🟡 MEDIUM — Oxide-Auth-Based OAuth2.1 Integration Still Carries Protocol-Logic Risk
 
-**Files:** `crates/core/src/domain/oauth.rs`, `crates/platform/src/http/oauth_handlers.rs`, `crates/core/src/application/token_exchange.rs`
+**Files:** `crates/platform/src/http/oauth_handlers.rs`, `crates/platform/src/http/registrar.rs`, `crates/platform/src/token_store/sqlite.rs`
 
-Brain3 implements its own OAuth2.1 authorization server (authorize, token exchange, PKCE, refresh rotation) rather than building on an established, widely-audited server-side OAuth library. Rust's memory safety rules out entire bug classes — buffer overflows, use-after-free, data races — but it provides no protection against protocol-level logic errors: subtle deviations from RFC 6749/9700, edge cases in state handling, or auth-bypass conditions that a maintained library might already have caught.
+Brain3 now builds its OAuth2.1 authorization server on `oxide-auth` for the authorize and token flows rather than a fully custom implementation. That materially reduces the risk associated with hand-rolled protocol logic, but it does not eliminate OAuth-specific integration risk: Brain3 still owns the registrar policy, the login/consent wiring around `AuthorizationFlow`, token persistence and refresh rotation in the SQLite-backed issuer, and the HTTP-layer request/response mapping. Rust's memory safety rules out entire bug classes — buffer overflows, use-after-free, data races — but it provides no protection against protocol-level logic errors or integration mistakes at those boundaries.
 
-The existing controls (mandatory PKCE, rate limiting, constant-time comparisons, single static client) reduce the blast radius of most classes of attack, and several open findings (M-1 through M-4) are specific instances of this broader risk.
+The existing controls (mandatory PKCE, rate limiting, constant-time comparisons, single static client, and reuse of a maintained OAuth library) reduce the blast radius of most classes of attack, and several open findings (M-1 through M-4) are specific instances of this broader risk.
 
-**Recommendation:** No action proposed in this pass beyond what's already tracked in section 1. Worth revisiting if/when the OAuth surface grows (e.g. multiple clients, dynamic registration) — at that point, the cost/benefit of a vetted library changes.
+**Recommendation:** No action proposed in this pass beyond what's already tracked in section 1. Revisit if the OAuth surface grows further (for example, multiple clients or dynamic registration), or if custom logic around `oxide-auth` expands enough that it starts to dominate the trusted computing base again.
 
 ---
 

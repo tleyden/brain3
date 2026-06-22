@@ -1,27 +1,32 @@
 use std::sync::Arc;
 
-use brain3_core::application::authorize::AuthorizeUseCase;
+use oxide_auth::primitives::authorizer::AuthMap;
+use oxide_auth::primitives::generator::RandomGenerator;
+use tokio::sync::Mutex;
+
+use crate::token_store::sqlite::SqliteTokenStore;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
-use brain3_core::application::token_exchange::TokenExchangeUseCase;
 use brain3_core::domain::model::GatewayConfig;
-use brain3_core::ports::auth_code_store::AuthCodeStore;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
 use super::rate_limit::OAuthRateLimiter;
+use super::registrar::GatewayRegistrar;
 
-pub struct AppState<S: AuthCodeStore, P: McpProxyPort> {
-    pub authorize: Arc<AuthorizeUseCase<S>>,
-    pub token_exchange: Arc<TokenExchangeUseCase<S>>,
+pub struct AppState<P: McpProxyPort> {
+    pub registrar: Arc<GatewayRegistrar>,
+    pub authorizer: Arc<Mutex<AuthMap<RandomGenerator>>>,
+    pub issuer: Arc<Mutex<SqliteTokenStore>>,
     pub proxy_mcp: Arc<ProxyMcpUseCase<P>>,
     pub config: Arc<GatewayConfig>,
     pub rate_limiter: Arc<OAuthRateLimiter>,
 }
 
-impl<S: AuthCodeStore, P: McpProxyPort> Clone for AppState<S, P> {
+impl<P: McpProxyPort> Clone for AppState<P> {
     fn clone(&self) -> Self {
         Self {
-            authorize: Arc::clone(&self.authorize),
-            token_exchange: Arc::clone(&self.token_exchange),
+            registrar: Arc::clone(&self.registrar),
+            authorizer: Arc::clone(&self.authorizer),
+            issuer: Arc::clone(&self.issuer),
             proxy_mcp: Arc::clone(&self.proxy_mcp),
             config: Arc::clone(&self.config),
             rate_limiter: Arc::clone(&self.rate_limiter),

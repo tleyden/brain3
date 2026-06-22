@@ -11,6 +11,7 @@ path = "src/main.rs"
 brain3-core = { path = "../../crates/core" }
 brain3-platform = { path = "../../crates/platform" }
 anyhow = "1"
+oxide-auth = "0.6"
 axum = "0.8"
 clap = { version = "4", features = ["derive"] }
 crossterm = "0.29"

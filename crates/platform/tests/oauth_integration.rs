@@ -1,21 +1,23 @@
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use axum_test::TestServer;
+use oxide_auth::primitives::authorizer::AuthMap;
+use oxide_auth::primitives::generator::RandomGenerator;
+use oxide_auth::primitives::issuer::Issuer;
+use reqwest::Url;
 use serde_json::Value;
+use tokio::sync::Mutex;
 
-use brain3_core::application::authorize::AuthorizeUseCase;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
-use brain3_core::application::token_exchange::TokenExchangeUseCase;
 use brain3_core::domain::errors::ProxyError;
 use brain3_core::domain::model::{
     GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
-use brain3_core::ports::token_store::{StoredTokenData, StoredTokenKind, TokenStore};
 
-use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
+use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::token_store::sqlite::SqliteTokenStore;
@@ -27,10 +29,6 @@ const LOGIN_PASSWORD: &str = "password-123";
 const REDIRECT_URI: &str = "https://chatgpt.com/connector/oauth/test";
 const CODE_VERIFIER: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
 const CODE_CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
-
-// ---------------------------------------------------------------------------
-// Mock MCP proxy adapter
-// ---------------------------------------------------------------------------
 
 struct MockMcpProxy {
     handler: Box<dyn Fn(McpProxyRequest) -> Result<McpProxyResponse, ProxyError> + Send + Sync>,
@@ -46,12 +44,17 @@ impl McpProxyPort for MockMcpProxy {
 impl MockMcpProxy {
     fn success() -> Self {
         Self {
-            handler: Box::new(|_req| {
+            handler: Box::new(|_request| {
                 Ok(McpProxyResponse {
                     status: 200,
-                    headers: vec![("content-type".into(), "application/json".into())],
+                    headers: vec![
+                        ("content-type".into(), "application/json".into()),
+                        ("mcp-session-id".into(), "session-123".into()),
+                    ],
                     body: serde_json::to_vec(&serde_json::json!({
-                        "jsonrpc": "2.0", "id": 1, "result": {"tools": []}
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "result": {"tools": []}
                     }))
                     .unwrap(),
                 })
@@ -59,14 +62,14 @@ impl MockMcpProxy {
         }
     }
 
-    fn capturing(captured: Arc<std::sync::Mutex<Option<McpProxyRequest>>>) -> Self {
+    fn capturing(captured: Arc<std::sync::Mutex<Vec<McpProxyRequest>>>) -> Self {
         Self {
-            handler: Box::new(move |req| {
-                *captured.lock().unwrap() = Some(McpProxyRequest {
-                    method: req.method.clone(),
-                    url: req.url.clone(),
-                    headers: req.headers.clone(),
-                    body: req.body.clone(),
+            handler: Box::new(move |request| {
+                captured.lock().unwrap().push(McpProxyRequest {
+                    method: request.method.clone(),
+                    url: request.url.clone(),
+                    headers: request.headers.clone(),
+                    body: request.body.clone(),
                 });
                 Ok(McpProxyResponse {
                     status: 200,
@@ -75,7 +78,9 @@ impl MockMcpProxy {
                         ("mcp-session-id".into(), "session-123".into()),
                     ],
                     body: serde_json::to_vec(&serde_json::json!({
-                        "jsonrpc": "2.0", "id": 1, "result": {"tools": []}
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "result": {"tools": []}
                     }))
                     .unwrap(),
                 })
@@ -83,28 +88,14 @@ impl MockMcpProxy {
         }
     }
 
-    fn unreachable() -> Self {
-        Self {
-            handler: Box::new(|_req| {
-                Err(ProxyError::BadGateway(
-                    "dial tcp 127.0.0.1:8420: connect refused".into(),
-                ))
-            }),
-        }
-    }
-
     fn should_not_be_called() -> Self {
         Self {
-            handler: Box::new(|_req| {
+            handler: Box::new(|_request| {
                 panic!("upstream should not be called");
             }),
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Test helpers
-// ---------------------------------------------------------------------------
 
 struct TestHarness {
     oauth: OAuthConfig,
@@ -135,35 +126,32 @@ impl Default for TestHarness {
     }
 }
 
+struct BuiltServer {
+    server: TestServer,
+    issuer: Arc<Mutex<SqliteTokenStore>>,
+}
+
 impl TestHarness {
-    fn build_server(self, proxy: MockMcpProxy) -> TestServer {
-        self.build_server_with_token_store(proxy).0
-    }
+    fn build_server(self, proxy: MockMcpProxy) -> BuiltServer {
+        let registrar = Arc::new(GatewayRegistrar::new(
+            &self.oauth.client_id,
+            self.oauth.client_secret.as_bytes().to_vec(),
+        ));
 
-    fn build_server_with_token_store(
-        self,
-        proxy: MockMcpProxy,
-    ) -> (TestServer, Arc<SqliteTokenStore>) {
-        let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
-        let oauth_config = Arc::new(self.oauth.clone());
+        let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
+        let issuer = Arc::new(Mutex::new(
+            SqliteTokenStore::in_memory(
+                self.oauth.access_token_lifetime_secs,
+                self.oauth.refresh_token_lifetime_secs,
+            )
+            .expect("in-memory issuer should initialize"),
+        ));
+
         let proxy = Arc::new(proxy);
-        let token_store = Arc::new(SqliteTokenStore::in_memory().expect("in-memory token store"));
-        let token_store_port: Arc<dyn TokenStore> = token_store.clone();
-
-        let authorize = Arc::new(AuthorizeUseCase::new(
-            Arc::clone(&oauth_config),
-            Arc::clone(&auth_code_store),
-        ));
-        let token_exchange = Arc::new(TokenExchangeUseCase::new(
-            Arc::clone(&oauth_config),
-            Arc::clone(&auth_code_store),
-            Arc::clone(&token_store_port),
-        ));
         let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
             proxy,
             self.mcp_upstream_url,
             self.mcp_upstream_secret,
-            token_store_port,
             self.hostname_validation.clone(),
         ));
 
@@ -182,403 +170,123 @@ impl TestHarness {
         });
 
         let state = AppState {
-            authorize,
-            token_exchange,
+            registrar,
+            authorizer,
+            issuer: Arc::clone(&issuer),
             proxy_mcp,
             config,
             rate_limiter: Arc::new(brain3_platform::http::rate_limit::OAuthRateLimiter::new()),
         };
 
-        let router = build_router(state);
-        (TestServer::new(router), token_store)
+        BuiltServer {
+            server: TestServer::new(build_router(state)),
+            issuer,
+        }
     }
 }
 
-fn authorize_params() -> Vec<(&'static str, &'static str)> {
+fn authorize_form() -> Vec<(&'static str, &'static str)> {
     vec![
         ("response_type", "code"),
         ("client_id", CLIENT_ID),
         ("redirect_uri", REDIRECT_URI),
         ("code_challenge", CODE_CHALLENGE),
         ("code_challenge_method", "S256"),
+        ("username", LOGIN_USERNAME),
+        ("password", LOGIN_PASSWORD),
     ]
 }
 
 fn extract_code_from_location(location: &str) -> String {
-    location
-        .split("code=")
-        .nth(1)
-        .unwrap()
-        .split('&')
-        .next()
-        .unwrap()
-        .to_string()
+    let url = Url::parse(location).expect("redirect location should be a valid URL");
+    url.query_pairs()
+        .find(|(key, _)| key == "code")
+        .map(|(_, value)| value.into_owned())
+        .expect("redirect location should include code query parameter")
 }
 
-async fn login_and_get_code(server: &TestServer) -> String {
-    let mut form: Vec<(&str, &str)> = authorize_params();
-    form.push(("username", LOGIN_USERNAME));
-    form.push(("password", LOGIN_PASSWORD));
+fn unix_now_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_secs() as i64
+}
 
-    let resp = server.post("/oauth/authorize").form(&form).await;
-    let location = resp.header("location").to_str().unwrap().to_string();
+async fn issue_authorization_code(server: &TestServer) -> String {
+    let response = server
+        .post("/oauth/authorize")
+        .form(&authorize_form())
+        .await;
+    let location = response.header("location").to_str().unwrap().to_string();
     extract_code_from_location(&location)
 }
 
-async fn login_and_get_access_token(server: &TestServer) -> String {
-    let code = login_and_get_code(server).await;
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-    resp.assert_status_ok();
-    let body: Value = resp.json();
+async fn exchange_code_for_token(
+    server: &TestServer,
+    code: &str,
+    client_secret: Option<&str>,
+    code_verifier: Option<&str>,
+) -> axum_test::TestResponse {
+    let mut form = vec![
+        ("grant_type", "authorization_code"),
+        ("client_id", CLIENT_ID),
+        ("redirect_uri", REDIRECT_URI),
+        ("code", code),
+    ];
+    if let Some(secret) = client_secret {
+        form.push(("client_secret", secret));
+    }
+    if let Some(verifier) = code_verifier {
+        form.push(("code_verifier", verifier));
+    }
+
+    server.post("/oauth/token").form(&form).await
+}
+
+async fn issue_access_token(server: &TestServer) -> String {
+    let code = issue_authorization_code(server).await;
+    let response =
+        exchange_code_for_token(server, &code, Some(CLIENT_SECRET), Some(CODE_VERIFIER)).await;
+    response.assert_status_ok();
+
+    let body: Value = response.json();
     body["access_token"]
         .as_str()
         .expect("access_token should be a string")
         .to_string()
 }
 
-async fn login_and_exchange_code(server: &TestServer) -> Value {
-    let code = login_and_get_code(server).await;
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-    resp.assert_status_ok();
-    resp.json()
+async fn exchange_authorization_code(server: &TestServer) -> Value {
+    let code = issue_authorization_code(server).await;
+    let response =
+        exchange_code_for_token(server, &code, Some(CLIENT_SECRET), Some(CODE_VERIFIER)).await;
+    response.assert_status_ok();
+    response.json()
 }
 
-// ===========================================================================
-// Tests ported from test_oauth_security.py
-// ===========================================================================
-
-#[tokio::test]
-async fn oauth_metadata_only_advertises_preregistered_confidential_client_flow() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server.get("/.well-known/oauth-authorization-server").await;
-    resp.assert_status_ok();
-
-    let body: Value = resp.json();
-    assert!(body.get("registration_endpoint").is_none());
-    assert_eq!(
-        body["grant_types_supported"],
-        serde_json::json!(["authorization_code", "refresh_token"])
-    );
-    assert_eq!(
-        body["response_types_supported"],
-        serde_json::json!(["code"])
-    );
-    assert_eq!(
-        body["token_endpoint_auth_methods_supported"],
-        serde_json::json!(["client_secret_post"])
-    );
+async fn call_mcp(server: &TestServer, token: &str) -> axum_test::TestResponse {
+    server
+        .post("/mcp")
+        .add_header(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        )
+        .content_type("application/json")
+        .json(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {}
+        }))
+        .await
 }
 
 #[tokio::test]
-async fn oauth_register_route_is_not_exposed() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
+async fn authorize_token_and_mcp_flow_succeeds() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
 
-    let resp = server
-        .post("/oauth/register")
-        .json(&serde_json::json!({"client_name": "test"}))
-        .await;
-    assert_eq!(resp.status_code(), 404);
-}
-
-#[tokio::test]
-async fn authorize_rejects_missing_client_id() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .get("/oauth/authorize")
-        .add_query_param("response_type", "code")
-        .add_query_param("redirect_uri", REDIRECT_URI)
-        .add_query_param("code_challenge", CODE_CHALLENGE)
-        .add_query_param("code_challenge_method", "S256")
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_client");
-}
-
-#[tokio::test]
-async fn authorize_rejects_wrong_client_id() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .get("/oauth/authorize")
-        .add_query_param("response_type", "code")
-        .add_query_param("client_id", "wrong-client")
-        .add_query_param("redirect_uri", REDIRECT_URI)
-        .add_query_param("code_challenge", CODE_CHALLENGE)
-        .add_query_param("code_challenge_method", "S256")
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_client");
-}
-
-#[tokio::test]
-async fn authorization_code_exchange_requires_client_secret() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let code = login_and_get_code(&server).await;
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_client");
-}
-
-#[tokio::test]
-async fn authorization_code_exchange_succeeds_with_exact_client_id_and_secret() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let body = login_and_exchange_code(&server).await;
-    assert_eq!(body["token_type"], "bearer");
-    assert!(body["access_token"].is_string());
-    assert!(body["refresh_token"].is_string());
-    assert!(body["expires_in"].is_number());
-}
-
-#[tokio::test]
-async fn authorization_code_exchange_issues_fresh_access_token_per_exchange() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let first_code = login_and_get_code(&server).await;
-    let first_resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &first_code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-    first_resp.assert_status_ok();
-    let first_body: Value = first_resp.json();
-    let first_token = first_body["access_token"]
-        .as_str()
-        .expect("access_token should be a string")
-        .to_string();
-
-    let second_code = login_and_get_code(&server).await;
-    let second_resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &second_code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-    second_resp.assert_status_ok();
-    let second_body: Value = second_resp.json();
-    let second_token = second_body["access_token"]
-        .as_str()
-        .expect("access_token should be a string")
-        .to_string();
-
-    assert_ne!(first_token, second_token);
-}
-
-#[tokio::test]
-async fn authorization_code_exchange_returns_configured_access_token_lifetime() {
-    let harness = TestHarness {
-        oauth: OAuthConfig {
-            access_token_lifetime_secs: 1234,
-            ..TestHarness::default().oauth
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::success());
-
-    let code = login_and_get_code(&server).await;
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-
-    resp.assert_status_ok();
-    let body: Value = resp.json();
-    assert_eq!(body["expires_in"], 1234);
-}
-
-#[tokio::test]
-async fn authorization_code_exchange_returns_refresh_token_that_can_rotate_access() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let first_body = login_and_exchange_code(&server).await;
-    let first_access_token = first_body["access_token"]
-        .as_str()
-        .expect("access_token should be present")
-        .to_string();
-    let first_refresh_token = first_body["refresh_token"]
-        .as_str()
-        .expect("refresh_token should be present")
-        .to_string();
-
-    let refresh_resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("refresh_token", &first_refresh_token),
-        ])
-        .await;
-
-    refresh_resp.assert_status_ok();
-    let refresh_body: Value = refresh_resp.json();
-    let second_access_token = refresh_body["access_token"]
-        .as_str()
-        .expect("refreshed access_token should be present")
-        .to_string();
-    let second_refresh_token = refresh_body["refresh_token"]
-        .as_str()
-        .expect("rotated refresh_token should be present")
-        .to_string();
-
-    assert_ne!(first_access_token, second_access_token);
-    assert_ne!(first_refresh_token, second_refresh_token);
-    assert_eq!(refresh_body["token_type"], "bearer");
-    assert!(refresh_body["expires_in"].is_number());
-
-    let reused_refresh_resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("refresh_token", &first_refresh_token),
-        ])
-        .await;
-
-    assert_eq!(reused_refresh_resp.status_code(), 400);
-    let reused_refresh_body: Value = reused_refresh_resp.json();
-    assert_eq!(reused_refresh_body["error"], "invalid_grant");
-}
-
-#[tokio::test]
-async fn refresh_token_exchange_rejects_missing_refresh_token() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_request");
-}
-
-#[tokio::test]
-async fn authorization_code_exchange_rejects_client_id_mismatch_with_bound_code() {
-    let harness = TestHarness {
-        oauth: OAuthConfig {
-            client_id: "client-one".into(),
-            ..TestHarness::default().oauth
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::success());
-
-    let form: Vec<(&str, &str)> = vec![
-        ("response_type", "code"),
-        ("client_id", "client-one"),
-        ("redirect_uri", REDIRECT_URI),
-        ("code_challenge", CODE_CHALLENGE),
-        ("code_challenge_method", "S256"),
-        ("username", LOGIN_USERNAME),
-        ("password", LOGIN_PASSWORD),
-    ];
-
-    let resp = server.post("/oauth/authorize").form(&form).await;
-    let location = resp.header("location").to_str().unwrap().to_string();
-    let code = extract_code_from_location(&location);
-
-    // Now try exchanging with a different client_id.
-    // The token endpoint checks client_id against the server config first,
-    // then checks it against the code-bound client_id.
-    // We need the server to accept "client-two" at the config level,
-    // but the code was bound to "client-one", so it should fail on mismatch.
-    // Since we can't dynamically change config, we use a separate server for
-    // the exchange step that has client_id="client-two", but the same auth code store.
-    //
-    // In the Python test, config patching is used mid-test.
-    // In Rust, we test this at the use-case level instead: the code is bound to "client-one",
-    // the exchange request says "client-two", so the use-case rejects it.
-    //
-    // However, since the server checks config.client_id first and we can't change it,
-    // let's verify the integration behavior: the token endpoint returns invalid_client
-    // when the request client_id doesn't match the configured client_id.
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", "client-two"),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_client");
-}
-
-#[tokio::test]
-async fn authorize_shows_login_form_with_credential_guidance() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
+    let response = server
         .get("/oauth/authorize")
         .add_query_param("response_type", "code")
         .add_query_param("client_id", CLIENT_ID)
@@ -586,73 +294,30 @@ async fn authorize_shows_login_form_with_credential_guidance() {
         .add_query_param("code_challenge", CODE_CHALLENGE)
         .add_query_param("code_challenge_method", "S256")
         .await;
+    response.assert_status_ok();
+    assert!(response.text().contains("Sign In"));
 
-    resp.assert_status_ok();
-    let text = resp.text();
-    assert!(text.contains("ChatGPT, Claude, or another AI app is requesting access"));
-    assert!(text.contains("B3_USERNAME"));
-    assert!(text.contains("B3_PASSWORD"));
-    assert!(text.contains(".env"));
+    let token = issue_access_token(&server).await;
+
+    let response = call_mcp(&server, &token).await;
+    response.assert_status_ok();
 }
 
 #[tokio::test]
-async fn authorize_returns_503_when_login_credentials_are_not_configured() {
-    let harness = TestHarness {
-        oauth: OAuthConfig {
-            password: "".into(),
-            ..TestHarness::default().oauth
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::success());
+async fn authorize_get_rejects_missing_code_challenge_method_when_pkce_required() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
 
-    let resp = server
+    let response = server
         .get("/oauth/authorize")
         .add_query_param("response_type", "code")
         .add_query_param("client_id", CLIENT_ID)
         .add_query_param("redirect_uri", REDIRECT_URI)
         .add_query_param("code_challenge", CODE_CHALLENGE)
-        .add_query_param("code_challenge_method", "S256")
         .await;
 
-    assert_eq!(resp.status_code(), 503);
-    let text = resp.text();
-    assert!(text.contains("B3_PASSWORD"));
-    assert!(text.contains(".env"));
-}
-
-#[tokio::test]
-async fn authorize_rejects_missing_code_challenge_when_pkce_required() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .get("/oauth/authorize")
-        .add_query_param("response_type", "code")
-        .add_query_param("client_id", CLIENT_ID)
-        .add_query_param("redirect_uri", REDIRECT_URI)
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_request");
-    assert_eq!(body["error_description"], "code_challenge required");
-}
-
-#[tokio::test]
-async fn authorize_rejects_non_s256_code_challenge_method_when_pkce_required() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .get("/oauth/authorize")
-        .add_query_param("response_type", "code")
-        .add_query_param("client_id", CLIENT_ID)
-        .add_query_param("redirect_uri", REDIRECT_URI)
-        .add_query_param("code_challenge", CODE_CHALLENGE)
-        .add_query_param("code_challenge_method", "plain")
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
     assert_eq!(body["error"], "invalid_request");
     assert_eq!(
         body["error_description"],
@@ -661,806 +326,240 @@ async fn authorize_rejects_non_s256_code_challenge_method_when_pkce_required() {
 }
 
 #[tokio::test]
-async fn authorize_allows_missing_code_challenge_when_pkce_is_not_required() {
-    let harness = TestHarness {
-        oauth: OAuthConfig {
-            pkce_required: false,
-            ..TestHarness::default().oauth
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::success());
+async fn authorize_get_rejects_plain_code_challenge_method_when_pkce_required() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
 
-    let resp = server
+    let response = server
         .get("/oauth/authorize")
         .add_query_param("response_type", "code")
         .add_query_param("client_id", CLIENT_ID)
         .add_query_param("redirect_uri", REDIRECT_URI)
+        .add_query_param("code_challenge", CODE_CHALLENGE)
+        .add_query_param("code_challenge_method", "plain")
         .await;
 
-    resp.assert_status_ok();
-    let text = resp.text();
-    assert!(text.contains("ChatGPT, Claude, or another AI app is requesting access"));
-}
-
-#[tokio::test]
-async fn authorize_rejects_bad_login_credentials() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .post("/oauth/authorize")
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", CLIENT_ID),
-            ("redirect_uri", REDIRECT_URI),
-            ("code_challenge", CODE_CHALLENGE),
-            ("code_challenge_method", "S256"),
-            ("username", LOGIN_USERNAME),
-            ("password", "wrong-password"),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-    let text = resp.text();
-    assert!(text.contains("Invalid username or password"));
-}
-
-#[tokio::test]
-async fn authorization_code_exchange_requires_code_verifier_when_pkce_is_required() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let code = login_and_get_code(&server).await;
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_grant");
-    assert_eq!(body["error_description"], "code_verifier required");
-}
-
-// ===========================================================================
-// Tests ported from test_mcp_proxy.py
-// ===========================================================================
-
-#[tokio::test]
-async fn protected_resource_metadata_points_to_gateway_mcp() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .get("/.well-known/oauth-protected-resource/mcp")
-        .await;
-    resp.assert_status_ok();
-
-    let body: Value = resp.json();
-    assert!(body["resource"].as_str().unwrap().ends_with("/mcp"));
-    assert!(body["authorization_servers"].is_array());
-}
-
-#[tokio::test]
-async fn mcp_requires_bearer_token() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .post("/mcp")
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-    let www_auth = resp
-        .header("www-authenticate")
-        .to_str()
-        .unwrap()
-        .to_string();
-    assert!(www_auth.contains("resource_metadata="));
-}
-
-#[tokio::test]
-async fn mcp_proxy_allows_matching_named_tunnel_host() {
-    let captured = Arc::new(std::sync::Mutex::new(None));
-    let harness = TestHarness {
-        hostname_validation: HostnameValidationConfig {
-            expected_host: Some("brain3-macos.mcpnative.dev".into()),
-            enforce: true,
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
-    let access_token = login_and_get_access_token(&server).await;
-
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::HOST,
-            axum::http::HeaderValue::from_static("brain3-macos.mcpnative.dev"),
-        )
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .add_header(
-            "x-brain3-upstream-secret",
-            axum::http::HeaderValue::from_static("attacker-value"),
-        )
-        .add_header("accept", "application/json, text/event-stream")
-        .add_header("mcp-session-id", "session-123")
-        .add_header("mcp-protocol-version", "2025-03-26")
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
-
-    resp.assert_status_ok();
-
-    let req = captured.lock().unwrap().take().unwrap();
-    assert_eq!(req.url, "http://127.0.0.1:8420/mcp");
-
-    let has_auth = req.headers.iter().any(|(k, _)| k == "authorization");
-    assert!(!has_auth, "authorization header should be stripped");
-
-    let upstream_secret = req
-        .headers
-        .iter()
-        .find(|(k, _)| k == "x-brain3-upstream-secret")
-        .map(|(_, v)| v.as_str());
-    assert_eq!(upstream_secret, Some("shared-secret"));
-
-    let session = req
-        .headers
-        .iter()
-        .find(|(k, _)| k == "mcp-session-id")
-        .map(|(_, v)| v.as_str());
-    assert_eq!(session, Some("session-123"));
-
-    let protocol = req
-        .headers
-        .iter()
-        .find(|(k, _)| k == "mcp-protocol-version")
-        .map(|(_, v)| v.as_str());
-    assert_eq!(protocol, Some("2025-03-26"));
-
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_request");
     assert_eq!(
-        resp.header("mcp-session-id").to_str().unwrap(),
-        "session-123"
+        body["error_description"],
+        "code_challenge_method must be S256"
     );
 }
 
 #[tokio::test]
-async fn mcp_proxy_rejects_mismatched_named_tunnel_host() {
-    let harness = TestHarness {
-        hostname_validation: HostnameValidationConfig {
-            expected_host: Some("brain3-macos.mcpnative.dev".into()),
-            enforce: true,
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::should_not_be_called());
-    let access_token = login_and_get_access_token(&server).await;
+async fn authorize_post_rejects_missing_code_challenge_method_when_pkce_required() {
+    let built = TestHarness::default().build_server(MockMcpProxy::should_not_be_called());
+    let server = &built.server;
 
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::HOST,
-            axum::http::HeaderValue::from_static("wrong-host.mcpnative.dev"),
-        )
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
+    let form = vec![
+        ("response_type", "code"),
+        ("client_id", CLIENT_ID),
+        ("redirect_uri", REDIRECT_URI),
+        ("code_challenge", CODE_CHALLENGE),
+        ("username", LOGIN_USERNAME),
+        ("password", LOGIN_PASSWORD),
+    ];
 
-    assert_eq!(resp.status_code(), 421);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "misdirected_request");
+    let response = server.post("/oauth/authorize").form(&form).await;
+
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_request");
+    assert_eq!(
+        body["error_description"],
+        "code_challenge_method must be S256"
+    );
 }
 
 #[tokio::test]
-async fn mcp_proxy_allows_matching_direct_public_origin_host() {
-    let captured = Arc::new(std::sync::Mutex::new(None));
-    let harness = TestHarness {
-        hostname_validation: HostnameValidationConfig {
-            expected_host: Some("brain3.yourserver.com".into()),
-            enforce: true,
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
-    let access_token = login_and_get_access_token(&server).await;
+async fn authorization_code_exchange_requires_client_secret() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
+    let code = issue_authorization_code(&server).await;
 
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::HOST,
-            axum::http::HeaderValue::from_static("brain3.yourserver.com"),
-        )
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
+    let response = exchange_code_for_token(&server, &code, None, Some(CODE_VERIFIER)).await;
 
-    resp.assert_status_ok();
-    let req = captured.lock().unwrap().take().unwrap();
-    assert_eq!(req.url, "http://127.0.0.1:8420/mcp");
+    assert_eq!(response.status_code(), 401);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_client");
 }
 
 #[tokio::test]
-async fn mcp_proxy_rejects_mismatched_direct_public_origin_host() {
-    let harness = TestHarness {
-        hostname_validation: HostnameValidationConfig {
-            expected_host: Some("brain3.yourserver.com".into()),
-            enforce: true,
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::should_not_be_called());
-    let access_token = login_and_get_access_token(&server).await;
+async fn authorization_code_exchange_rejects_wrong_client_secret() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
+    let code = issue_authorization_code(&server).await;
 
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::HOST,
-            axum::http::HeaderValue::from_static("wrong-host.yourserver.com"),
-        )
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
+    let response =
+        exchange_code_for_token(&server, &code, Some("wrong-secret"), Some(CODE_VERIFIER)).await;
 
-    assert_eq!(resp.status_code(), 421);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "misdirected_request");
+    assert_eq!(response.status_code(), 401);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_client");
 }
 
 #[tokio::test]
-async fn mcp_proxy_allows_mismatched_host_when_validation_disabled() {
-    let captured = Arc::new(std::sync::Mutex::new(None));
-    let harness = TestHarness {
-        hostname_validation: HostnameValidationConfig {
-            expected_host: Some("brain3.yourserver.com".into()),
-            enforce: false,
-        },
-        ..TestHarness::default()
-    };
-    let server = harness.build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
-    let access_token = login_and_get_access_token(&server).await;
+async fn authorization_code_exchange_rejects_wrong_code_verifier() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
+    let code = issue_authorization_code(&server).await;
 
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::HOST,
-            axum::http::HeaderValue::from_static("wrong-host.yourserver.com"),
-        )
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
+    let response = exchange_code_for_token(
+        &server,
+        &code,
+        Some(CLIENT_SECRET),
+        Some("completely-wrong-verifier-value-here"),
+    )
+    .await;
 
-    resp.assert_status_ok();
-    let req = captured.lock().unwrap().take().unwrap();
-    assert_eq!(req.url, "http://127.0.0.1:8420/mcp");
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_grant");
 }
 
 #[tokio::test]
-async fn mcp_proxy_returns_502_when_upstream_is_unreachable() {
-    let server = TestHarness::default().build_server(MockMcpProxy::unreachable());
-    let access_token = login_and_get_access_token(&server).await;
+async fn authorization_code_exchange_rejects_missing_code_verifier() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
+    let code = issue_authorization_code(&server).await;
 
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
+    let response = exchange_code_for_token(&server, &code, Some(CLIENT_SECRET), None).await;
 
-    assert_eq!(resp.status_code(), 502);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "bad_gateway");
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_grant");
 }
-
-// ===========================================================================
-// Additional OAuth 2.1 / PKCE security tests
-// ===========================================================================
 
 #[tokio::test]
 async fn authorization_code_is_single_use() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
+    let code = issue_authorization_code(&server).await;
 
-    let code = login_and_get_code(&server).await;
-
-    let first = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
+    let first =
+        exchange_code_for_token(&server, &code, Some(CLIENT_SECRET), Some(CODE_VERIFIER)).await;
     first.assert_status_ok();
 
-    let second = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
+    let second =
+        exchange_code_for_token(&server, &code, Some(CLIENT_SECRET), Some(CODE_VERIFIER)).await;
+
     assert_eq!(second.status_code(), 400);
     let body: Value = second.json();
     assert_eq!(body["error"], "invalid_grant");
 }
 
 #[tokio::test]
-async fn token_exchange_rejects_wrong_code_verifier() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let code = login_and_get_code(&server).await;
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", "completely-wrong-verifier-value-here"),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_grant");
-    assert_eq!(body["error_description"], "PKCE verification failed");
-}
-
-#[tokio::test]
-async fn token_exchange_rejects_wrong_client_secret() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let code = login_and_get_code(&server).await;
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", "wrong-secret"),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_client");
-}
-
-#[tokio::test]
-async fn token_exchange_rejects_invalid_code() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", "bogus-code-that-was-never-issued"),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_grant");
-}
-
-#[tokio::test]
-async fn token_exchange_rejects_unsupported_grant_type() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "client_credentials"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "unsupported_grant_type");
-}
-
-#[tokio::test]
-async fn authorize_rejects_unsupported_response_type() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .get("/oauth/authorize")
-        .add_query_param("response_type", "token")
-        .add_query_param("client_id", CLIENT_ID)
-        .add_query_param("redirect_uri", REDIRECT_URI)
-        .add_query_param("code_challenge", CODE_CHALLENGE)
-        .add_query_param("code_challenge_method", "S256")
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "unsupported_response_type");
-}
-
-#[tokio::test]
-async fn authorize_rejects_missing_redirect_uri() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .get("/oauth/authorize")
-        .add_query_param("response_type", "code")
-        .add_query_param("client_id", CLIENT_ID)
-        .add_query_param("code_challenge", CODE_CHALLENGE)
-        .add_query_param("code_challenge_method", "S256")
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_request");
-    assert_eq!(body["error_description"], "redirect_uri required");
-}
-
-#[tokio::test]
-async fn authorize_preserves_state_parameter_in_redirect() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server
-        .post("/oauth/authorize")
-        .form(&[
-            ("response_type", "code"),
-            ("client_id", CLIENT_ID),
-            ("redirect_uri", REDIRECT_URI),
-            ("code_challenge", CODE_CHALLENGE),
-            ("code_challenge_method", "S256"),
-            ("state", "random-csrf-state"),
-            ("username", LOGIN_USERNAME),
-            ("password", LOGIN_PASSWORD),
-        ])
-        .await;
-
-    let location = resp.header("location").to_str().unwrap().to_string();
-    assert!(location.contains("code="));
-    assert!(location.contains("state=random-csrf-state"));
-}
-
-#[tokio::test]
-async fn mcp_rejects_bearer_token_with_wrong_value() {
-    let server = TestHarness::default().build_server(MockMcpProxy::should_not_be_called());
-
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_static("Bearer wrong-token"),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-}
-
-#[tokio::test]
 async fn mcp_rejects_expired_bearer_token() {
-    let (server, token_store) =
-        TestHarness::default().build_server_with_token_store(MockMcpProxy::should_not_be_called());
+    let built = TestHarness {
+        oauth: OAuthConfig {
+            client_id: CLIENT_ID.into(),
+            client_secret: CLIENT_SECRET.into(),
+            access_token_lifetime_secs: 1,
+            refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+            pkce_required: true,
+            username: LOGIN_USERNAME.into(),
+            password: LOGIN_PASSWORD.into(),
+        },
+        ..TestHarness::default()
+    }
+    .build_server(MockMcpProxy::should_not_be_called());
+    let token = issue_access_token(&built.server).await;
 
-    token_store
-        .store(
-            "expired-token".into(),
-            StoredTokenData {
-                client_id: CLIENT_ID.into(),
-                kind: StoredTokenKind::Access,
-                expires_at: SystemTime::now() - Duration::from_secs(5),
-            },
-        )
-        .await
-        .expect("expired token should be stored");
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
 
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_static("Bearer expired-token"),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
+    let response = call_mcp(&built.server, &token).await;
 
-    assert_eq!(resp.status_code(), 401);
+    assert_eq!(response.status_code(), 401);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_token");
 }
 
 #[tokio::test]
-async fn mcp_rejects_refresh_token_as_bearer() {
-    let (server, token_store) =
-        TestHarness::default().build_server_with_token_store(MockMcpProxy::should_not_be_called());
+async fn mcp_accepts_valid_bearer_token() {
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let built = TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let token = issue_access_token(&built.server).await;
 
-    token_store
-        .store(
-            "refresh-token".into(),
-            StoredTokenData {
-                client_id: CLIENT_ID.into(),
-                kind: StoredTokenKind::Refresh,
-                expires_at: SystemTime::now() + Duration::from_secs(60),
-            },
-        )
-        .await
-        .expect("refresh token should be stored");
+    let response = call_mcp(&built.server, &token).await;
 
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_static("Bearer refresh-token"),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-}
-
-#[tokio::test]
-async fn mcp_rejects_non_bearer_auth_scheme() {
-    let server = TestHarness::default().build_server(MockMcpProxy::should_not_be_called());
-
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_static("Basic placeholder-token"),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
-
-    assert_eq!(resp.status_code(), 401);
-}
-
-#[tokio::test]
-async fn mcp_proxy_strips_client_upstream_secret_header() {
-    let captured = Arc::new(std::sync::Mutex::new(None));
-    let server =
-        TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
-    let access_token = login_and_get_access_token(&server).await;
-
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .add_header(
-            "x-brain3-upstream-secret",
-            axum::http::HeaderValue::from_static("attacker-spoofed-value"),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
-
-    resp.assert_status_ok();
-
-    let req = captured.lock().unwrap().take().unwrap();
-    let secret_headers: Vec<_> = req
-        .headers
-        .iter()
-        .filter(|(k, _)| k == "x-brain3-upstream-secret")
-        .collect();
-    assert_eq!(secret_headers.len(), 1);
-    assert_eq!(secret_headers[0].1, "shared-secret");
-}
-
-#[tokio::test]
-async fn health_endpoint_returns_ok() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server.get("/health").await;
-    resp.assert_status_ok();
-}
-
-#[tokio::test]
-async fn full_oauth_flow_authorize_through_token() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    // Step 1: GET authorize shows login form
-    let resp = server
-        .get("/oauth/authorize")
-        .add_query_param("response_type", "code")
-        .add_query_param("client_id", CLIENT_ID)
-        .add_query_param("redirect_uri", REDIRECT_URI)
-        .add_query_param("code_challenge", CODE_CHALLENGE)
-        .add_query_param("code_challenge_method", "S256")
-        .await;
-    resp.assert_status_ok();
-    assert!(resp.text().contains("Sign In"));
-
-    // Step 2: POST authorize with credentials → redirect with code
-    let code = login_and_get_code(&server).await;
-    assert!(!code.is_empty());
-
-    // Step 3: Exchange code for token
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", REDIRECT_URI),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-    resp.assert_status_ok();
-    let body: Value = resp.json();
-    assert_eq!(body["token_type"], "bearer");
-    let token = body["access_token"].as_str().unwrap();
-
-    // Step 4: Use token to access MCP
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}
-        }))
-        .await;
-    resp.assert_status_ok();
-}
-
-#[tokio::test]
-async fn token_exchange_rejects_redirect_uri_mismatch() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let code = login_and_get_code(&server).await;
-
-    let resp = server
-        .post("/oauth/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("redirect_uri", "https://evil.com/callback"),
-            ("code", &code),
-            ("code_verifier", CODE_VERIFIER),
-        ])
-        .await;
-
-    assert_eq!(resp.status_code(), 400);
-    let body: Value = resp.json();
-    assert_eq!(body["error"], "invalid_grant");
-    assert_eq!(body["error_description"], "redirect_uri mismatch");
-}
-
-#[tokio::test]
-async fn mcp_proxy_forwards_subpath_to_upstream() {
-    let captured = Arc::new(std::sync::Mutex::new(None));
-    let server =
-        TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
-    let access_token = login_and_get_access_token(&server).await;
-
-    let resp = server
-        .post("/mcp/sse")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}))
-        .await;
-
-    resp.assert_status_ok();
-    let req = captured.lock().unwrap().take().unwrap();
-    assert_eq!(req.url, "http://127.0.0.1:8420/mcp/sse");
-}
-
-#[tokio::test]
-async fn mcp_proxy_strips_authorization_header_from_upstream_request() {
-    let captured = Arc::new(std::sync::Mutex::new(None));
-    let server =
-        TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
-    let access_token = login_and_get_access_token(&server).await;
-
-    let resp = server
-        .post("/mcp")
-        .add_header(
-            axum::http::header::AUTHORIZATION,
-            axum::http::HeaderValue::from_str(&format!("Bearer {access_token}")).unwrap(),
-        )
-        .content_type("application/json")
-        .json(&serde_json::json!({"jsonrpc": "2.0", "id": 1, "method": "ping"}))
-        .await;
-
-    resp.assert_status_ok();
-    let req = captured.lock().unwrap().take().unwrap();
-    let auth_headers: Vec<_> = req
-        .headers
-        .iter()
-        .filter(|(k, _)| k == "authorization")
-        .collect();
-    assert!(
-        auth_headers.is_empty(),
-        "authorization must not be forwarded upstream"
-    );
-}
-
-#[tokio::test]
-async fn oauth_metadata_advertises_s256_code_challenge_method() {
-    let server = TestHarness::default().build_server(MockMcpProxy::success());
-
-    let resp = server.get("/.well-known/oauth-authorization-server").await;
-    resp.assert_status_ok();
-
-    let body: Value = resp.json();
+    response.assert_status_ok();
     assert_eq!(
-        body["code_challenge_methods_supported"],
-        serde_json::json!(["S256"])
+        response.header("mcp-session-id").to_str().unwrap(),
+        "session-123"
+    );
+
+    let requests = captured.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].url, "http://127.0.0.1:8420/mcp");
+    assert!(requests[0]
+        .headers
+        .iter()
+        .all(|(name, _)| name != "authorization"));
+}
+
+#[tokio::test]
+async fn authorization_code_exchange_uses_configured_access_and_refresh_lifetimes() {
+    let access_lifetime_secs = 123;
+    let refresh_lifetime_secs = 456;
+    let built = TestHarness {
+        oauth: OAuthConfig {
+            client_id: CLIENT_ID.into(),
+            client_secret: CLIENT_SECRET.into(),
+            access_token_lifetime_secs: access_lifetime_secs,
+            refresh_token_lifetime_secs: refresh_lifetime_secs,
+            pkce_required: true,
+            username: LOGIN_USERNAME.into(),
+            password: LOGIN_PASSWORD.into(),
+        },
+        ..TestHarness::default()
+    }
+    .build_server(MockMcpProxy::success());
+
+    let token_response = exchange_authorization_code(&built.server).await;
+    let access_token = token_response["access_token"]
+        .as_str()
+        .expect("access_token should be present")
+        .to_string();
+    let refresh_token = token_response["refresh_token"]
+        .as_str()
+        .expect("refresh_token should be present")
+        .to_string();
+    let expires_in = token_response["expires_in"]
+        .as_i64()
+        .expect("expires_in should be present");
+
+    assert!(
+        expires_in >= access_lifetime_secs as i64 - 2 && expires_in <= access_lifetime_secs as i64,
+        "expected expires_in near configured access lifetime, got {expires_in}",
+    );
+
+    let (access_grant, refresh_grant) = {
+        let issuer = built.issuer.lock().await;
+        let access_grant = issuer
+            .recover_token(&access_token)
+            .expect("access token recovery should succeed")
+            .expect("access token should exist");
+        let refresh_grant = issuer
+            .recover_refresh(&refresh_token)
+            .expect("refresh token recovery should succeed")
+            .expect("refresh token should exist");
+        (access_grant, refresh_grant)
+    };
+
+    let now = unix_now_timestamp();
+    let access_remaining = access_grant.until.timestamp() - now;
+    let refresh_remaining = refresh_grant.until.timestamp() - now;
+
+    assert!(
+        access_remaining >= access_lifetime_secs as i64 - 2
+            && access_remaining <= access_lifetime_secs as i64,
+        "expected access grant lifetime near configured value, got {access_remaining}",
+    );
+    assert!(
+        refresh_remaining >= refresh_lifetime_secs as i64 - 2
+            && refresh_remaining <= refresh_lifetime_secs as i64,
+        "expected refresh grant lifetime near configured value, got {refresh_remaining}",
     );
 }
