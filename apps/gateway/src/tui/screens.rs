@@ -692,6 +692,10 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             runtime.launch_plan.env_file.display().to_string(),
         ));
         lines.push(key_value_line(
+            "SQLite DB",
+            runtime.config.token_db_path.display().to_string(),
+        ));
+        lines.push(key_value_line(
             "Logs",
             runtime.launch_plan.log_file.display().to_string(),
         ));
@@ -1183,6 +1187,7 @@ mod tests {
         )));
         assert!(text.contains("Container runtime: Docker"));
         assert!(text.contains("Vault path: /missing/vault"));
+        assert!(text.contains("SQLite DB: /tmp/brain3-home/brain3.db"));
         assert!(text.contains("Vault path does not exist"));
         assert!(text.contains("Gateway:  Not started"));
     }

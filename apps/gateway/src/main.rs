@@ -92,12 +92,14 @@ struct Args {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct RuntimeOverrides {
     container_tag: Option<String>,
+    brain3_home: Option<PathBuf>,
 }
 
 impl RuntimeOverrides {
     fn from_args(args: &Args) -> Self {
         Self {
             container_tag: args.container_tag.clone(),
+            brain3_home: args.brain3_home.clone(),
         }
     }
 }
@@ -508,7 +510,10 @@ fn load_config(
     env_file: PathBuf,
     runtime_overrides: &RuntimeOverrides,
 ) -> Result<Arc<brain3_core::domain::model::GatewayConfig>> {
-    let config_adapter = EnvFileConfigAdapter::new(Some(env_file));
+    let config_adapter = EnvFileConfigAdapter::with_token_db_home_override(
+        Some(env_file),
+        runtime_overrides.brain3_home.clone(),
+    );
     let mut config = config_adapter
         .load()
         .context("failed to load configuration")?;
@@ -516,8 +521,8 @@ fn load_config(
     Ok(Arc::new(config))
 }
 
-async fn run_setup_mode(env_file: PathBuf) -> Result<()> {
-    let config = load_config(env_file, &RuntimeOverrides::default())?;
+async fn run_setup_mode(env_file: PathBuf, runtime_overrides: &RuntimeOverrides) -> Result<()> {
+    let config = load_config(env_file, runtime_overrides)?;
 
     match &config.tunnel {
         Some(tc @ TunnelConfig::CloudflareNamed { .. }) => setup_tui::run(tc).await,
@@ -638,13 +643,17 @@ async fn main() -> Result<()> {
             }
             run_cli_mode(&args.host, config, launch_plan, &logging).await
         }
-        LaunchDispatch::Setup { env_file } => run_setup_mode(env_file).await,
+        LaunchDispatch::Setup { env_file } => run_setup_mode(env_file, &runtime_overrides).await,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+    use std::fs;
     use std::path::PathBuf;
+    use std::sync::{LazyLock, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     use brain3_core::domain::setup::{
         DependencyAvailability, DependencyStatus, InstallAction, PackageManager,
@@ -652,6 +661,54 @@ mod tests {
     };
 
     use super::*;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+    const CONFIG_KEYS: &[&str] = &[
+        "HOME",
+        "B3_HOME",
+        "B3_TOKEN_DB_PATH",
+        "B3_OAUTH2_GATEWAY_CLIENT_SECRET",
+        "B3_USERNAME",
+        "B3_PASSWORD",
+        "B3_CF_QUICK_TUNNEL",
+    ];
+
+    fn with_clean_env<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().expect("env lock should not be poisoned");
+        let saved: Vec<(&str, Option<String>)> = CONFIG_KEYS
+            .iter()
+            .map(|key| (*key, env::var(key).ok()))
+            .collect();
+
+        for key in CONFIG_KEYS {
+            env::remove_var(key);
+        }
+
+        let result = f();
+
+        for key in CONFIG_KEYS {
+            env::remove_var(key);
+        }
+        for (key, value) in saved {
+            if let Some(value) = value {
+                env::set_var(key, value);
+            }
+        }
+
+        result
+    }
+
+    fn write_test_env_file(contents: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after unix epoch")
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("brain3-main-test-{unique}"));
+        fs::create_dir_all(&dir).expect("test dir should be created");
+        let env_path = dir.join(".env");
+        fs::write(&env_path, contents).expect("env file should be written");
+        env_path
+    }
 
     #[test]
     fn args_default_to_tui_mode() {
@@ -685,6 +742,30 @@ mod tests {
             .expect("container tag args should parse");
 
         assert_eq!(args.container_tag.as_deref(), Some("pr-123"));
+    }
+
+    #[test]
+    fn load_config_uses_brain3_home_override_for_token_db_when_path_unset() {
+        with_clean_env(|| {
+            let env_path = write_test_env_file(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_CF_QUICK_TUNNEL=false\n",
+            );
+            let home_override = env::temp_dir().join("brain3-cli-home-override");
+
+            let config = load_config(
+                env_path,
+                &RuntimeOverrides {
+                    container_tag: None,
+                    brain3_home: Some(home_override.clone()),
+                },
+            )
+            .expect("config should load");
+
+            assert_eq!(config.token_db_path, home_override.join("brain3.db"));
+        });
     }
 
     #[test]

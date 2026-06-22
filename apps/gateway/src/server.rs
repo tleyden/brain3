@@ -105,6 +105,7 @@ where
     tracing::info!(
         bind_addr = %bind_addr,
         local_url = %local_url,
+        token_db_path = %config.token_db_path.display(),
         brain3_version = release::APP_VERSION,
         oauth_implementation = release::OAUTH_IMPLEMENTATION,
         oxide_auth_version = release::OXIDE_AUTH_VERSION,
@@ -144,6 +145,7 @@ pub async fn spawn_gateway_server(
     tracing::info!(
         bind_addr = %bind_addr_display,
         local_url = %local_url,
+        token_db_path = %config.token_db_path.display(),
         brain3_version = release::APP_VERSION,
         oauth_implementation = release::OAUTH_IMPLEMENTATION,
         oxide_auth_version = release::OXIDE_AUTH_VERSION,
@@ -177,9 +179,12 @@ pub async fn spawn_configured_gateway_session(
     launch_plan: RuntimeLaunchPlan,
     runtime_overrides: RuntimeOverrides,
 ) -> Result<ConfiguredGatewaySession> {
-    let mut config = EnvFileConfigAdapter::new(Some(launch_plan.env_file.clone()))
-        .load()
-        .context("failed to load configuration")?;
+    let mut config = EnvFileConfigAdapter::with_token_db_home_override(
+        Some(launch_plan.env_file.clone()),
+        runtime_overrides.brain3_home.clone(),
+    )
+    .load()
+    .context("failed to load configuration")?;
     apply_runtime_overrides(&mut config, &runtime_overrides)?;
     let config = Arc::new(config);
     let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;

@@ -1,5 +1,5 @@
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
@@ -12,11 +12,25 @@ use brain3_core::ports::config::ConfigPort;
 
 pub struct EnvFileConfigAdapter {
     env_path: Option<PathBuf>,
+    token_db_home_override: Option<PathBuf>,
 }
 
 impl EnvFileConfigAdapter {
     pub fn new(env_path: Option<PathBuf>) -> Self {
-        Self { env_path }
+        Self {
+            env_path,
+            token_db_home_override: None,
+        }
+    }
+
+    pub fn with_token_db_home_override(
+        env_path: Option<PathBuf>,
+        token_db_home_override: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            env_path,
+            token_db_home_override,
+        }
     }
 
     fn load_env_file(&self) {
@@ -70,7 +84,7 @@ impl ConfigPort for EnvFileConfigAdapter {
 
         let expected_host = resolve_expected_host()?;
         let enforce_hostname = env_bool("B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
-        let token_db_path = resolve_token_db_path()?;
+        let token_db_path = resolve_token_db_path(self.token_db_home_override.as_deref())?;
 
         let upstream_secret_file = PathBuf::from(env_var_or(
             "B3_OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
@@ -131,9 +145,13 @@ fn env_var_or(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.to_string())
 }
 
-fn resolve_token_db_path() -> Result<PathBuf, ConfigError> {
+fn resolve_token_db_path(token_db_home_override: Option<&Path>) -> Result<PathBuf, ConfigError> {
     if let Some(path) = env::var_os("B3_TOKEN_DB_PATH").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(path));
+    }
+
+    if let Some(root) = token_db_home_override {
+        return Ok(root.join("brain3.db"));
     }
 
     if let Some(root) = env::var_os("B3_HOME").filter(|value| !value.is_empty()) {

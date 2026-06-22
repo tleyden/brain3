@@ -30,6 +30,10 @@ pub fn log_startup_config(config: &GatewayConfig) {
         tunnel = ?config.tunnel.as_ref().map(tunnel_summary),
         "startup config"
     );
+    tracing::info!(
+        token_db_path = %config.token_db_path.display(),
+        "using SQLite token database"
+    );
 }
 
 fn tunnel_summary(t: &TunnelConfig) -> String {
