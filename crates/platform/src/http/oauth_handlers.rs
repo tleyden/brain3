@@ -343,13 +343,30 @@ async fn normalize_token_error_response(
             grant_type = ?request_shape.grant_type,
             "token endpoint: oxide-auth issued token successfully"
         );
-    } else {
-        tracing::warn!(
-            http_status = status.as_u16(),
-            grant_type = ?request_shape.grant_type,
-            "token endpoint: oxide-auth returned error response"
-        );
+        return response;
     }
+
+    // Always read and log the body on error so refresh_token failures are visible.
+    let (parts, body) = response.into_parts();
+    let body_bytes = match to_bytes(body, 16 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            tracing::warn!(
+                http_status = status.as_u16(),
+                grant_type = ?request_shape.grant_type,
+                "token endpoint: oxide-auth returned error response (body unreadable)"
+            );
+            return (parts.status, parts.headers, Body::empty()).into_response();
+        }
+    };
+
+    tracing::warn!(
+        http_status = status.as_u16(),
+        grant_type = ?request_shape.grant_type,
+        has_refresh_token = request_shape.has_refresh_token,
+        error_body = %String::from_utf8_lossy(&body_bytes),
+        "token endpoint: oxide-auth returned error response"
+    );
 
     let should_normalize = status == StatusCode::BAD_REQUEST
         && request_shape.grant_type.as_deref() == Some("authorization_code")
@@ -358,14 +375,8 @@ async fn normalize_token_error_response(
         && request_shape.has_code;
 
     if !should_normalize {
-        return response;
+        return (parts.status, parts.headers, body_bytes).into_response();
     }
-
-    let (parts, body) = response.into_parts();
-    let body_bytes = match to_bytes(body, 16 * 1024).await {
-        Ok(bytes) => bytes,
-        Err(_) => return (parts.status, parts.headers, Body::empty()).into_response(),
-    };
 
     let mut json_body: Value = match serde_json::from_slice(&body_bytes) {
         Ok(body) => body,
