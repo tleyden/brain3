@@ -1,15 +1,5 @@
 use crate::domain::errors::ProxyError;
 
-pub fn validate_bearer_token(auth_header: &str) -> Result<&str, ProxyError> {
-    let (scheme, token) = auth_header.split_once(' ').unwrap_or(("", ""));
-    if !scheme.eq_ignore_ascii_case("bearer") || token.is_empty() {
-        return Err(ProxyError::Unauthorized(
-            "Missing or invalid bearer token".into(),
-        ));
-    }
-    Ok(token)
-}
-
 pub fn validate_host(
     request_host: &str,
     expected_host: Option<&str>,

@@ -1,14 +1,12 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
-use std::time::SystemTime;
 
 use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
 use crate::domain::redact::elide_secret;
 use crate::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
-use crate::ports::token_store::{StoredTokenKind, TokenStore};
 
-use super::validate_request::{validate_bearer_token, validate_host};
+use super::validate_request::validate_host;
 
 static HOP_BY_HOP_HEADERS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
     [
@@ -38,7 +36,6 @@ pub struct ProxyMcpUseCase<P: McpProxyPort> {
     proxy: Arc<P>,
     upstream_url: String,
     upstream_secret: String,
-    token_store: Arc<dyn TokenStore>,
     hostname_validation: HostnameValidationConfig,
 }
 
@@ -47,14 +44,12 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
         proxy: Arc<P>,
         upstream_url: String,
         upstream_secret: String,
-        token_store: Arc<dyn TokenStore>,
         hostname_validation: HostnameValidationConfig,
     ) -> Self {
         Self {
             proxy,
             upstream_url: upstream_url.trim_end_matches('/').to_string(),
             upstream_secret,
-            token_store,
             hostname_validation,
         }
     }
@@ -67,7 +62,6 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
     pub async fn handle(
         &self,
         request_host: &str,
-        auth_header: &str,
         method: &str,
         path: &str,
         query: Option<&str>,
@@ -79,75 +73,6 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             self.hostname_validation.expected_host.as_deref(),
             self.hostname_validation.enforce,
         )?;
-
-        let received_token = match validate_bearer_token(auth_header) {
-            Ok(token) => token,
-            Err(e) => {
-                tracing::info!(
-                    method = method,
-                    path = path,
-                    host = request_host,
-                    "MCP proxy: unauthenticated probe, returning 401 with resource metadata"
-                );
-                return Err(e);
-            }
-        };
-
-        let token_data = match self.token_store.get(received_token).await {
-            Ok(Some(data)) => data,
-            Ok(None) => {
-                tracing::warn!(
-                    received_token_hint = %elide_secret(received_token),
-                    method = method,
-                    path = path,
-                    host = request_host,
-                    "MCP proxy rejected: bearer token not found"
-                );
-                return Err(ProxyError::Unauthorized(
-                    "Missing or invalid bearer token".into(),
-                ));
-            }
-            Err(error) => {
-                tracing::error!(
-                    %error,
-                    method = method,
-                    path = path,
-                    host = request_host,
-                    "MCP proxy rejected: token store lookup failed"
-                );
-                return Err(ProxyError::Unauthorized(
-                    "Missing or invalid bearer token".into(),
-                ));
-            }
-        };
-
-        if token_data.expires_at <= SystemTime::now() {
-            tracing::warn!(
-                received_token_hint = %elide_secret(received_token),
-                client_id = %token_data.client_id,
-                method = method,
-                path = path,
-                host = request_host,
-                "MCP proxy rejected: bearer token expired"
-            );
-            return Err(ProxyError::Unauthorized(
-                "Missing or invalid bearer token".into(),
-            ));
-        }
-
-        if token_data.kind != StoredTokenKind::Access {
-            tracing::warn!(
-                received_token_hint = %elide_secret(received_token),
-                client_id = %token_data.client_id,
-                method = method,
-                path = path,
-                host = request_host,
-                "MCP proxy rejected: token kind was not access"
-            );
-            return Err(ProxyError::Unauthorized(
-                "Missing or invalid bearer token".into(),
-            ));
-        }
 
         let upstream_url = self.build_upstream_url(path, query);
         let original_host_header = header_value(&headers, "host").map(str::to_owned);
@@ -246,4 +171,73 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
 fn url_authority(url: &str) -> Option<&str> {
     url.split_once("://")
         .map(|(_, rest)| rest.split('/').next().unwrap_or(rest))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+
+    use super::*;
+
+    struct CapturingProxy {
+        captured: Arc<Mutex<Option<McpProxyRequest>>>,
+    }
+
+    #[async_trait]
+    impl McpProxyPort for CapturingProxy {
+        async fn forward(&self, request: McpProxyRequest) -> Result<McpProxyResponse, ProxyError> {
+            *self.captured.lock().expect("capture lock should succeed") = Some(request);
+            Ok(McpProxyResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: br#"{"jsonrpc":"2.0","result":{}}"#.to_vec(),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_forwards_request_without_auth_dependency() {
+        let captured = Arc::new(Mutex::new(None));
+        let proxy = Arc::new(CapturingProxy {
+            captured: Arc::clone(&captured),
+        });
+        let use_case = ProxyMcpUseCase::new(
+            proxy,
+            "http://127.0.0.1:8420".into(),
+            "shared-secret".into(),
+            HostnameValidationConfig {
+                expected_host: None,
+                enforce: true,
+            },
+        );
+
+        let response = use_case
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                br#"{"jsonrpc":"2.0","method":"ping"}"#.to_vec(),
+            )
+            .await
+            .expect("proxy forwarding should succeed");
+
+        assert_eq!(response.status, 200);
+
+        let request = captured
+            .lock()
+            .expect("capture lock should succeed")
+            .take()
+            .expect("request should be forwarded");
+        assert_eq!(request.url, "http://127.0.0.1:8420/mcp");
+        assert!(
+            !request
+                .headers
+                .iter()
+                .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        );
+    }
 }

@@ -1,11 +1,9 @@
 use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use async_trait::async_trait;
 use oxide_auth::primitives::generator::{RandomGenerator, TagGrant};
 use oxide_auth::primitives::grant::{Extensions, Grant, Value};
 use oxide_auth::primitives::issuer::{IssuedToken, Issuer, RefreshedToken, TokenType};
@@ -13,21 +11,14 @@ use oxide_auth::primitives::scope::Scope;
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Connection, Row, SqliteConnection};
-use tokio::sync::Mutex;
 
 use brain3_core::domain::errors::TokenStoreError;
-use brain3_core::ports::token_store::{StoredTokenData, StoredTokenKind, TokenStore};
 
 pub struct SqliteTokenStore {
     connect_options: SqliteConnectOptions,
     schema_ready: OnceLock<()>,
     generator: RandomGenerator,
     usage: u64,
-}
-
-#[derive(Clone)]
-pub struct SharedSqliteTokenStore {
-    inner: Arc<Mutex<SqliteTokenStore>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -272,12 +263,6 @@ impl SqliteTokenStore {
     }
 }
 
-impl SharedSqliteTokenStore {
-    pub fn new(inner: Arc<Mutex<SqliteTokenStore>>) -> Self {
-        Self { inner }
-    }
-}
-
 impl Issuer for SqliteTokenStore {
     fn issue(&mut self, grant: Grant) -> Result<IssuedToken, ()> {
         let pair_id = self.generator.tag(self.usage, &grant)?;
@@ -330,30 +315,6 @@ impl Issuer for SqliteTokenStore {
 
     fn recover_refresh<'a>(&'a self, token: &'a str) -> Result<Option<Grant>, ()> {
         self.load_token(token, TokenKind::Refresh).map_err(|_| ())
-    }
-}
-
-#[async_trait]
-impl TokenStore for SharedSqliteTokenStore {
-    async fn store(&self, _token: String, _data: StoredTokenData) -> Result<(), TokenStoreError> {
-        Ok(())
-    }
-
-    async fn get(&self, token: &str) -> Result<Option<StoredTokenData>, TokenStoreError> {
-        let issuer = self.inner.lock().await;
-        match issuer.recover_token(token) {
-            Ok(Some(grant)) => Ok(Some(stored_access_token_data(&grant))),
-            Ok(None) | Err(()) => Ok(None),
-        }
-    }
-
-    async fn revoke(&self, _token: &str) -> Result<(), TokenStoreError> {
-        Ok(())
-    }
-
-    async fn cleanup_expired(&self) -> Result<(), TokenStoreError> {
-        let issuer = self.inner.lock().await;
-        issuer.cleanup_expired().await
     }
 }
 
@@ -426,21 +387,6 @@ fn deserialize_scope(scope: &str) -> Result<Scope, TokenStoreError> {
     scope
         .parse()
         .map_err(|error| TokenStoreError::Unavailable(format!("invalid scope: {error}")))
-}
-
-fn stored_access_token_data(grant: &Grant) -> StoredTokenData {
-    let secs = grant.until.timestamp();
-    let expires_at = if secs >= 0 {
-        SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs as u64)
-    } else {
-        SystemTime::UNIX_EPOCH
-    };
-
-    StoredTokenData {
-        client_id: grant.client_id.clone(),
-        kind: StoredTokenKind::Access,
-        expires_at,
-    }
 }
 
 fn serialize_extensions(extensions: &Extensions) -> Result<String, TokenStoreError> {

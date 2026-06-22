@@ -14,7 +14,6 @@ use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::model::GatewayConfig;
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::config::ConfigPort;
-use brain3_core::ports::token_store::TokenStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
 use brain3_platform::http::registrar::GatewayRegistrar;
@@ -22,7 +21,7 @@ use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
-use brain3_platform::token_store::sqlite::{SharedSqliteTokenStore, SqliteTokenStore};
+use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
 use crate::{apply_runtime_overrides, RuntimeOverrides};
 
@@ -212,14 +211,10 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
     ));
 
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
-    let token_store: Arc<dyn TokenStore> =
-        Arc::new(SharedSqliteTokenStore::new(Arc::clone(&issuer)));
-
     let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
         mcp_proxy,
         config.mcp_reverse_proxy.mcp_upstream_url.clone(),
         upstream_secret,
-        token_store,
         config.hostname_validation.clone(),
     ));
 

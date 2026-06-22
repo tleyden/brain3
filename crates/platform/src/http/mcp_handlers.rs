@@ -3,6 +3,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use oxide_auth::primitives::issuer::Issuer;
 use serde_json::json;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
@@ -40,6 +41,85 @@ fn effective_host(headers: &HeaderMap) -> String {
 
 fn resource_metadata_url(base_url: &str) -> String {
     format!("{base_url}/.well-known/oauth-protected-resource/mcp")
+}
+
+fn parse_bearer_token(headers: &HeaderMap) -> Result<&str, ProxyError> {
+    let auth_header = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    let (scheme, token) = auth_header.split_once(' ').unwrap_or(("", ""));
+
+    if !scheme.eq_ignore_ascii_case("bearer") || token.is_empty() {
+        return Err(ProxyError::Unauthorized(
+            "Missing or invalid bearer token".into(),
+        ));
+    }
+
+    Ok(token)
+}
+
+async fn validate_access_token<P: McpProxyPort + 'static>(
+    state: &AppState<P>,
+    headers: &HeaderMap,
+    method: &Method,
+    uri: &Uri,
+    host: &str,
+) -> Result<(), ProxyError> {
+    let token = match parse_bearer_token(headers) {
+        Ok(token) => token,
+        Err(error) => {
+            tracing::info!(
+                method = %method,
+                path = %uri,
+                host = host,
+                "MCP proxy: unauthenticated probe, returning 401 with resource metadata"
+            );
+            return Err(error);
+        }
+    };
+
+    let grant = {
+        let issuer = state.issuer.lock().await;
+        match issuer.recover_token(token) {
+            Ok(Some(grant)) => grant,
+            Ok(None) | Err(()) => {
+                tracing::warn!(
+                    received_token_hint = %elide_secret(token),
+                    method = %method,
+                    path = %uri,
+                    host = host,
+                    "MCP proxy rejected: bearer token not found"
+                );
+                return Err(ProxyError::Unauthorized(
+                    "Missing or invalid bearer token".into(),
+                ));
+            }
+        }
+    };
+
+    if grant.until.timestamp() <= unix_now_timestamp() {
+        tracing::warn!(
+            received_token_hint = %elide_secret(token),
+            client_id = %grant.client_id,
+            method = %method,
+            path = %uri,
+            host = host,
+            "MCP proxy rejected: bearer token expired"
+        );
+        return Err(ProxyError::Unauthorized(
+            "Missing or invalid bearer token".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn unix_now_timestamp() -> i64 {
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs() as i64,
+        Err(_) => 0,
+    }
 }
 
 fn proxy_error_response(err: ProxyError, headers: &HeaderMap) -> Response {
@@ -115,7 +195,9 @@ pub async fn mcp_reverse_proxy<P: McpProxyPort + 'static>(
     body: Bytes,
 ) -> Response {
     let host = effective_host(&headers);
-    let raw_auth = headers.get("authorization").and_then(|v| v.to_str().ok());
+    let raw_auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
     let auth_header = raw_auth.unwrap_or("");
 
     tracing::info!(
@@ -127,6 +209,10 @@ pub async fn mcp_reverse_proxy<P: McpProxyPort + 'static>(
         token_hint = %elide_secret(auth_header.split_once(' ').map(|(_, t)| t).unwrap_or("")),
         "MCP request received"
     );
+
+    if let Err(error) = validate_access_token(&state, &headers, &method, &uri, &host).await {
+        return proxy_error_response(error, &headers);
+    }
 
     let header_pairs: Vec<(String, String)> = headers
         .iter()
@@ -145,7 +231,6 @@ pub async fn mcp_reverse_proxy<P: McpProxyPort + 'static>(
         .proxy_mcp
         .handle(
             &host,
-            auth_header,
             method.as_str(),
             path,
             query,

@@ -14,12 +14,11 @@ use brain3_core::domain::model::{
     GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
-use brain3_core::ports::token_store::TokenStore;
 
 use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
-use brain3_platform::token_store::sqlite::{SharedSqliteTokenStore, SqliteTokenStore};
+use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
 const CLIENT_ID: &str = "brain3-oauth2-client";
 const CLIENT_SECRET: &str = "hardcoded-secret";
@@ -149,14 +148,10 @@ impl TestHarness {
         ));
 
         let proxy = Arc::new(proxy);
-        let token_store: Arc<dyn TokenStore> =
-            Arc::new(SharedSqliteTokenStore::new(Arc::clone(&issuer)));
-
         let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
             proxy,
             self.mcp_upstream_url,
             self.mcp_upstream_secret,
-            token_store,
             self.hostname_validation.clone(),
         ));
 
