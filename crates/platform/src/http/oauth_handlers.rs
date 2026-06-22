@@ -265,14 +265,12 @@ fn validate_authorize_params(
             )
                 .into_response());
         }
-        if let Some(method) = &params.code_challenge_method {
-            if method != "S256" {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(json!({"error": "invalid_request", "error_description": "code_challenge_method must be S256"})),
-                )
-                    .into_response());
-            }
+        if params.code_challenge_method.as_deref() != Some("S256") {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "invalid_request", "error_description": "code_challenge_method must be S256"})),
+            )
+                .into_response());
         }
     }
 

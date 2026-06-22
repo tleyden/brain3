@@ -287,6 +287,76 @@ async fn authorize_token_and_mcp_flow_succeeds() {
 }
 
 #[tokio::test]
+async fn authorize_get_rejects_missing_code_challenge_method_when_pkce_required() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
+
+    let response = server
+        .get("/oauth/authorize")
+        .add_query_param("response_type", "code")
+        .add_query_param("client_id", CLIENT_ID)
+        .add_query_param("redirect_uri", REDIRECT_URI)
+        .add_query_param("code_challenge", CODE_CHALLENGE)
+        .await;
+
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_request");
+    assert_eq!(
+        body["error_description"],
+        "code_challenge_method must be S256"
+    );
+}
+
+#[tokio::test]
+async fn authorize_get_rejects_plain_code_challenge_method_when_pkce_required() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let server = &built.server;
+
+    let response = server
+        .get("/oauth/authorize")
+        .add_query_param("response_type", "code")
+        .add_query_param("client_id", CLIENT_ID)
+        .add_query_param("redirect_uri", REDIRECT_URI)
+        .add_query_param("code_challenge", CODE_CHALLENGE)
+        .add_query_param("code_challenge_method", "plain")
+        .await;
+
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_request");
+    assert_eq!(
+        body["error_description"],
+        "code_challenge_method must be S256"
+    );
+}
+
+#[tokio::test]
+async fn authorize_post_rejects_missing_code_challenge_method_when_pkce_required() {
+    let built = TestHarness::default().build_server(MockMcpProxy::should_not_be_called());
+    let server = &built.server;
+
+    let form = vec![
+        ("response_type", "code"),
+        ("client_id", CLIENT_ID),
+        ("redirect_uri", REDIRECT_URI),
+        ("code_challenge", CODE_CHALLENGE),
+        ("username", LOGIN_USERNAME),
+        ("password", LOGIN_PASSWORD),
+    ];
+
+    let response = server.post("/oauth/authorize").form(&form).await;
+
+    assert_eq!(response.status_code(), 400);
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_request");
+    assert_eq!(
+        body["error_description"],
+        "code_challenge_method must be S256"
+    );
+}
+
+#[tokio::test]
 async fn authorization_code_exchange_requires_client_secret() {
     let built = TestHarness::default().build_server(MockMcpProxy::success());
     let server = &built.server;
