@@ -264,6 +264,23 @@ async fn exchange_authorization_code(server: &TestServer) -> Value {
     response.json()
 }
 
+async fn exchange_refresh_token(
+    server: &TestServer,
+    refresh_token: &str,
+    client_secret: Option<&str>,
+) -> axum_test::TestResponse {
+    let mut form = vec![
+        ("grant_type", "refresh_token"),
+        ("client_id", CLIENT_ID),
+        ("refresh_token", refresh_token),
+    ];
+    if let Some(secret) = client_secret {
+        form.push(("client_secret", secret));
+    }
+
+    server.post("/oauth/token").form(&form).await
+}
+
 async fn call_mcp(server: &TestServer, token: &str) -> axum_test::TestResponse {
     server
         .post("/mcp")
@@ -448,6 +465,49 @@ async fn authorization_code_is_single_use() {
     assert_eq!(second.status_code(), 400);
     let body: Value = second.json();
     assert_eq!(body["error"], "invalid_grant");
+}
+
+#[tokio::test]
+async fn refresh_token_exchange_succeeds() {
+    let built = TestHarness::default().build_server(MockMcpProxy::success());
+    let token_response = exchange_authorization_code(&built.server).await;
+    let original_access_token = token_response["access_token"]
+        .as_str()
+        .expect("access_token should be present")
+        .to_string();
+    let original_refresh_token = token_response["refresh_token"]
+        .as_str()
+        .expect("refresh_token should be present")
+        .to_string();
+
+    let refresh_response = exchange_refresh_token(
+        &built.server,
+        &original_refresh_token,
+        Some(CLIENT_SECRET),
+    )
+    .await;
+    refresh_response.assert_status_ok();
+
+    let refreshed_body: Value = refresh_response.json();
+    let refreshed_access_token = refreshed_body["access_token"]
+        .as_str()
+        .expect("refreshed access_token should be present")
+        .to_string();
+    let refreshed_refresh_token = refreshed_body["refresh_token"]
+        .as_str()
+        .expect("refreshed refresh_token should be present")
+        .to_string();
+
+    assert_ne!(refreshed_access_token, original_access_token);
+    assert_ne!(refreshed_refresh_token, original_refresh_token);
+
+    let revoked_response = call_mcp(&built.server, &original_access_token).await;
+    assert_eq!(revoked_response.status_code(), 401);
+    let revoked_body: Value = revoked_response.json();
+    assert_eq!(revoked_body["error"], "invalid_token");
+
+    let refreshed_response = call_mcp(&built.server, &refreshed_access_token).await;
+    refreshed_response.assert_status_ok();
 }
 
 #[tokio::test]

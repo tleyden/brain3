@@ -4,9 +4,13 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::Json;
+use oxide_auth::code_grant::refresh::{
+    refresh as refresh_grant, Endpoint as RefreshEndpoint, Error as RefreshError,
+    Request as RefreshRequest,
+};
 use oxide_auth::endpoint::{
     OAuthError, OwnerConsent, QueryParameter, Scopes, Solicitation, Template, WebRequest,
 };
@@ -183,6 +187,86 @@ impl<'a> AsyncEndpoint<OAuthRequest> for TokenEndpoint<'a> {
 
     fn extension(&mut self) -> Option<&mut (dyn AsyncExtension + Send)> {
         Some(&mut self.extensions)
+    }
+}
+
+struct BodyRefreshRequest {
+    valid: bool,
+    grant_type: Option<String>,
+    refresh_token: Option<String>,
+    client_id: Option<String>,
+    client_secret: Option<String>,
+    scope: Option<String>,
+}
+
+impl BodyRefreshRequest {
+    fn from_oauth_request(request: &OAuthRequest) -> Self {
+        let body = request.body();
+        Self {
+            valid: body.is_some(),
+            grant_type: body
+                .and_then(|body| body.unique_value("grant_type"))
+                .map(|value| value.into_owned()),
+            refresh_token: body
+                .and_then(|body| body.unique_value("refresh_token"))
+                .map(|value| value.into_owned()),
+            client_id: body
+                .and_then(|body| body.unique_value("client_id"))
+                .map(|value| value.into_owned()),
+            client_secret: body
+                .and_then(|body| body.unique_value("client_secret"))
+                .map(|value| value.into_owned()),
+            scope: body
+                .and_then(|body| body.unique_value("scope"))
+                .map(|value| value.into_owned()),
+        }
+    }
+}
+
+impl RefreshRequest for BodyRefreshRequest {
+    fn valid(&self) -> bool {
+        self.valid
+    }
+
+    fn refresh_token(&self) -> Option<Cow<'_, str>> {
+        self.refresh_token.as_deref().map(Cow::Borrowed)
+    }
+
+    fn scope(&self) -> Option<Cow<'_, str>> {
+        self.scope.as_deref().map(Cow::Borrowed)
+    }
+
+    fn grant_type(&self) -> Option<Cow<'_, str>> {
+        self.grant_type.as_deref().map(Cow::Borrowed)
+    }
+
+    fn authorization(&self) -> Option<(Cow<'_, str>, Cow<'_, [u8]>)> {
+        match (&self.client_id, &self.client_secret) {
+            (Some(client_id), Some(client_secret)) => Some((
+                Cow::Borrowed(client_id.as_str()),
+                Cow::Borrowed(client_secret.as_bytes()),
+            )),
+            _ => None,
+        }
+    }
+
+    fn extension(&self, _key: &str) -> Option<Cow<'_, str>> {
+        None
+    }
+}
+
+struct SimpleRefreshEndpoint<'a> {
+    registrar: &'a GatewayRegistrar,
+    issuer: &'a mut SqliteTokenStore,
+}
+
+impl<'a> RefreshEndpoint for SimpleRefreshEndpoint<'a> {
+    fn registrar(&self) -> &dyn oxide_auth::primitives::registrar::Registrar {
+        self.registrar
+    }
+
+    fn issuer(&mut self) -> &mut dyn oxide_auth::primitives::issuer::Issuer {
+        self.issuer
     }
 }
 
@@ -400,6 +484,86 @@ async fn normalize_token_error_response(
     );
     json_body["error"] = Value::String("invalid_grant".into());
     (parts.status, parts.headers, Json(json_body)).into_response()
+}
+
+fn unsupported_grant_type_response() -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        Json(json!({"error": "unsupported_grant_type"})),
+    )
+        .into_response()
+}
+
+async fn execute_authorization_code_token_flow(
+    registrar: &GatewayRegistrar,
+    authorizer: &mut AuthMap<RandomGenerator>,
+    issuer: &mut SqliteTokenStore,
+    request: OAuthRequest,
+    request_shape: &TokenRequestShape,
+) -> Response {
+    let mut extensions = AddonList::new();
+    extensions.push_access_token(Pkce::optional());
+
+    let endpoint = TokenEndpoint {
+        registrar,
+        authorizer,
+        issuer,
+        extensions,
+    };
+
+    match AccessTokenFlow::prepare(endpoint) {
+        Err(e) => {
+            tracing::error!("AccessTokenFlow::prepare failed: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+        Ok(mut flow) => {
+            flow.allow_credentials_in_body(true);
+            match flow.execute(request).await {
+                Ok(response) => normalize_token_error_response(response, request_shape).await,
+                Err(e) => {
+                    tracing::error!("AccessTokenFlow::execute failed: {:?}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                }
+            }
+        }
+    }
+}
+
+fn execute_refresh_token_flow(
+    registrar: &GatewayRegistrar,
+    issuer: &mut SqliteTokenStore,
+    request: &OAuthRequest,
+) -> Response {
+    let refresh_request = BodyRefreshRequest::from_oauth_request(request);
+    let mut endpoint = SimpleRefreshEndpoint { registrar, issuer };
+
+    match refresh_grant(&mut endpoint, &refresh_request) {
+        Ok(bearer) => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            bearer.to_json(),
+        )
+            .into_response(),
+        Err(RefreshError::Invalid(description)) => (
+            StatusCode::BAD_REQUEST,
+            [(header::CONTENT_TYPE, "application/json")],
+            description.to_json(),
+        )
+            .into_response(),
+        Err(RefreshError::Unauthorized(description, scheme)) => (
+            StatusCode::UNAUTHORIZED,
+            [
+                (header::CONTENT_TYPE, "application/json"),
+                (header::WWW_AUTHENTICATE, scheme.as_str()),
+            ],
+            description.to_json(),
+        )
+            .into_response(),
+        Err(RefreshError::Primitive) => {
+            tracing::error!("refresh token flow failed with primitive error");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -622,30 +786,26 @@ pub async fn oauth_token<P: McpProxyPort + 'static>(
         );
     }
 
-    let mut extensions = AddonList::new();
-    extensions.push_access_token(Pkce::optional());
-
-    let endpoint = TokenEndpoint {
-        registrar: state.registrar.as_ref(),
-        authorizer: &mut *authorizer,
-        issuer: &mut *issuer,
-        extensions,
-    };
-
-    match AccessTokenFlow::prepare(endpoint) {
-        Err(e) => {
-            tracing::error!("AccessTokenFlow::prepare failed: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+    match request_shape.grant_type.as_deref() {
+        Some("authorization_code") => {
+            execute_authorization_code_token_flow(
+                state.registrar.as_ref(),
+                &mut *authorizer,
+                &mut *issuer,
+                request,
+                &request_shape,
+            )
+            .await
         }
-        Ok(mut flow) => {
-            flow.allow_credentials_in_body(true);
-            match flow.execute(request).await {
-                Ok(response) => normalize_token_error_response(response, &request_shape).await,
-                Err(e) => {
-                    tracing::error!("AccessTokenFlow::execute failed: {:?}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
-                }
-            }
+        Some("refresh_token") => {
+            execute_refresh_token_flow(state.registrar.as_ref(), &mut *issuer, &request)
+        }
+        grant_type => {
+            tracing::warn!(
+                grant_type = ?grant_type,
+                "oauth/token rejected unsupported grant_type"
+            );
+            unsupported_grant_type_response()
         }
     }
 }
