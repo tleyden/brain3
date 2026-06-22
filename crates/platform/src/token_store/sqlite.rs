@@ -76,6 +76,9 @@ impl SqliteTokenStore {
         })
     }
 
+    /// Deletes expired OAuth token rows on demand.
+    ///
+    /// No background cleanup scheduler invokes this today.
     pub async fn cleanup_expired(&self) -> Result<(), TokenStoreError> {
         self.ensure_schema()?;
         self.run_db(|mut conn| async move {
