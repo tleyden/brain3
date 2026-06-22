@@ -282,6 +282,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 - The container uses **internal-only networking by default** and cannot make outbound connections to the public internet.  
 - Your machine doesn't need a "hole poked in the firewall" since it uses **outbound-only Cloudflare tunnel connections**.  However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security. 
 - It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is **no open registration** as both Dynamic Client Registration (DCR) and Client ID Meta Documents (CIMD) are disabled.
+- OAuth is built on `oxide-auth` rather than a fully hand-rolled implementation.
 - Client secret is required at token exchange (`client_secret_post`).
 - Auth codes are single-use and expire after 5 minutes.
 - Every login issues a **fresh 256-bit access token** (1-hour lifetime by default), stored in a local SQLite database.
@@ -305,8 +306,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 - **Prompt injection** — not mitigated by Brain3; the MCP server has no egress and runs in an isolated container network, but be careful what directory you point it at or what is in your vault.
 - **Installer trust still depends on the distribution path** — `install.sh` now verifies a signed checksum manifest before extracting a release tarball, but the default `releases/latest/install.sh` bootstrap is still fetched from the distribution path itself. A version-pinned installer URL would be stronger.
 - **Container port exposure (macOS)** — it is not yet confirmed whether the mapped container port is accessible only to the gateway or to any local process, which could allow OAuth bypass.
-- **No process sandboxing** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
-- **Oxide-auth-based OAuth 2.1 integration** — Brain3 now builds OAuth 2.1 on `oxide-auth`, which reduces hand-rolled protocol risk, but Rust memory safety still does not prevent protocol-level integration bugs. See `docs/SECURITY_AUDIT_LATEST.md` §6.4.
+- **No sandboxing for host gateway process** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
 - **Plaintext secret storage** — all secrets (password, client secret, upstream shared secret) are stored in plaintext in `~/.brain3/.env` (file permissions are `0600`, but no encryption at rest).
 - **No hostname validation in default (quick tunnel) mode** — hostname validation (HTTP 421 on unexpected `Host` headers) only works with named Cloudflare tunnels tied to a DNS record. The default quick tunnel setup currently disables it entirely. 
 
