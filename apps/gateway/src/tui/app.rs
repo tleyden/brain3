@@ -67,12 +67,13 @@ pub async fn run_gateway_tui(
         GatewayTuiLaunch::Configured { launch_plan } => {
             let (tx, rx) = oneshot::channel();
             let host_clone = host.to_string();
+            let runtime_overrides_for_startup = runtime_overrides.clone();
             tokio::spawn(async move {
                 let _ = tx.send(
                     server::spawn_configured_gateway_session(
                         &host_clone,
                         launch_plan,
-                        runtime_overrides,
+                        runtime_overrides_for_startup,
                     )
                     .await,
                 );
@@ -81,7 +82,14 @@ pub async fn run_gateway_tui(
         }
     };
 
-    let result = event_loop(&mut terminal, &mut state, &use_case, setup_system).await;
+    let result = event_loop(
+        &mut terminal,
+        &mut state,
+        &use_case,
+        setup_system,
+        &runtime_overrides,
+    )
+    .await;
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -96,6 +104,7 @@ async fn event_loop(
     state: &mut FirstRunTuiState,
     use_case: &FirstRunSetupUseCase,
     setup_system: Arc<dyn SetupSystemPort>,
+    runtime_overrides: &RuntimeOverrides,
 ) -> Result<()> {
     loop {
         handle_runtime_tick(state);
@@ -308,7 +317,7 @@ async fn event_loop(
                     state.step = SetupStep::PortsAndSettings;
                 }
                 KeyCode::Enter => {
-                    finalize_and_start(state, use_case).await;
+                    finalize_and_start(state, use_case, runtime_overrides.clone()).await;
                 }
                 KeyCode::Tab | KeyCode::Down => {
                     state.next_summary_focus();
@@ -469,7 +478,11 @@ async fn run_install_action(
     }
 }
 
-async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSetupUseCase) {
+async fn finalize_and_start(
+    state: &mut FirstRunTuiState,
+    use_case: &FirstRunSetupUseCase,
+    runtime_overrides: RuntimeOverrides,
+) {
     state.clear_messages();
 
     let request: FinalizeSetupRequest = state.apply_inputs_to_draft();
@@ -497,7 +510,8 @@ async fn finalize_and_start(state: &mut FirstRunTuiState, use_case: &FirstRunSet
     let host = state.host.clone();
     let (tx, rx) = oneshot::channel();
     tokio::spawn(async move {
-        let _ = tx.send(start_configured_runtime_session(&host, launch_plan).await);
+        let _ =
+            tx.send(start_configured_runtime_session(&host, launch_plan, runtime_overrides).await);
     });
 
     state.summary = Some(summary);
@@ -594,8 +608,9 @@ fn apply_startup_result(
 async fn start_configured_runtime_session(
     host: &str,
     launch_plan: RuntimeLaunchPlan,
+    runtime_overrides: RuntimeOverrides,
 ) -> Result<ConfiguredGatewaySession> {
-    server::spawn_configured_gateway_session(host, launch_plan, RuntimeOverrides::default()).await
+    server::spawn_configured_gateway_session(host, launch_plan, runtime_overrides).await
 }
 
 async fn cleanup(state: &mut FirstRunTuiState) -> Result<()> {
