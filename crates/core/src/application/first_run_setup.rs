@@ -40,7 +40,7 @@ impl FirstRunSetupUseCase {
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
             container_runtime: default_container_runtime(self.port.operating_system()),
             vault_path: std::path::PathBuf::new(),
-            container_image: self.defaults.default_container_image.clone(),
+            container_image_repo: self.defaults.default_container_image_repo.clone(),
             container_host_port: DEFAULT_CONTAINER_HOST_PORT,
             container_mcp_port: DEFAULT_CONTAINER_MCP_PORT,
             container_network_isolated: true,
@@ -298,7 +298,7 @@ mod tests {
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
             container_runtime: ContainerRuntime::MacOSContainer,
             vault_path,
-            container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
+            container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
             container_host_port: 8420,
             container_mcp_port: 8420,
             container_network_isolated: false,
@@ -310,9 +310,7 @@ mod tests {
 
     fn sample_defaults() -> SetupDefaults {
         SetupDefaults {
-            default_container_image: format!(
-                "ghcr.io/tleyden/brain3-mcp-vault-tools:{CURRENT_RELEASE}"
-            ),
+            default_container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
         }
     }
 
@@ -375,20 +373,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_uses_injected_default_container_image() {
+    async fn prepare_uses_injected_default_container_image_repo() {
         let port = Arc::new(MockSetupSystemPort::new(vec![]));
         let use_case = FirstRunSetupUseCase::new(
             port,
             SetupDefaults {
-                default_container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v9.9.9".into(),
+                default_container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
             },
         );
 
         let preparation = use_case.prepare().await.expect("prepare should succeed");
 
         assert_eq!(
-            preparation.draft.container_image,
-            "ghcr.io/tleyden/brain3-mcp-vault-tools:v9.9.9"
+            preparation.draft.container_image_repo,
+            "ghcr.io/tleyden/brain3-mcp-vault-tools"
         );
     }
 

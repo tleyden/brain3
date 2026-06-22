@@ -584,7 +584,7 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Container runtime",
             format_container_runtime(state.draft.container_runtime),
         ),
-        key_value_line("Container image", state.draft.container_image.clone()),
+        key_value_line("Container image", state.draft.container_image_repo.clone()),
         key_value_line("Tunnel", format_tunnel_mode(&state.draft.tunnel_mode)),
         key_value_line(
             "Env file",
@@ -1208,7 +1208,7 @@ mod tests {
                     tunnel_mode: TunnelModeDraft::CloudflareQuick,
                     container_runtime: ContainerRuntime::MacOSContainer,
                     vault_path: PathBuf::from("/tmp/vault"),
-                    container_image: release::default_container_image(),
+                    container_image_repo: release::MCP_IMAGE_REPO.to_string(),
                     container_host_port: 8420,
                     container_mcp_port: 8420,
                     container_network_isolated: true,

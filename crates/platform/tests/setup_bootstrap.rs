@@ -40,7 +40,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         tunnel_mode: TunnelModeDraft::CloudflareQuick,
         container_runtime: ContainerRuntime::MacOSContainer,
         vault_path: PathBuf::from("/Users/test/My Vault"),
-        container_image: "ghcr.io/tleyden/brain3-mcp-vault-tools:latest".into(),
+        container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
         container_host_port: 8420,
         container_mcp_port: 8420,
         container_network_isolated: false,
@@ -61,9 +61,9 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));
     assert!(rendered.contains("B3_CONTAINER_RUNTIME=\"macos-container\""));
     assert!(rendered.contains("B3_VAULT_PATH=\"/Users/test/My Vault\""));
-    assert!(
-        rendered.contains("B3_CONTAINER_IMAGE=\"ghcr.io/tleyden/brain3-mcp-vault-tools:latest\"")
-    );
+    assert!(rendered
+        .contains("B3_CONTAINER_IMAGE_REPO=\"ghcr.io/tleyden/brain3-mcp-vault-tools\""));
+    assert!(rendered.contains("B3_CONTAINER_IMAGE_TAG=\"\""));
     assert!(rendered.contains("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=\"false\""));
 }
 

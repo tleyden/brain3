@@ -14,7 +14,7 @@ pub const DEFAULT_GENERATED_PASSWORD_LENGTH: usize = 24;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupDefaults {
-    pub default_container_image: String,
+    pub default_container_image_repo: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,7 +53,7 @@ pub struct SetupDraftConfig {
     pub tunnel_mode: TunnelModeDraft,
     pub container_runtime: ContainerRuntime,
     pub vault_path: PathBuf,
-    pub container_image: String,
+    pub container_image_repo: String,
     pub container_host_port: u16,
     pub container_mcp_port: u16,
     pub container_network_isolated: bool,

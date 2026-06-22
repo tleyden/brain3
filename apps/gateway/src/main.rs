@@ -262,12 +262,9 @@ fn resolve_effective_container_image(
     }
 }
 
-fn setup_defaults(runtime_overrides: &RuntimeOverrides) -> SetupDefaults {
-    let effective =
-        resolve_effective_container_image(None, runtime_overrides.container_tag.as_deref());
-
+fn setup_defaults() -> SetupDefaults {
     SetupDefaults {
-        default_container_image: effective.image,
+        default_container_image_repo: release::MCP_IMAGE_REPO.to_string(),
     }
 }
 
@@ -604,7 +601,7 @@ async fn main() -> Result<()> {
                 &args.host,
                 logging.log_file.clone(),
                 GatewayTuiLaunch::FirstRun,
-                setup_defaults(&runtime_overrides),
+                setup_defaults(),
                 runtime_overrides.clone(),
                 args.brain3_home.clone(),
             )
@@ -625,7 +622,7 @@ async fn main() -> Result<()> {
                 &args.host,
                 logging.log_file.clone(),
                 GatewayTuiLaunch::Configured { launch_plan },
-                setup_defaults(&runtime_overrides),
+                setup_defaults(),
                 runtime_overrides.clone(),
                 args.brain3_home.clone(),
             )

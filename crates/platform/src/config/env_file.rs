@@ -1,6 +1,7 @@
 use std::env;
 use std::path::PathBuf;
 
+use brain3_core::application::first_run_setup::CURRENT_RELEASE;
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
     ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig, GatewayConfig,
@@ -179,7 +180,7 @@ fn derive_container_name_from_image(image: &str) -> Result<String, ConfigError> 
         .filter(|segment| !segment.is_empty())
         .ok_or_else(|| {
             ConfigError::Invalid(format!(
-                "B3_CONTAINER_IMAGE: could not derive container name from '{image}'"
+                "resolved container image: could not derive container name from '{image}'"
             ))
         })?;
 
@@ -188,7 +189,7 @@ fn derive_container_name_from_image(image: &str) -> Result<String, ConfigError> 
 
     if name.is_empty() {
         return Err(ConfigError::Invalid(format!(
-            "B3_CONTAINER_IMAGE: could not derive container name from '{image}'"
+            "resolved container image: could not derive container name from '{image}'"
         )));
     }
 
@@ -245,7 +246,24 @@ fn load_container_startup_config(
 
     let vault_path_str = require_nonempty_env("B3_VAULT_PATH", "when B3_CONTAINER_RUNTIME is set")?;
 
-    let image = require_nonempty_env("B3_CONTAINER_IMAGE", "when B3_CONTAINER_RUNTIME is set")?;
+    let repo = require_nonempty_env(
+        "B3_CONTAINER_IMAGE_REPO",
+        "when B3_CONTAINER_RUNTIME is set",
+    )?;
+    if repo.contains(':') {
+        return Err(ConfigError::Invalid(format!(
+            "B3_CONTAINER_IMAGE_REPO must not include a tag (found ':'). \
+             Use B3_CONTAINER_IMAGE_TAG to pin a version, or leave it empty \
+             to automatically use the version matching this binary ({CURRENT_RELEASE})"
+        )));
+    }
+    let tag_override = env_var_or("B3_CONTAINER_IMAGE_TAG", "");
+    let tag = if tag_override.trim().is_empty() {
+        CURRENT_RELEASE.to_string()
+    } else {
+        tag_override.trim().to_string()
+    };
+    let image = format!("{repo}:{tag}");
 
     let container_name = {
         let override_name = env_var_or("B3_CONTAINER_NAME", "");
@@ -443,7 +461,8 @@ mod tests {
         "B3_TOKEN_DB_PATH",
         "B3_CONTAINER_RUNTIME",
         "B3_VAULT_PATH",
-        "B3_CONTAINER_IMAGE",
+        "B3_CONTAINER_IMAGE_REPO",
+        "B3_CONTAINER_IMAGE_TAG",
         "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION",
         "B3_CONTAINER_NETWORK_ISOLATION_STRATEGY",
         "B3_CONTAINER_HOST_PORT",
@@ -503,7 +522,7 @@ mod tests {
                  B3_CF_QUICK_TUNNEL=false\n\
                  B3_CONTAINER_RUNTIME=docker\n\
                  B3_VAULT_PATH={}\n\
-                 B3_CONTAINER_IMAGE=ghcr.io/tleyden/brain3-mcp-vault-tools:latest\n\
+                 B3_CONTAINER_IMAGE_REPO=ghcr.io/tleyden/brain3-mcp-vault-tools\n\
                  B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true\n",
                 token_db.display(),
                 vault_dir.display()
@@ -540,7 +559,7 @@ mod tests {
                  B3_CF_QUICK_TUNNEL=false\n\
                  B3_CONTAINER_RUNTIME=docker\n\
                  B3_VAULT_PATH={}\n\
-                 B3_CONTAINER_IMAGE=ghcr.io/tleyden/brain3-mcp-vault-tools:latest\n\
+                 B3_CONTAINER_IMAGE_REPO=ghcr.io/tleyden/brain3-mcp-vault-tools\n\
                  B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true\n",
                 token_db.display(),
                 vault_dir.display()
@@ -559,6 +578,101 @@ mod tests {
                 config.container.as_ref().map(|c| c.isolation_strategy),
                 Some(Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp))
             );
+        });
+    }
+
+    #[test]
+    fn load_resolves_release_tag_when_container_image_tag_is_empty() {
+        with_clean_config_env(|| {
+            let vault_dir = env::temp_dir().join("brain3-config-test-vault-release-tag");
+            fs::create_dir_all(&vault_dir).unwrap();
+            let token_db = env::temp_dir().join("brain3-config-test-release-tag.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_CF_QUICK_TUNNEL=false\n\
+                 B3_CONTAINER_RUNTIME=macos-container\n\
+                 B3_VAULT_PATH={}\n\
+                 B3_CONTAINER_IMAGE_REPO=ghcr.io/tleyden/brain3-mcp-vault-tools\n\
+                 B3_CONTAINER_IMAGE_TAG=\n",
+                token_db.display(),
+                vault_dir.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+            let expected_image =
+                format!("ghcr.io/tleyden/brain3-mcp-vault-tools:{CURRENT_RELEASE}");
+
+            assert_eq!(
+                config.container.as_ref().map(|c| c.image.as_str()),
+                Some(expected_image.as_str())
+            );
+        });
+    }
+
+    #[test]
+    fn load_uses_explicit_container_image_tag_when_present() {
+        with_clean_config_env(|| {
+            let vault_dir = env::temp_dir().join("brain3-config-test-vault-explicit-tag");
+            fs::create_dir_all(&vault_dir).unwrap();
+            let token_db = env::temp_dir().join("brain3-config-test-explicit-tag.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_CF_QUICK_TUNNEL=false\n\
+                 B3_CONTAINER_RUNTIME=macos-container\n\
+                 B3_VAULT_PATH={}\n\
+                 B3_CONTAINER_IMAGE_REPO=ghcr.io/tleyden/brain3-mcp-vault-tools\n\
+                 B3_CONTAINER_IMAGE_TAG=v0.1.7\n",
+                token_db.display(),
+                vault_dir.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+
+            assert_eq!(
+                config.container.as_ref().map(|c| c.image.as_str()),
+                Some("ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.7")
+            );
+        });
+    }
+
+    #[test]
+    fn load_rejects_container_image_repo_that_includes_a_tag() {
+        with_clean_config_env(|| {
+            let vault_dir = env::temp_dir().join("brain3-config-test-vault-invalid-repo");
+            fs::create_dir_all(&vault_dir).unwrap();
+            let token_db = env::temp_dir().join("brain3-config-test-invalid-repo.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_CF_QUICK_TUNNEL=false\n\
+                 B3_CONTAINER_RUNTIME=macos-container\n\
+                 B3_VAULT_PATH={}\n\
+                 B3_CONTAINER_IMAGE_REPO=ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.7\n\
+                 B3_CONTAINER_IMAGE_TAG=v0.1.8\n",
+                token_db.display(),
+                vault_dir.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let err = adapter.load().expect_err("expected invalid config");
+
+            match err {
+                ConfigError::Invalid(message) => {
+                    assert!(message.contains("B3_CONTAINER_IMAGE_REPO must not include a tag"));
+                    assert!(message.contains("B3_CONTAINER_IMAGE_TAG"));
+                }
+                other => panic!("expected invalid config error, got {other:?}"),
+            }
         });
     }
 }
