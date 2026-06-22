@@ -45,15 +45,21 @@ checksum_cmd() {
 
 tarballs=()
 while IFS= read -r tarball; do
-  tarballs+=("$tarball")
-done < <(find "$ARTIFACTS_DIR" -maxdepth 1 -type f -name 'brain3-*.tar.gz' -print | sort)
+  tarballs+=("${tarball#./}")
+done < <(
+  cd "$ARTIFACTS_DIR"
+  find . -maxdepth 1 -type f -name 'brain3-*.tar.gz' -print | sort
+)
 
 if [ "${#tarballs[@]}" -eq 0 ]; then
   echo "Error: no release tarballs found in $ARTIFACTS_DIR" >&2
   exit 1
 fi
 
-checksum_cmd "${tarballs[@]}" > "$CHECKSUM_FILE"
+(
+  cd "$ARTIFACTS_DIR"
+  checksum_cmd "${tarballs[@]}"
+) > "$CHECKSUM_FILE"
 
 openssl dgst -sha256 \
   -sign "$RELEASE_SIGNING_KEY_FILE" \

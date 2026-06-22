@@ -114,6 +114,15 @@ jobs:
             bash scripts/generate-release-manifest.sh artifacts
           rm -f release-signing-key.pem
 
+      - name: Verify signed release manifest
+        run: |
+          test -s artifacts/SHA256SUMS
+          test -s artifacts/SHA256SUMS.sig
+          openssl dgst -sha256 \
+            -verify scripts/release-signing-public-key.pem \
+            -signature artifacts/SHA256SUMS.sig \
+            artifacts/SHA256SUMS
+
       - uses: actions/upload-artifact@v4
         with:
           name: release-assets
