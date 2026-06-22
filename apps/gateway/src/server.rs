@@ -7,7 +7,7 @@ use axum::Router;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, oneshot};
+use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
@@ -226,8 +226,12 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
 
     let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
     let issuer = Arc::new(Mutex::new(
-        SqliteTokenStore::from_path(&config.token_db_path)
-            .context("failed to initialize sqlite OAuth issuer")?,
+        SqliteTokenStore::from_path(
+            &config.token_db_path,
+            config.oauth.access_token_lifetime_secs,
+            config.oauth.refresh_token_lifetime_secs,
+        )
+        .context("failed to initialize sqlite OAuth issuer")?,
     ));
 
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());

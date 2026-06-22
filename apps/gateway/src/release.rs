@@ -56,6 +56,8 @@ mod tests {
         assert!(is_official_latest_container_image(
             &official_latest_container_image()
         ));
-        assert!(!is_official_latest_container_image(&default_container_image()));
+        assert!(!is_official_latest_container_image(
+            &default_container_image()
+        ));
     }
 }

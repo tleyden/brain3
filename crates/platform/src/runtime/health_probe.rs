@@ -73,8 +73,7 @@ pub async fn probe_mcp_vault_list(upstream_url: &str, upstream_secret: &str) -> 
             Err(error) => {
                 let total_elapsed = started_at.elapsed();
                 let attempts_remaining = PROBE_MAX_ATTEMPTS.saturating_sub(attempt);
-                let can_retry =
-                    attempts_remaining > 0 && total_elapsed < PROBE_TOTAL_TIMEOUT;
+                let can_retry = attempts_remaining > 0 && total_elapsed < PROBE_TOTAL_TIMEOUT;
 
                 tracing::warn!(
                     upstream_url = %url,
@@ -280,8 +279,8 @@ fn error_source_chain(error: &reqwest::Error) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
@@ -323,8 +322,7 @@ mod tests {
             }
         });
 
-        let result =
-            probe_mcp_vault_list(&format!("http://{}", addr), "shared-secret").await;
+        let result = probe_mcp_vault_list(&format!("http://{}", addr), "shared-secret").await;
 
         if server.is_finished() {
             server.await.expect("join probe server");
@@ -332,7 +330,10 @@ mod tests {
             server.abort();
         }
 
-        assert!(result.is_ok(), "expected probe to succeed after retries: {result:?}");
+        assert!(
+            result.is_ok(),
+            "expected probe to succeed after retries: {result:?}"
+        );
         assert_eq!(attempts.load(Ordering::SeqCst), 7);
     }
 }

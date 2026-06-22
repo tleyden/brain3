@@ -184,8 +184,7 @@ impl SetupSystemPort for PlatformSetupSystem {
             bytes.swap(i, j);
         }
 
-        String::from_utf8(bytes)
-            .map_err(|e| SetupError::Invalid(e.to_string()))
+        String::from_utf8(bytes).map_err(|e| SetupError::Invalid(e.to_string()))
     }
 
     fn render_env_file(

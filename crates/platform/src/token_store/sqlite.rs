@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use chrono::{Duration, Utc};
 use oxide_auth::primitives::generator::{RandomGenerator, TagGrant};
 use oxide_auth::primitives::grant::{Extensions, Grant, Value};
 use oxide_auth::primitives::issuer::{IssuedToken, Issuer, RefreshedToken, TokenType};
@@ -18,7 +19,14 @@ pub struct SqliteTokenStore {
     connect_options: SqliteConnectOptions,
     schema_ready: OnceLock<()>,
     generator: RandomGenerator,
+    lifetimes: TokenLifetimes,
     usage: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct TokenLifetimes {
+    access: Duration,
+    refresh: Duration,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -42,7 +50,11 @@ struct StoredExtension {
 }
 
 impl SqliteTokenStore {
-    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, TokenStoreError> {
+    pub fn from_path(
+        path: impl AsRef<Path>,
+        access_token_lifetime_secs: u64,
+        refresh_token_lifetime_secs: u64,
+    ) -> Result<Self, TokenStoreError> {
         let path = path.as_ref().to_path_buf();
         ensure_parent_dir(&path)?;
 
@@ -54,11 +66,18 @@ impl SqliteTokenStore {
             connect_options: options,
             schema_ready: OnceLock::new(),
             generator: RandomGenerator::new(32),
+            lifetimes: TokenLifetimes::new(
+                access_token_lifetime_secs,
+                refresh_token_lifetime_secs,
+            )?,
             usage: 0,
         })
     }
 
-    pub fn in_memory() -> Result<Self, TokenStoreError> {
+    pub fn in_memory(
+        access_token_lifetime_secs: u64,
+        refresh_token_lifetime_secs: u64,
+    ) -> Result<Self, TokenStoreError> {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|error| TokenStoreError::Unavailable(error.to_string()))?
@@ -72,6 +91,10 @@ impl SqliteTokenStore {
             connect_options: options,
             schema_ready: OnceLock::new(),
             generator: RandomGenerator::new(32),
+            lifetimes: TokenLifetimes::new(
+                access_token_lifetime_secs,
+                refresh_token_lifetime_secs,
+            )?,
             usage: 0,
         })
     }
@@ -164,19 +187,20 @@ impl SqliteTokenStore {
         pair_id: String,
         access_token: String,
         refresh_token: String,
-        grant: Grant,
+        access_grant: Grant,
+        refresh_grant: Grant,
     ) -> Result<(), TokenStoreError> {
         self.ensure_schema()?;
 
         let access_row = TokenRow {
             pair_id: pair_id.clone(),
             kind: TokenKind::Access,
-            grant: grant.clone(),
+            grant: access_grant,
         };
         let refresh_row = TokenRow {
             pair_id,
             kind: TokenKind::Refresh,
-            grant,
+            grant: refresh_grant,
         };
 
         self.run_db(move |mut conn| async move {
@@ -196,19 +220,20 @@ impl SqliteTokenStore {
         pair_id: String,
         access_token: String,
         refresh_token: String,
-        grant: Grant,
+        access_grant: Grant,
+        refresh_grant: Grant,
     ) -> Result<(), TokenStoreError> {
         self.ensure_schema()?;
 
         let access_row = TokenRow {
             pair_id: pair_id.clone(),
             kind: TokenKind::Access,
-            grant: grant.clone(),
+            grant: access_grant,
         };
         let refresh_row = TokenRow {
             pair_id,
             kind: TokenKind::Refresh,
-            grant,
+            grant: refresh_grant,
         };
         let old_refresh_token = old_refresh_token.to_string();
 
@@ -238,7 +263,11 @@ impl SqliteTokenStore {
         })
     }
 
-    fn load_token(&self, token: &str, expected_kind: TokenKind) -> Result<Option<Grant>, TokenStoreError> {
+    fn load_token(
+        &self,
+        token: &str,
+        expected_kind: TokenKind,
+    ) -> Result<Option<Grant>, TokenStoreError> {
         self.ensure_schema()?;
         let token = token.to_string();
 
@@ -264,35 +293,57 @@ impl SqliteTokenStore {
             })
         })
     }
+
+    fn grant_for_kind(&self, mut grant: Grant, kind: TokenKind) -> Grant {
+        let duration = match kind {
+            TokenKind::Access => self.lifetimes.access,
+            TokenKind::Refresh => self.lifetimes.refresh,
+        };
+        grant.until = Utc::now() + duration;
+        grant
+    }
 }
 
 impl Issuer for SqliteTokenStore {
     fn issue(&mut self, grant: Grant) -> Result<IssuedToken, ()> {
-        let pair_id = self.generator.tag(self.usage, &grant)?;
-        let access_token = self.generator.tag(self.usage.wrapping_add(1), &grant)?;
-        let refresh_token = self.generator.tag(self.usage.wrapping_add(2), &grant)?;
+        let access_grant = self.grant_for_kind(grant.clone(), TokenKind::Access);
+        let refresh_grant = self.grant_for_kind(grant, TokenKind::Refresh);
+        let pair_id = self.generator.tag(self.usage, &refresh_grant)?;
+        let access_token = self
+            .generator
+            .tag(self.usage.wrapping_add(1), &access_grant)?;
+        let refresh_token = self
+            .generator
+            .tag(self.usage.wrapping_add(2), &refresh_grant)?;
         self.usage = self.usage.wrapping_add(3);
 
         self.issue_pair(
             pair_id,
             access_token.clone(),
             refresh_token.clone(),
-            grant.clone(),
+            access_grant.clone(),
+            refresh_grant,
         )
         .map_err(|_| ())?;
 
         Ok(IssuedToken {
             token: access_token,
             refresh: Some(refresh_token),
-            until: grant.until,
+            until: access_grant.until,
             token_type: TokenType::Bearer,
         })
     }
 
     fn refresh(&mut self, refresh: &str, grant: Grant) -> Result<RefreshedToken, ()> {
-        let pair_id = self.generator.tag(self.usage, &grant)?;
-        let access_token = self.generator.tag(self.usage.wrapping_add(1), &grant)?;
-        let refresh_token = self.generator.tag(self.usage.wrapping_add(2), &grant)?;
+        let access_grant = self.grant_for_kind(grant.clone(), TokenKind::Access);
+        let refresh_grant = self.grant_for_kind(grant, TokenKind::Refresh);
+        let pair_id = self.generator.tag(self.usage, &refresh_grant)?;
+        let access_token = self
+            .generator
+            .tag(self.usage.wrapping_add(1), &access_grant)?;
+        let refresh_token = self
+            .generator
+            .tag(self.usage.wrapping_add(2), &refresh_grant)?;
         self.usage = self.usage.wrapping_add(3);
 
         self.rotate_refresh_pair(
@@ -300,14 +351,15 @@ impl Issuer for SqliteTokenStore {
             pair_id,
             access_token.clone(),
             refresh_token.clone(),
-            grant.clone(),
+            access_grant.clone(),
+            refresh_grant,
         )
         .map_err(|_| ())?;
 
         Ok(RefreshedToken {
             token: access_token,
             refresh: Some(refresh_token),
-            until: grant.until,
+            until: access_grant.until,
             token_type: TokenType::Bearer,
         })
     }
@@ -366,17 +418,20 @@ fn token_row_from_sql_row(row: sqlx::sqlite::SqliteRow) -> Result<TokenRow, Toke
                 .try_get::<String, _>("redirect_uri")
                 .map_err(sqlite_error)?
                 .parse()
-                .map_err(|error| TokenStoreError::Unavailable(format!("invalid redirect URI: {error}")))?,
-            scope: deserialize_scope(
-                &row.try_get::<String, _>("scope").map_err(sqlite_error)?,
-            )?,
+                .map_err(|error| {
+                    TokenStoreError::Unavailable(format!("invalid redirect URI: {error}"))
+                })?,
+            scope: deserialize_scope(&row.try_get::<String, _>("scope").map_err(sqlite_error)?)?,
             until: row
                 .try_get::<String, _>("expires_at")
                 .map_err(sqlite_error)?
                 .parse()
-                .map_err(|error| TokenStoreError::Unavailable(format!("invalid expiry timestamp: {error}")))?,
+                .map_err(|error| {
+                    TokenStoreError::Unavailable(format!("invalid expiry timestamp: {error}"))
+                })?,
             extensions: deserialize_extensions(
-                &row.try_get::<String, _>("extensions_json").map_err(sqlite_error)?,
+                &row.try_get::<String, _>("extensions_json")
+                    .map_err(sqlite_error)?,
             )?,
         },
     })
@@ -411,13 +466,12 @@ fn serialize_extensions(extensions: &Extensions) -> Result<String, TokenStoreErr
         });
     }
 
-    serde_json::to_string(&stored)
-        .map_err(|error| TokenStoreError::Unavailable(error.to_string()))
+    serde_json::to_string(&stored).map_err(|error| TokenStoreError::Unavailable(error.to_string()))
 }
 
 fn deserialize_extensions(payload: &str) -> Result<Extensions, TokenStoreError> {
-    let stored: Vec<StoredExtension> =
-        serde_json::from_str(payload).map_err(|error| TokenStoreError::Unavailable(error.to_string()))?;
+    let stored: Vec<StoredExtension> = serde_json::from_str(payload)
+        .map_err(|error| TokenStoreError::Unavailable(error.to_string()))?;
     let mut extensions = Extensions::new();
 
     for extension in stored {
@@ -465,6 +519,25 @@ fn sqlite_error(error: impl std::fmt::Display) -> TokenStoreError {
     TokenStoreError::Unavailable(error.to_string())
 }
 
+impl TokenLifetimes {
+    fn new(
+        access_token_lifetime_secs: u64,
+        refresh_token_lifetime_secs: u64,
+    ) -> Result<Self, TokenStoreError> {
+        Ok(Self {
+            access: seconds_to_duration(access_token_lifetime_secs)?,
+            refresh: seconds_to_duration(refresh_token_lifetime_secs)?,
+        })
+    }
+}
+
+fn seconds_to_duration(seconds: u64) -> Result<Duration, TokenStoreError> {
+    let seconds = i64::try_from(seconds).map_err(|_| {
+        TokenStoreError::Unavailable("token lifetime exceeds supported range".into())
+    })?;
+    Ok(Duration::seconds(seconds))
+}
+
 #[cfg(test)]
 mod tests {
     use oxide_auth::primitives::grant::{Extensions, Grant};
@@ -487,27 +560,61 @@ mod tests {
         }
     }
 
+    fn assert_grant_matches(actual: &Grant, expected: &Grant) {
+        assert_eq!(actual.owner_id, expected.owner_id);
+        assert_eq!(actual.client_id, expected.client_id);
+        assert_eq!(actual.scope, expected.scope);
+        assert_eq!(actual.redirect_uri, expected.redirect_uri);
+        assert_eq!(actual.extensions, expected.extensions);
+    }
+
+    fn assert_remaining_secs(until: chrono::DateTime<Utc>, expected_secs: i64) {
+        let remaining_secs = until.signed_duration_since(Utc::now()).num_seconds();
+        assert!(
+            remaining_secs >= expected_secs - 2 && remaining_secs <= expected_secs,
+            "expected lifetime near {expected_secs}s, got {remaining_secs}s",
+        );
+    }
+
     #[test]
     fn issue_round_trips_access_and_refresh_tokens() {
-        let mut store = SqliteTokenStore::in_memory().expect("in-memory store should initialize");
+        let access_lifetime_secs = 3600;
+        let refresh_lifetime_secs = 7776000;
+        let mut store = SqliteTokenStore::in_memory(access_lifetime_secs, refresh_lifetime_secs)
+            .expect("in-memory store should initialize");
         let grant = sample_grant();
 
-        let issued = store.issue(grant.clone()).expect("issuing token should succeed");
+        let issued = store
+            .issue(grant.clone())
+            .expect("issuing token should succeed");
 
         let access = store
             .recover_token(&issued.token)
             .expect("access token recovery should succeed");
         let refresh = store
-            .recover_refresh(issued.refresh.as_deref().expect("refresh token should exist"))
+            .recover_refresh(
+                issued
+                    .refresh
+                    .as_deref()
+                    .expect("refresh token should exist"),
+            )
             .expect("refresh token recovery should succeed");
 
-        assert_eq!(access, Some(grant.clone()));
-        assert_eq!(refresh, Some(grant));
+        let access = access.expect("access grant should exist");
+        let refresh = refresh.expect("refresh grant should exist");
+
+        assert_grant_matches(&access, &grant);
+        assert_grant_matches(&refresh, &grant);
+        assert_remaining_secs(access.until, access_lifetime_secs as i64);
+        assert_remaining_secs(refresh.until, refresh_lifetime_secs as i64);
     }
 
     #[test]
     fn refresh_rotates_refresh_token_and_replaces_old_access_token() {
-        let mut store = SqliteTokenStore::in_memory().expect("in-memory store should initialize");
+        let access_lifetime_secs = 3600;
+        let refresh_lifetime_secs = 7776000;
+        let mut store = SqliteTokenStore::in_memory(access_lifetime_secs, refresh_lifetime_secs)
+            .expect("in-memory store should initialize");
         let original_grant = sample_grant();
         let issued = store
             .issue(original_grant)
@@ -522,7 +629,10 @@ mod tests {
 
         let refreshed = store
             .refresh(
-                issued.refresh.as_deref().expect("refresh token should exist"),
+                issued
+                    .refresh
+                    .as_deref()
+                    .expect("refresh token should exist"),
                 new_grant.clone(),
             )
             .expect("refresh should succeed");
@@ -531,7 +641,12 @@ mod tests {
             .recover_token(&issued.token)
             .expect("old access token lookup should succeed");
         let old_refresh = store
-            .recover_refresh(issued.refresh.as_deref().expect("refresh token should exist"))
+            .recover_refresh(
+                issued
+                    .refresh
+                    .as_deref()
+                    .expect("refresh token should exist"),
+            )
             .expect("old refresh token lookup should succeed");
         let new_access = store
             .recover_token(&refreshed.token)
@@ -547,7 +662,11 @@ mod tests {
 
         assert_eq!(old_access, None);
         assert_eq!(old_refresh, None);
-        assert_eq!(new_access, Some(new_grant.clone()));
-        assert_eq!(new_refresh, Some(new_grant));
+        let new_access = new_access.expect("new access grant should exist");
+        let new_refresh = new_refresh.expect("new refresh grant should exist");
+        assert_grant_matches(&new_access, &new_grant);
+        assert_grant_matches(&new_refresh, &new_grant);
+        assert_remaining_secs(new_access.until, access_lifetime_secs as i64);
+        assert_remaining_secs(new_refresh.until, refresh_lifetime_secs as i64);
     }
 }

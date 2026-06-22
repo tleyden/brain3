@@ -14,12 +14,12 @@ use oxide_auth::frontends::simple::endpoint::Error as OAuthEndpointError;
 use oxide_auth::frontends::simple::extensions::{AddonList, Pkce};
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
-use oxide_auth_async::endpoint::Endpoint as AsyncEndpoint;
-use oxide_auth_async::endpoint::{Extension as AsyncExtension, OwnerSolicitor};
 use oxide_auth_async::endpoint::access_token::AccessTokenFlow;
 use oxide_auth_async::endpoint::authorization::AuthorizationFlow;
+use oxide_auth_async::endpoint::Endpoint as AsyncEndpoint;
+use oxide_auth_async::endpoint::{Extension as AsyncExtension, OwnerSolicitor};
 use oxide_auth_axum::{OAuthRequest, OAuthResponse, WebError};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use subtle::ConstantTimeEq;
 
 use brain3_core::ports::mcp_proxy::McpProxyPort;
@@ -51,7 +51,8 @@ impl WebRequest for PostBodyRequest {
     type Response = OAuthResponse;
 
     fn query(&mut self) -> Result<Cow<'_, dyn QueryParameter + 'static>, Self::Error> {
-        self.0.body()
+        self.0
+            .body()
             .map(|b| Cow::Borrowed(b as &dyn QueryParameter))
             .ok_or(WebError::Body)
     }
@@ -93,7 +94,9 @@ impl<'a> AsyncEndpoint<PostBodyRequest> for AuthorizeEndpoint<'a> {
         Some(self.registrar)
     }
 
-    fn authorizer_mut(&mut self) -> Option<&mut (dyn oxide_auth_async::primitives::Authorizer + Send)> {
+    fn authorizer_mut(
+        &mut self,
+    ) -> Option<&mut (dyn oxide_auth_async::primitives::Authorizer + Send)> {
         Some(self.authorizer)
     }
 
@@ -109,7 +112,11 @@ impl<'a> AsyncEndpoint<PostBodyRequest> for AuthorizeEndpoint<'a> {
         None
     }
 
-    fn response(&mut self, _: &mut PostBodyRequest, _: Template) -> Result<OAuthResponse, Self::Error> {
+    fn response(
+        &mut self,
+        _: &mut PostBodyRequest,
+        _: Template,
+    ) -> Result<OAuthResponse, Self::Error> {
         Ok(OAuthResponse::default())
     }
 
@@ -140,7 +147,9 @@ impl<'a> AsyncEndpoint<OAuthRequest> for TokenEndpoint<'a> {
         Some(self.registrar)
     }
 
-    fn authorizer_mut(&mut self) -> Option<&mut (dyn oxide_auth_async::primitives::Authorizer + Send)> {
+    fn authorizer_mut(
+        &mut self,
+    ) -> Option<&mut (dyn oxide_auth_async::primitives::Authorizer + Send)> {
         Some(self.authorizer)
     }
 
@@ -156,7 +165,11 @@ impl<'a> AsyncEndpoint<OAuthRequest> for TokenEndpoint<'a> {
         None
     }
 
-    fn response(&mut self, _: &mut OAuthRequest, _: Template) -> Result<OAuthResponse, Self::Error> {
+    fn response(
+        &mut self,
+        _: &mut OAuthRequest,
+        _: Template,
+    ) -> Result<OAuthResponse, Self::Error> {
         Ok(OAuthResponse::default())
     }
 
@@ -254,10 +267,7 @@ fn validate_authorize_params(
     }
 
     if config.oauth.pkce_required {
-        let challenge_empty = params
-            .code_challenge
-            .as_ref()
-            .is_none_or(|s| s.is_empty());
+        let challenge_empty = params.code_challenge.as_ref().is_none_or(|s| s.is_empty());
         if challenge_empty {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -494,7 +504,10 @@ pub async fn oauth_authorize_post<P: McpProxyPort + 'static>(
         tracing::warn!(username = %username, "authorize POST: invalid credentials");
         return (
             StatusCode::UNAUTHORIZED,
-            Html(render_login_form(&params, Some("Invalid username or password"))),
+            Html(render_login_form(
+                &params,
+                Some("Invalid username or password"),
+            )),
         )
             .into_response();
     }

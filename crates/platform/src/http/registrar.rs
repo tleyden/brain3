@@ -1,6 +1,8 @@
 use std::borrow::Cow;
 
-use oxide_auth::primitives::registrar::{BoundClient, ClientUrl, PreGrant, Registrar, RegistrarError};
+use oxide_auth::primitives::registrar::{
+    BoundClient, ClientUrl, PreGrant, Registrar, RegistrarError,
+};
 use oxide_auth::primitives::scope::Scope;
 use subtle::ConstantTimeEq;
 
@@ -21,9 +23,7 @@ impl GatewayRegistrar {
         Self {
             client_id: client_id.into(),
             client_secret: client_secret.into(),
-            default_scope: "read"
-                .parse()
-                .expect("static gateway scope should parse"),
+            default_scope: "read".parse().expect("static gateway scope should parse"),
         }
     }
 }
@@ -58,10 +58,7 @@ impl Registrar for GatewayRegistrar {
     }
 
     fn check(&self, client_id: &str, passphrase: Option<&[u8]>) -> Result<(), RegistrarError> {
-        let client_id_matches = client_id
-            .as_bytes()
-            .ct_eq(self.client_id.as_bytes())
-            .into();
+        let client_id_matches = client_id.as_bytes().ct_eq(self.client_id.as_bytes()).into();
         let provided_secret = passphrase.ok_or(RegistrarError::Unspecified)?;
         let secret_matches = provided_secret.ct_eq(self.client_secret.as_slice()).into();
 
@@ -110,6 +107,9 @@ mod tests {
 
         let result = registrar.check("brain3-oauth2-client", Some(b"hardcoded-secret"));
 
-        assert!(result.is_ok(), "registrar should validate configured client secret");
+        assert!(
+            result.is_ok(),
+            "registrar should validate configured client secret"
+        );
     }
 }

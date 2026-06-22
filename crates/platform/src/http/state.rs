@@ -4,10 +4,10 @@ use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use tokio::sync::Mutex;
 
+use crate::token_store::sqlite::SqliteTokenStore;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::model::GatewayConfig;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
-use crate::token_store::sqlite::SqliteTokenStore;
 
 use super::rate_limit::OAuthRateLimiter;
 use super::registrar::GatewayRegistrar;

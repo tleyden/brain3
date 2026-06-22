@@ -233,11 +233,9 @@ mod tests {
             .take()
             .expect("request should be forwarded");
         assert_eq!(request.url, "http://127.0.0.1:8420/mcp");
-        assert!(
-            !request
-                .headers
-                .iter()
-                .any(|(name, _)| name.eq_ignore_ascii_case("authorization"))
-        );
+        assert!(!request
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("authorization")));
     }
 }

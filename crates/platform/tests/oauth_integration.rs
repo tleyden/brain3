@@ -1,10 +1,10 @@
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use axum_test::TestServer;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
-use oxide_auth::primitives::grant::{Extensions, Grant};
 use oxide_auth::primitives::issuer::Issuer;
 use reqwest::Url;
 use serde_json::Value;
@@ -140,7 +140,11 @@ impl TestHarness {
 
         let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
         let issuer = Arc::new(Mutex::new(
-            SqliteTokenStore::in_memory().expect("in-memory issuer should initialize"),
+            SqliteTokenStore::in_memory(
+                self.oauth.access_token_lifetime_secs,
+                self.oauth.refresh_token_lifetime_secs,
+            )
+            .expect("in-memory issuer should initialize"),
         ));
 
         let proxy = Arc::new(proxy);
@@ -201,8 +205,18 @@ fn extract_code_from_location(location: &str) -> String {
         .expect("redirect location should include code query parameter")
 }
 
+fn unix_now_timestamp() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_secs() as i64
+}
+
 async fn issue_authorization_code(server: &TestServer) -> String {
-    let response = server.post("/oauth/authorize").form(&authorize_form()).await;
+    let response = server
+        .post("/oauth/authorize")
+        .form(&authorize_form())
+        .await;
     let location = response.header("location").to_str().unwrap().to_string();
     extract_code_from_location(&location)
 }
@@ -231,13 +245,8 @@ async fn exchange_code_for_token(
 
 async fn issue_access_token(server: &TestServer) -> String {
     let code = issue_authorization_code(server).await;
-    let response = exchange_code_for_token(
-        server,
-        &code,
-        Some(CLIENT_SECRET),
-        Some(CODE_VERIFIER),
-    )
-    .await;
+    let response =
+        exchange_code_for_token(server, &code, Some(CLIENT_SECRET), Some(CODE_VERIFIER)).await;
     response.assert_status_ok();
 
     let body: Value = response.json();
@@ -245,6 +254,14 @@ async fn issue_access_token(server: &TestServer) -> String {
         .as_str()
         .expect("access_token should be a string")
         .to_string()
+}
+
+async fn exchange_authorization_code(server: &TestServer) -> Value {
+    let code = issue_authorization_code(server).await;
+    let response =
+        exchange_code_for_token(server, &code, Some(CLIENT_SECRET), Some(CODE_VERIFIER)).await;
+    response.assert_status_ok();
+    response.json()
 }
 
 async fn call_mcp(server: &TestServer, token: &str) -> axum_test::TestResponse {
@@ -421,22 +438,12 @@ async fn authorization_code_is_single_use() {
     let server = &built.server;
     let code = issue_authorization_code(&server).await;
 
-    let first = exchange_code_for_token(
-        &server,
-        &code,
-        Some(CLIENT_SECRET),
-        Some(CODE_VERIFIER),
-    )
-    .await;
+    let first =
+        exchange_code_for_token(&server, &code, Some(CLIENT_SECRET), Some(CODE_VERIFIER)).await;
     first.assert_status_ok();
 
-    let second = exchange_code_for_token(
-        &server,
-        &code,
-        Some(CLIENT_SECRET),
-        Some(CODE_VERIFIER),
-    )
-    .await;
+    let second =
+        exchange_code_for_token(&server, &code, Some(CLIENT_SECRET), Some(CODE_VERIFIER)).await;
 
     assert_eq!(second.status_code(), 400);
     let body: Value = second.json();
@@ -445,23 +452,24 @@ async fn authorization_code_is_single_use() {
 
 #[tokio::test]
 async fn mcp_rejects_expired_bearer_token() {
-    let built = TestHarness::default().build_server(MockMcpProxy::should_not_be_called());
-    let expired_token = {
-        let mut issuer = built.issuer.lock().await;
-        issuer
-            .issue(Grant {
-                owner_id: LOGIN_USERNAME.into(),
-                client_id: CLIENT_ID.into(),
-                redirect_uri: REDIRECT_URI.parse().unwrap(),
-                scope: "read".parse().unwrap(),
-                until: "2020-01-01T00:00:00Z".parse().unwrap(),
-                extensions: Extensions::new(),
-            })
-            .expect("issuing an expired token should succeed")
-            .token
-    };
+    let built = TestHarness {
+        oauth: OAuthConfig {
+            client_id: CLIENT_ID.into(),
+            client_secret: CLIENT_SECRET.into(),
+            access_token_lifetime_secs: 1,
+            refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+            pkce_required: true,
+            username: LOGIN_USERNAME.into(),
+            password: LOGIN_PASSWORD.into(),
+        },
+        ..TestHarness::default()
+    }
+    .build_server(MockMcpProxy::should_not_be_called());
+    let token = issue_access_token(&built.server).await;
 
-    let response = call_mcp(&built.server, &expired_token).await;
+    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+
+    let response = call_mcp(&built.server, &token).await;
 
     assert_eq!(response.status_code(), 401);
     let body: Value = response.json();
@@ -471,8 +479,7 @@ async fn mcp_rejects_expired_bearer_token() {
 #[tokio::test]
 async fn mcp_accepts_valid_bearer_token() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let built = TestHarness::default()
-        .build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+    let built = TestHarness::default().build_server(MockMcpProxy::capturing(Arc::clone(&captured)));
     let token = issue_access_token(&built.server).await;
 
     let response = call_mcp(&built.server, &token).await;
@@ -486,10 +493,73 @@ async fn mcp_accepts_valid_bearer_token() {
     let requests = captured.lock().unwrap();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].url, "http://127.0.0.1:8420/mcp");
+    assert!(requests[0]
+        .headers
+        .iter()
+        .all(|(name, _)| name != "authorization"));
+}
+
+#[tokio::test]
+async fn authorization_code_exchange_uses_configured_access_and_refresh_lifetimes() {
+    let access_lifetime_secs = 123;
+    let refresh_lifetime_secs = 456;
+    let built = TestHarness {
+        oauth: OAuthConfig {
+            client_id: CLIENT_ID.into(),
+            client_secret: CLIENT_SECRET.into(),
+            access_token_lifetime_secs: access_lifetime_secs,
+            refresh_token_lifetime_secs: refresh_lifetime_secs,
+            pkce_required: true,
+            username: LOGIN_USERNAME.into(),
+            password: LOGIN_PASSWORD.into(),
+        },
+        ..TestHarness::default()
+    }
+    .build_server(MockMcpProxy::success());
+
+    let token_response = exchange_authorization_code(&built.server).await;
+    let access_token = token_response["access_token"]
+        .as_str()
+        .expect("access_token should be present")
+        .to_string();
+    let refresh_token = token_response["refresh_token"]
+        .as_str()
+        .expect("refresh_token should be present")
+        .to_string();
+    let expires_in = token_response["expires_in"]
+        .as_i64()
+        .expect("expires_in should be present");
+
     assert!(
-        requests[0]
-            .headers
-            .iter()
-            .all(|(name, _)| name != "authorization")
+        expires_in >= access_lifetime_secs as i64 - 2 && expires_in <= access_lifetime_secs as i64,
+        "expected expires_in near configured access lifetime, got {expires_in}",
+    );
+
+    let (access_grant, refresh_grant) = {
+        let issuer = built.issuer.lock().await;
+        let access_grant = issuer
+            .recover_token(&access_token)
+            .expect("access token recovery should succeed")
+            .expect("access token should exist");
+        let refresh_grant = issuer
+            .recover_refresh(&refresh_token)
+            .expect("refresh token recovery should succeed")
+            .expect("refresh token should exist");
+        (access_grant, refresh_grant)
+    };
+
+    let now = unix_now_timestamp();
+    let access_remaining = access_grant.until.timestamp() - now;
+    let refresh_remaining = refresh_grant.until.timestamp() - now;
+
+    assert!(
+        access_remaining >= access_lifetime_secs as i64 - 2
+            && access_remaining <= access_lifetime_secs as i64,
+        "expected access grant lifetime near configured value, got {access_remaining}",
+    );
+    assert!(
+        refresh_remaining >= refresh_lifetime_secs as i64 - 2
+            && refresh_remaining <= refresh_lifetime_secs as i64,
+        "expected refresh grant lifetime near configured value, got {refresh_remaining}",
     );
 }
