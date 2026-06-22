@@ -15,7 +15,6 @@ use oxide_auth::frontends::simple::extensions::{AddonList, Pkce};
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use oxide_auth::primitives::issuer::TokenMap;
-use oxide_auth::primitives::registrar::ClientMap;
 use oxide_auth_async::endpoint::Endpoint as AsyncEndpoint;
 use oxide_auth_async::endpoint::{Extension as AsyncExtension, OwnerSolicitor};
 use oxide_auth_async::endpoint::access_token::AccessTokenFlow;
@@ -26,7 +25,7 @@ use subtle::ConstantTimeEq;
 
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
-use super::registrar::BrainRegistrar;
+use super::registrar::GatewayRegistrar;
 use super::state::AppState;
 use super::templates::{render_login_form, render_misconfigured_page, LoginFormParams};
 
@@ -80,7 +79,7 @@ impl OwnerSolicitor<PostBodyRequest> for GrantSolicitor {
 }
 
 struct AuthorizeEndpoint<'a> {
-    registrar: &'a BrainRegistrar,
+    registrar: &'a GatewayRegistrar,
     authorizer: &'a mut AuthMap<RandomGenerator>,
     issuer: &'a mut TokenMap<RandomGenerator>,
     solicitor: GrantSolicitor,
@@ -128,7 +127,7 @@ impl<'a> AsyncEndpoint<PostBodyRequest> for AuthorizeEndpoint<'a> {
 }
 
 struct TokenEndpoint<'a> {
-    registrar: &'a ClientMap,
+    registrar: &'a GatewayRegistrar,
     authorizer: &'a mut AuthMap<RandomGenerator>,
     issuer: &'a mut TokenMap<RandomGenerator>,
     extensions: AddonList,
@@ -512,7 +511,7 @@ pub async fn oauth_authorize_post<P: McpProxyPort + 'static>(
     extensions.push_code(Pkce::optional());
 
     let endpoint = AuthorizeEndpoint {
-        registrar: state.auth_registrar.as_ref(),
+        registrar: state.registrar.as_ref(),
         authorizer: &mut *authorizer,
         issuer: &mut *issuer,
         solicitor: GrantSolicitor(username),
@@ -570,7 +569,7 @@ pub async fn oauth_token<P: McpProxyPort + 'static>(
     extensions.push_access_token(Pkce::optional());
 
     let endpoint = TokenEndpoint {
-        registrar: state.token_registrar.as_ref(),
+        registrar: state.registrar.as_ref(),
         authorizer: &mut *authorizer,
         issuer: &mut *issuer,
         extensions,

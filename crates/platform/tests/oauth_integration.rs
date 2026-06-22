@@ -5,7 +5,6 @@ use axum_test::TestServer;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use oxide_auth::primitives::issuer::TokenMap;
-use oxide_auth::primitives::registrar::{Client, ClientMap, RegisteredUrl};
 use reqwest::Url;
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -18,7 +17,7 @@ use brain3_core::domain::model::{
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
 use brain3_core::ports::token_store::TokenStore;
 
-use brain3_platform::http::registrar::BrainRegistrar;
+use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::token_store::token_map::TokenMapStore;
@@ -140,20 +139,10 @@ impl Default for TestHarness {
 
 impl TestHarness {
     fn build_server(self, proxy: MockMcpProxy) -> TestServer {
-        let auth_registrar = Arc::new(BrainRegistrar::new(&self.oauth.client_id));
-
-        let mut client_map = ClientMap::new();
-        client_map.register_client(Client::confidential(
+        let registrar = Arc::new(GatewayRegistrar::new(
             &self.oauth.client_id,
-            RegisteredUrl::Exact(
-                "https://example.com/callback"
-                    .parse()
-                    .expect("static URL valid"),
-            ),
-            "read".parse().expect("static scope valid"),
-            self.oauth.client_secret.as_bytes(),
+            self.oauth.client_secret.as_bytes().to_vec(),
         ));
-        let token_registrar = Arc::new(client_map);
 
         let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
         let issuer = Arc::new(Mutex::new(TokenMap::new(RandomGenerator::new(32))));
@@ -185,8 +174,7 @@ impl TestHarness {
         });
 
         let state = AppState {
-            auth_registrar,
-            token_registrar,
+            registrar,
             authorizer,
             issuer,
             proxy_mcp,

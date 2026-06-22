@@ -7,7 +7,6 @@ use axum::Router;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use oxide_auth::primitives::issuer::TokenMap;
-use oxide_auth::primitives::registrar::{Client, ClientMap, RegisteredUrl};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
@@ -19,7 +18,7 @@ use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::token_store::TokenStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
-use brain3_platform::http::registrar::BrainRegistrar;
+use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
@@ -202,22 +201,10 @@ async fn bind_listener(host: &str, port: u16) -> Result<TcpListener> {
 }
 
 fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> Result<Router> {
-    let auth_registrar = Arc::new(BrainRegistrar::new(&config.oauth.client_id));
-
-    // ClientMap is only used in the token flow for client_id + client_secret validation.
-    // The redirect_uri registered here is unused — ClientMap::check() does not verify it.
-    let mut client_map = ClientMap::new();
-    client_map.register_client(Client::confidential(
+    let registrar = Arc::new(GatewayRegistrar::new(
         &config.oauth.client_id,
-        RegisteredUrl::Exact(
-            "https://brain3.internal/oauth/callback"
-                .parse()
-                .expect("static URL is valid"),
-        ),
-        "read".parse().expect("static scope is valid"),
-        config.oauth.client_secret.as_bytes(),
+        config.oauth.client_secret.as_bytes().to_vec(),
     ));
-    let token_registrar = Arc::new(client_map);
 
     let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
     let issuer = Arc::new(Mutex::new(TokenMap::new(RandomGenerator::new(32))));
@@ -234,8 +221,7 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
     ));
 
     let app_state = AppState {
-        auth_registrar,
-        token_registrar,
+        registrar,
         authorizer,
         issuer,
         proxy_mcp,
