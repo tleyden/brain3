@@ -105,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn registrar_rejects_client_secret_checks_today() {
+    fn registrar_validates_configured_client_secret() {
         let registrar = GatewayRegistrar::new("brain3-oauth2-client", b"hardcoded-secret".to_vec());
 
         let result = registrar.check("brain3-oauth2-client", Some(b"hardcoded-secret"));

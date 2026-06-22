@@ -320,6 +320,9 @@ async fn normalize_token_error_response(
     response: OAuthResponse,
     request_shape: &TokenRequestShape,
 ) -> Response {
+    // oxide-auth reports several authorization-code reuse/PKCE failures as
+    // invalid_request; the gateway keeps the public OAuth surface aligned with
+    // invalid_grant for those token-exchange cases.
     let response = response.into_response();
     let should_normalize = response.status() == StatusCode::BAD_REQUEST
         && request_shape.grant_type.as_deref() == Some("authorization_code")
