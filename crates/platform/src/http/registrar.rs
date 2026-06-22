@@ -63,12 +63,15 @@ impl Registrar for GatewayRegistrar {
         let secret_matches = provided_secret.ct_eq(self.client_secret.as_slice()).into();
 
         if client_id_matches && secret_matches {
+            tracing::debug!(client_id = %client_id, "GatewayRegistrar: client credentials valid");
             Ok(())
         } else {
-            tracing::debug!(
+            tracing::warn!(
                 submitted = %client_id,
                 expected = %self.client_id,
-                "GatewayRegistrar: client credential validation failed"
+                client_id_ok = client_id_matches,
+                secret_ok = secret_matches,
+                "GatewayRegistrar: client credential validation FAILED"
             );
             Err(RegistrarError::Unspecified)
         }

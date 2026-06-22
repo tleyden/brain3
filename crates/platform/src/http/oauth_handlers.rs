@@ -306,6 +306,7 @@ struct TokenRequestShape {
     has_client_id: bool,
     has_redirect_uri: bool,
     has_code: bool,
+    has_refresh_token: bool,
 }
 
 fn token_request_shape(request: &OAuthRequest) -> TokenRequestShape {
@@ -321,6 +322,9 @@ fn token_request_shape(request: &OAuthRequest) -> TokenRequestShape {
             .and_then(|body| body.unique_value("redirect_uri"))
             .is_some(),
         has_code: body.and_then(|body| body.unique_value("code")).is_some(),
+        has_refresh_token: body
+            .and_then(|body| body.unique_value("refresh_token"))
+            .is_some(),
     }
 }
 
@@ -332,7 +336,22 @@ async fn normalize_token_error_response(
     // invalid_request; the gateway keeps the public OAuth surface aligned with
     // invalid_grant for those token-exchange cases.
     let response = response.into_response();
-    let should_normalize = response.status() == StatusCode::BAD_REQUEST
+    let status = response.status();
+    if status.is_success() {
+        tracing::info!(
+            http_status = status.as_u16(),
+            grant_type = ?request_shape.grant_type,
+            "token endpoint: oxide-auth issued token successfully"
+        );
+    } else {
+        tracing::warn!(
+            http_status = status.as_u16(),
+            grant_type = ?request_shape.grant_type,
+            "token endpoint: oxide-auth returned error response"
+        );
+    }
+
+    let should_normalize = status == StatusCode::BAD_REQUEST
         && request_shape.grant_type.as_deref() == Some("authorization_code")
         && request_shape.has_client_id
         && request_shape.has_redirect_uri
@@ -364,6 +383,10 @@ async fn normalize_token_error_response(
         return (parts.status, parts.headers, body_bytes).into_response();
     }
 
+    tracing::warn!(
+        grant_type = ?request_shape.grant_type,
+        "token endpoint: normalized oxide-auth invalid_request → invalid_grant"
+    );
     json_body["error"] = Value::String("invalid_grant".into());
     (parts.status, parts.headers, Json(json_body)).into_response()
 }
@@ -566,6 +589,14 @@ pub async fn oauth_token<P: McpProxyPort + 'static>(
     let mut authorizer = state.authorizer.lock().await;
     let mut issuer = state.issuer.lock().await;
     let request_shape = token_request_shape(&request);
+
+    tracing::info!(
+        grant_type = ?request_shape.grant_type,
+        has_code = request_shape.has_code,
+        has_refresh_token = request_shape.has_refresh_token,
+        "oauth/token endpoint invoked"
+    );
+
     if let Some(body) = request.body() {
         tracing::debug!(
             grant_type = ?body.unique_value("grant_type"),
@@ -574,8 +605,9 @@ pub async fn oauth_token<P: McpProxyPort + 'static>(
             has_client_secret = body.unique_value("client_secret").is_some(),
             has_code = body.unique_value("code").is_some(),
             has_code_verifier = body.unique_value("code_verifier").is_some(),
+            has_refresh_token = body.unique_value("refresh_token").is_some(),
             has_authorization = request.authorization_header().is_some(),
-            "oauth token request parsed"
+            "oauth token request details"
         );
     }
 
