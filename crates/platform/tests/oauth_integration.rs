@@ -501,6 +501,16 @@ async fn refresh_token_exchange_succeeds() {
     assert_ne!(refreshed_access_token, original_access_token);
     assert_ne!(refreshed_refresh_token, original_refresh_token);
 
+    let replay_response = exchange_refresh_token(
+        &built.server,
+        &original_refresh_token,
+        Some(CLIENT_SECRET),
+    )
+    .await;
+    assert_eq!(replay_response.status_code(), 400);
+    let replay_body: Value = replay_response.json();
+    assert_eq!(replay_body["error"], "invalid_grant");
+
     let revoked_response = call_mcp(&built.server, &original_access_token).await;
     assert_eq!(revoked_response.status_code(), 401);
     let revoked_body: Value = revoked_response.json();
