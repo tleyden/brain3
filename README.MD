@@ -305,7 +305,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 - **Tampered release binaries** — release assets on S3/GitHub are not yet signed or checksummed, so a compromised distribution path could serve a modified binary.
 - **Container port exposure (macOS)** — it is not yet confirmed whether the mapped container port is accessible only to the gateway or to any local process, which could allow OAuth bypass.
 - **No process sandboxing** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
-- **Hand-rolled OAuth 2.1** — Brain3 implements OAuth 2.1 itself rather than using a battle-tested library; Rust memory safety does not prevent protocol-level logic bugs. See `docs/SECURITY_AUDIT_LATEST.md` §6.4.
+- **Oxide-auth-based OAuth 2.1 integration** — Brain3 now builds OAuth 2.1 on `oxide-auth`, which reduces hand-rolled protocol risk, but Rust memory safety still does not prevent protocol-level integration bugs. See `docs/SECURITY_AUDIT_LATEST.md` §6.4.
 - **Plaintext secret storage** — all secrets (password, client secret, upstream shared secret) are stored in plaintext in `~/.brain3/.env` (file permissions are `0600`, but no encryption at rest).
 - **No hostname validation in default (quick tunnel) mode** — hostname validation (HTTP 421 on unexpected `Host` headers) only works with named Cloudflare tunnels tied to a DNS record. The default quick tunnel setup currently disables it entirely. 
 
