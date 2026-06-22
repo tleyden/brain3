@@ -1,28 +1,30 @@
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
-use std::time::Duration;
 
 use anyhow::{Context, Result};
 use axum::Router;
+use oxide_auth::primitives::authorizer::AuthMap;
+use oxide_auth::primitives::generator::RandomGenerator;
+use oxide_auth::primitives::issuer::TokenMap;
+use oxide_auth::primitives::registrar::{Client, ClientMap, RegisteredUrl};
 use tokio::net::TcpListener;
-use tokio::sync::oneshot;
+use tokio::sync::{Mutex, oneshot};
 use tokio::task::JoinHandle;
 
-use brain3_core::application::authorize::AuthorizeUseCase;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
-use brain3_core::application::token_exchange::TokenExchangeUseCase;
 use brain3_core::domain::model::GatewayConfig;
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::config::ConfigPort;
-use brain3_platform::auth_code_store::in_memory::InMemoryAuthCodeStore;
+use brain3_core::ports::token_store::TokenStore;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
+use brain3_platform::http::registrar::BrainRegistrar;
 use brain3_platform::http::router::build_router;
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
-use brain3_platform::token_store::sqlite::SqliteTokenStore;
+use brain3_platform::token_store::token_map::TokenMapStore;
 
 use crate::{apply_runtime_overrides, RuntimeOverrides};
 
@@ -200,29 +202,29 @@ async fn bind_listener(host: &str, port: u16) -> Result<TcpListener> {
 }
 
 fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> Result<Router> {
-    let auth_code_store = Arc::new(InMemoryAuthCodeStore::new());
+    let auth_registrar = Arc::new(BrainRegistrar::new(&config.oauth.client_id));
+
+    // ClientMap is only used in the token flow for client_id + client_secret validation.
+    // The redirect_uri registered here is unused — ClientMap::check() does not verify it.
+    let mut client_map = ClientMap::new();
+    client_map.register_client(Client::confidential(
+        &config.oauth.client_id,
+        RegisteredUrl::Exact(
+            "https://brain3.internal/oauth/callback"
+                .parse()
+                .expect("static URL is valid"),
+        ),
+        "read".parse().expect("static scope is valid"),
+        config.oauth.client_secret.as_bytes(),
+    ));
+    let token_registrar = Arc::new(client_map);
+
+    let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
+    let issuer = Arc::new(Mutex::new(TokenMap::new(RandomGenerator::new(32))));
+
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
-    let oauth_config = Arc::new(config.oauth.clone());
-    let token_store: Arc<dyn brain3_core::ports::token_store::TokenStore> = Arc::new(
-        SqliteTokenStore::from_path(&config.token_db_path).with_context(|| {
-            format!(
-                "failed to initialize token store at {}",
-                config.token_db_path.display()
-            )
-        })?,
-    );
+    let token_store: Arc<dyn TokenStore> = Arc::new(TokenMapStore::new(Arc::clone(&issuer)));
 
-    spawn_token_cleanup_task(Arc::clone(&token_store));
-
-    let authorize = Arc::new(AuthorizeUseCase::new(
-        Arc::clone(&oauth_config),
-        Arc::clone(&auth_code_store),
-    ));
-    let token_exchange = Arc::new(TokenExchangeUseCase::new(
-        Arc::clone(&oauth_config),
-        Arc::clone(&auth_code_store),
-        Arc::clone(&token_store),
-    ));
     let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
         mcp_proxy,
         config.mcp_reverse_proxy.mcp_upstream_url.clone(),
@@ -232,26 +234,16 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
     ));
 
     let app_state = AppState {
-        authorize,
-        token_exchange,
+        auth_registrar,
+        token_registrar,
+        authorizer,
+        issuer,
         proxy_mcp,
         config,
         rate_limiter: Arc::new(OAuthRateLimiter::new()),
     };
 
     Ok(build_router(app_state))
-}
-
-fn spawn_token_cleanup_task(token_store: Arc<dyn brain3_core::ports::token_store::TokenStore>) {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(300));
-        loop {
-            interval.tick().await;
-            if let Err(error) = token_store.cleanup_expired().await {
-                tracing::warn!(%error, "failed to clean up expired access tokens");
-            }
-        }
-    });
 }
 
 fn local_url_from_addr(addr: SocketAddr) -> String {

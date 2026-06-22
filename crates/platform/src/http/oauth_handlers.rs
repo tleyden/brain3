@@ -1,20 +1,181 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
+use async_trait::async_trait;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{Html, IntoResponse, Redirect, Response};
-use axum::Form;
+use axum::response::{Html, IntoResponse, Response};
 use axum::Json;
+use oxide_auth::endpoint::{
+    OAuthError, OwnerConsent, QueryParameter, Scopes, Solicitation, Template, WebRequest,
+};
+use oxide_auth::frontends::simple::endpoint::Error as OAuthEndpointError;
+use oxide_auth::frontends::simple::extensions::{AddonList, Pkce};
+use oxide_auth::primitives::authorizer::AuthMap;
+use oxide_auth::primitives::generator::RandomGenerator;
+use oxide_auth::primitives::issuer::TokenMap;
+use oxide_auth::primitives::registrar::ClientMap;
+use oxide_auth_async::endpoint::Endpoint as AsyncEndpoint;
+use oxide_auth_async::endpoint::{Extension as AsyncExtension, OwnerSolicitor};
+use oxide_auth_async::endpoint::access_token::AccessTokenFlow;
+use oxide_auth_async::endpoint::authorization::AuthorizationFlow;
+use oxide_auth_axum::{OAuthRequest, OAuthResponse, WebError};
 use serde_json::json;
+use subtle::ConstantTimeEq;
 
-use brain3_core::domain::errors::OAuthError;
-use brain3_core::domain::oauth::{AuthorizeRequest, TokenRequest};
-use brain3_core::domain::redact::elide_secret;
-use brain3_core::ports::auth_code_store::AuthCodeStore;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
+use super::registrar::BrainRegistrar;
 use super::state::AppState;
-use super::templates::{render_login_form, render_misconfigured_page};
+use super::templates::{render_login_form, render_misconfigured_page, LoginFormParams};
+
+// ---------------------------------------------------------------------------
+// Async endpoint structs
+// ---------------------------------------------------------------------------
+
+/// Wraps an OAuthRequest so that `query()` returns the POST body params.
+///
+/// The authorization form POSTs OAuth params (response_type, client_id, etc.)
+/// in the body alongside credentials. oxide-auth's AuthorizationFlow reads
+/// OAuth params via `request.query()`, so we redirect the body to query here.
+struct PostBodyRequest(OAuthRequest);
+
+impl std::fmt::Debug for PostBodyRequest {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("PostBodyRequest")
+    }
+}
+
+impl WebRequest for PostBodyRequest {
+    type Error = WebError;
+    type Response = OAuthResponse;
+
+    fn query(&mut self) -> Result<Cow<dyn QueryParameter + 'static>, Self::Error> {
+        self.0.body()
+            .map(|b| Cow::Borrowed(b as &dyn QueryParameter))
+            .ok_or(WebError::Body)
+    }
+
+    fn urlbody(&mut self) -> Result<Cow<dyn QueryParameter + 'static>, Self::Error> {
+        self.0.urlbody()
+    }
+
+    fn authheader(&mut self) -> Result<Option<Cow<str>>, Self::Error> {
+        self.0.authheader()
+    }
+}
+
+struct GrantSolicitor(String);
+
+#[async_trait]
+impl OwnerSolicitor<PostBodyRequest> for GrantSolicitor {
+    async fn check_consent(
+        &mut self,
+        _: &mut PostBodyRequest,
+        _: Solicitation<'_>,
+    ) -> OwnerConsent<OAuthResponse> {
+        OwnerConsent::Authorized(self.0.clone())
+    }
+}
+
+struct AuthorizeEndpoint<'a> {
+    registrar: &'a BrainRegistrar,
+    authorizer: &'a mut AuthMap<RandomGenerator>,
+    issuer: &'a mut TokenMap<RandomGenerator>,
+    solicitor: GrantSolicitor,
+    extensions: AddonList,
+}
+
+impl<'a> AsyncEndpoint<PostBodyRequest> for AuthorizeEndpoint<'a> {
+    type Error = OAuthEndpointError<PostBodyRequest>;
+
+    fn registrar(&self) -> Option<&(dyn oxide_auth_async::primitives::Registrar + Sync)> {
+        Some(self.registrar)
+    }
+
+    fn authorizer_mut(&mut self) -> Option<&mut (dyn oxide_auth_async::primitives::Authorizer + Send)> {
+        Some(self.authorizer)
+    }
+
+    fn issuer_mut(&mut self) -> Option<&mut (dyn oxide_auth_async::primitives::Issuer + Send)> {
+        Some(self.issuer)
+    }
+
+    fn owner_solicitor(&mut self) -> Option<&mut (dyn OwnerSolicitor<PostBodyRequest> + Send)> {
+        Some(&mut self.solicitor)
+    }
+
+    fn scopes(&mut self) -> Option<&mut dyn Scopes<PostBodyRequest>> {
+        None
+    }
+
+    fn response(&mut self, _: &mut PostBodyRequest, _: Template) -> Result<OAuthResponse, Self::Error> {
+        Ok(OAuthResponse::default())
+    }
+
+    fn error(&mut self, err: OAuthError) -> Self::Error {
+        OAuthEndpointError::OAuth(err)
+    }
+
+    fn web_error(&mut self, err: WebError) -> Self::Error {
+        OAuthEndpointError::Web(err)
+    }
+
+    fn extension(&mut self) -> Option<&mut (dyn AsyncExtension + Send)> {
+        Some(&mut self.extensions)
+    }
+}
+
+struct TokenEndpoint<'a> {
+    registrar: &'a ClientMap,
+    authorizer: &'a mut AuthMap<RandomGenerator>,
+    issuer: &'a mut TokenMap<RandomGenerator>,
+    extensions: AddonList,
+}
+
+impl<'a> AsyncEndpoint<OAuthRequest> for TokenEndpoint<'a> {
+    type Error = OAuthEndpointError<OAuthRequest>;
+
+    fn registrar(&self) -> Option<&(dyn oxide_auth_async::primitives::Registrar + Sync)> {
+        Some(self.registrar)
+    }
+
+    fn authorizer_mut(&mut self) -> Option<&mut (dyn oxide_auth_async::primitives::Authorizer + Send)> {
+        Some(self.authorizer)
+    }
+
+    fn issuer_mut(&mut self) -> Option<&mut (dyn oxide_auth_async::primitives::Issuer + Send)> {
+        Some(self.issuer)
+    }
+
+    fn owner_solicitor(&mut self) -> Option<&mut (dyn OwnerSolicitor<OAuthRequest> + Send)> {
+        None
+    }
+
+    fn scopes(&mut self) -> Option<&mut dyn Scopes<OAuthRequest>> {
+        None
+    }
+
+    fn response(&mut self, _: &mut OAuthRequest, _: Template) -> Result<OAuthResponse, Self::Error> {
+        Ok(OAuthResponse::default())
+    }
+
+    fn error(&mut self, err: OAuthError) -> Self::Error {
+        OAuthEndpointError::OAuth(err)
+    }
+
+    fn web_error(&mut self, err: WebError) -> Self::Error {
+        OAuthEndpointError::Web(err)
+    }
+
+    fn extension(&mut self) -> Option<&mut (dyn AsyncExtension + Send)> {
+        Some(&mut self.extensions)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Utility helpers
+// ---------------------------------------------------------------------------
 
 fn resolve_base_url(headers: &HeaderMap) -> String {
     let proto = headers
@@ -36,7 +197,7 @@ fn rate_limit_response(retry_after_secs: u64) -> Response {
             axum::http::header::RETRY_AFTER,
             retry_after_secs.to_string(),
         )],
-        Json(serde_json::json!({
+        Json(json!({
             "error": "rate_limit_exceeded",
             "error_description": "Too many attempts. Try again later."
         })),
@@ -44,43 +205,100 @@ fn rate_limit_response(retry_after_secs: u64) -> Response {
         .into_response()
 }
 
-fn oauth_error_response(err: OAuthError) -> Response {
-    let status =
-        StatusCode::from_u16(err.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    let mut body = serde_json::Map::new();
-    body.insert(
-        "error".into(),
-        serde_json::Value::String(err.error_code().into()),
-    );
-    if let Some(desc) = err.error_description() {
-        body.insert(
-            "error_description".into(),
-            serde_json::Value::String(desc.into()),
-        );
-    }
-    (status, Json(serde_json::Value::Object(body))).into_response()
+fn login_configured(config: &brain3_core::domain::model::GatewayConfig) -> bool {
+    !config.oauth.password.is_empty() && !config.oauth.username.is_empty()
 }
 
-fn parse_authorize_request(source: &HashMap<String, String>) -> AuthorizeRequest {
-    AuthorizeRequest {
-        response_type: source.get("response_type").cloned().unwrap_or_default(),
-        client_id: source.get("client_id").cloned().unwrap_or_default(),
-        redirect_uri: source.get("redirect_uri").cloned().unwrap_or_default(),
-        state: source.get("state").cloned().filter(|s| !s.is_empty()),
-        code_challenge: source
-            .get("code_challenge")
-            .cloned()
-            .filter(|s| !s.is_empty()),
-        code_challenge_method: source
+fn check_credentials(
+    username: &str,
+    password: &str,
+    config: &brain3_core::domain::model::GatewayConfig,
+) -> bool {
+    let u_match = username
+        .as_bytes()
+        .ct_eq(config.oauth.username.as_bytes())
+        .into();
+    let p_match = password
+        .as_bytes()
+        .ct_eq(config.oauth.password.as_bytes())
+        .into();
+    u_match && p_match
+}
+
+fn validate_authorize_params(
+    params: &LoginFormParams,
+    config: &brain3_core::domain::model::GatewayConfig,
+) -> Result<(), Response> {
+    if params.response_type != "code" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "unsupported_response_type"})),
+        )
+            .into_response());
+    }
+
+    if params.client_id.is_empty() || params.client_id != config.oauth.client_id {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(json!({"error": "invalid_client"})),
+        )
+            .into_response());
+    }
+
+    if params.redirect_uri.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({"error": "invalid_request", "error_description": "redirect_uri required"})),
+        )
+            .into_response());
+    }
+
+    if config.oauth.pkce_required {
+        let challenge_empty = params
+            .code_challenge
+            .as_ref()
+            .is_none_or(|s| s.is_empty());
+        if challenge_empty {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(json!({"error": "invalid_request", "error_description": "code_challenge required"})),
+            )
+                .into_response());
+        }
+        if let Some(method) = &params.code_challenge_method {
+            if method != "S256" {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(json!({"error": "invalid_request", "error_description": "code_challenge_method must be S256"})),
+                )
+                    .into_response());
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn parse_params_from_map(map: &HashMap<String, String>) -> LoginFormParams {
+    LoginFormParams {
+        response_type: map.get("response_type").cloned().unwrap_or_default(),
+        client_id: map.get("client_id").cloned().unwrap_or_default(),
+        redirect_uri: map.get("redirect_uri").cloned().unwrap_or_default(),
+        state: map.get("state").cloned().filter(|s| !s.is_empty()),
+        code_challenge: map.get("code_challenge").cloned().filter(|s| !s.is_empty()),
+        code_challenge_method: map
             .get("code_challenge_method")
             .cloned()
-            .filter(|s| !s.is_empty())
-            .or(Some("S256".into())),
+            .filter(|s| !s.is_empty()),
     }
 }
 
-pub async fn oauth_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(_state): State<AppState<S, P>>,
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+pub async fn oauth_metadata<P: McpProxyPort + 'static>(
+    State(_state): State<AppState<P>>,
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let base_url = resolve_base_url(&headers);
@@ -101,33 +319,29 @@ pub async fn oauth_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'stati
     }))
 }
 
-pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(state): State<AppState<S, P>>,
+pub async fn oauth_authorize_get<P: McpProxyPort + 'static>(
+    State(state): State<AppState<P>>,
     axum::extract::Query(query): axum::extract::Query<HashMap<String, String>>,
 ) -> Response {
-    let req = parse_authorize_request(&query);
+    let params = parse_params_from_map(&query);
 
     tracing::info!(
-        client_id = %req.client_id,
-        redirect_uri = %req.redirect_uri,
-        response_type = %req.response_type,
-        has_code_challenge = req.code_challenge.is_some(),
-        state = ?req.state,
+        client_id = %params.client_id,
+        redirect_uri = %params.redirect_uri,
+        response_type = %params.response_type,
+        has_code_challenge = params.code_challenge.is_some(),
         "authorize GET received"
     );
 
-    if let Err(e) = state.authorize.validate(&req) {
+    if let Err(resp) = validate_authorize_params(&params, &state.config) {
         tracing::warn!(
-            client_id = %req.client_id,
-            redirect_uri = %req.redirect_uri,
-            response_type = %req.response_type,
-            error = ?e,
-            "authorize request rejected"
+            client_id = %params.client_id,
+            "authorize GET rejected at validation"
         );
-        return oauth_error_response(e);
+        return resp;
     }
 
-    if !state.authorize.login_configured() {
+    if !login_configured(&state.config) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Html(render_misconfigured_page()),
@@ -135,13 +349,13 @@ pub async fn oauth_authorize_get<S: AuthCodeStore + 'static, P: McpProxyPort + '
             .into_response();
     }
 
-    Html(render_login_form(&req, None)).into_response()
+    Html(render_login_form(&params, None)).into_response()
 }
 
-pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(state): State<AppState<S, P>>,
+pub async fn oauth_authorize_post<P: McpProxyPort + 'static>(
+    State(state): State<AppState<P>>,
     headers: HeaderMap,
-    Form(form): Form<HashMap<String, String>>,
+    request: OAuthRequest,
 ) -> Response {
     if let Err(retry_after) = state.rate_limiter.check(&headers) {
         tracing::warn!(
@@ -151,20 +365,59 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
         return rate_limit_response(retry_after);
     }
 
-    let req = parse_authorize_request(&form);
+    // Read body fields before passing request into the flow.
+    // OAuthRequest caches the parsed body so the flow can re-read it.
+    let (username, password, params) = {
+        let body = match request.body() {
+            Some(b) => b,
+            None => return StatusCode::BAD_REQUEST.into_response(),
+        };
+        let username = body
+            .unique_value("username")
+            .map(|v| v.into_owned())
+            .unwrap_or_default();
+        let password = body
+            .unique_value("password")
+            .map(|v| v.into_owned())
+            .unwrap_or_default();
+        let params = LoginFormParams {
+            response_type: body
+                .unique_value("response_type")
+                .map(|v| v.into_owned())
+                .unwrap_or_default(),
+            client_id: body
+                .unique_value("client_id")
+                .map(|v| v.into_owned())
+                .unwrap_or_default(),
+            redirect_uri: body
+                .unique_value("redirect_uri")
+                .map(|v| v.into_owned())
+                .unwrap_or_default(),
+            state: body
+                .unique_value("state")
+                .map(|v| v.into_owned())
+                .filter(|s| !s.is_empty()),
+            code_challenge: body
+                .unique_value("code_challenge")
+                .map(|v| v.into_owned())
+                .filter(|s| !s.is_empty()),
+            code_challenge_method: body
+                .unique_value("code_challenge_method")
+                .map(|v| v.into_owned())
+                .filter(|s| !s.is_empty()),
+        };
+        (username, password, params)
+    };
 
-    if let Err(e) = state.authorize.validate(&req) {
+    if let Err(resp) = validate_authorize_params(&params, &state.config) {
         tracing::warn!(
-            client_id = %req.client_id,
-            redirect_uri = %req.redirect_uri,
-            response_type = %req.response_type,
-            error = ?e,
+            client_id = %params.client_id,
             "authorize POST rejected at validation"
         );
-        return oauth_error_response(e);
+        return resp;
     }
 
-    if !state.authorize.login_configured() {
+    if !login_configured(&state.config) {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Html(render_misconfigured_page()),
@@ -172,44 +425,57 @@ pub async fn oauth_authorize_post<S: AuthCodeStore + 'static, P: McpProxyPort + 
             .into_response();
     }
 
-    let username = form.get("username").cloned().unwrap_or_default();
-    let password = form.get("password").cloned().unwrap_or_default();
-
-    if !state.authorize.check_credentials(&username, &password) {
-        tracing::warn!(username = %username, "authorize POST rejected: invalid credentials");
+    if !check_credentials(&username, &password, &state.config) {
+        tracing::warn!(username = %username, "authorize POST: invalid credentials");
         return (
             StatusCode::UNAUTHORIZED,
-            Html(render_login_form(
-                &req,
-                Some("Invalid username or password"),
-            )),
+            Html(render_login_form(&params, Some("Invalid username or password"))),
         )
             .into_response();
     }
 
-    let code = state.authorize.issue_code(&req).await;
     tracing::info!(
-        "OAuth authorization code issued, redirecting to {}...",
-        &req.redirect_uri[..req.redirect_uri.len().min(50)]
+        client_id = %params.client_id,
+        redirect_uri_prefix = %&params.redirect_uri[..params.redirect_uri.len().min(50)],
+        "credentials valid, issuing authorization code"
     );
 
-    let separator = if req.redirect_uri.contains('?') {
-        "&"
-    } else {
-        "?"
-    };
-    let mut redirect_url = format!("{}{}code={}", req.redirect_uri, separator, code);
-    if let Some(ref state_val) = req.state {
-        redirect_url.push_str(&format!("&state={}", urlencoding::encode(state_val)));
-    }
+    let mut authorizer = state.authorizer.lock().await;
+    let mut issuer = state.issuer.lock().await;
 
-    Redirect::to(&redirect_url).into_response()
+    let mut extensions = AddonList::new();
+    extensions.push_code(Pkce::optional());
+
+    let endpoint = AuthorizeEndpoint {
+        registrar: state.auth_registrar.as_ref(),
+        authorizer: &mut *authorizer,
+        issuer: &mut *issuer,
+        solicitor: GrantSolicitor(username),
+        extensions,
+    };
+
+    // Wrap request so oxide-auth's AuthorizationFlow sees OAuth params via query().
+    let request_for_flow = PostBodyRequest(request);
+
+    match AuthorizationFlow::prepare(endpoint) {
+        Err(e) => {
+            tracing::error!("AuthorizationFlow::prepare failed: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+        Ok(mut flow) => match flow.execute(request_for_flow).await {
+            Ok(response) => response.into_response(),
+            Err(e) => {
+                tracing::error!("AuthorizationFlow::execute failed: {:?}", e);
+                StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            }
+        },
+    }
 }
 
-pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(state): State<AppState<S, P>>,
+pub async fn oauth_token<P: McpProxyPort + 'static>(
+    State(state): State<AppState<P>>,
     headers: HeaderMap,
-    Form(form): Form<HashMap<String, String>>,
+    request: OAuthRequest,
 ) -> Response {
     if let Err(retry_after) = state.rate_limiter.check(&headers) {
         tracing::warn!(
@@ -219,35 +485,33 @@ pub async fn oauth_token<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
         return rate_limit_response(retry_after);
     }
 
-    let req = TokenRequest {
-        grant_type: form.get("grant_type").cloned().unwrap_or_default(),
-        client_id: form.get("client_id").cloned().unwrap_or_default(),
-        client_secret: form.get("client_secret").cloned().unwrap_or_default(),
-        code: form.get("code").cloned().filter(|s| !s.is_empty()),
-        refresh_token: form.get("refresh_token").cloned().filter(|s| !s.is_empty()),
-        redirect_uri: form.get("redirect_uri").cloned().filter(|s| !s.is_empty()),
-        code_verifier: form.get("code_verifier").cloned().filter(|s| !s.is_empty()),
+    let mut authorizer = state.authorizer.lock().await;
+    let mut issuer = state.issuer.lock().await;
+
+    let mut extensions = AddonList::new();
+    extensions.push_access_token(Pkce::optional());
+
+    let endpoint = TokenEndpoint {
+        registrar: state.token_registrar.as_ref(),
+        authorizer: &mut *authorizer,
+        issuer: &mut *issuer,
+        extensions,
     };
 
-    match state.token_exchange.exchange(&req).await {
-        Ok(token_response) => {
-            tracing::info!(
-                access_token_hint = %elide_secret(&token_response.access_token),
-                refresh_token_issued = token_response.refresh_token.is_some(),
-                token_type = %token_response.token_type,
-                expires_in = token_response.expires_in,
-                grant_type = %req.grant_type,
-                "OAuth token issued"
-            );
-            let mut body = serde_json::Map::new();
-            body.insert("access_token".into(), token_response.access_token.into());
-            body.insert("token_type".into(), token_response.token_type.into());
-            body.insert("expires_in".into(), token_response.expires_in.into());
-            if let Some(refresh_token) = token_response.refresh_token {
-                body.insert("refresh_token".into(), refresh_token.into());
-            }
-            Json(serde_json::Value::Object(body)).into_response()
+    match AccessTokenFlow::prepare(endpoint) {
+        Err(e) => {
+            tracing::error!("AccessTokenFlow::prepare failed: {:?}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
-        Err(e) => oauth_error_response(e),
+        Ok(mut flow) => {
+            flow.allow_credentials_in_body(true);
+            match flow.execute(request).await {
+                Ok(response) => response.into_response(),
+                Err(e) => {
+                    tracing::error!("AccessTokenFlow::execute failed: {:?}", e);
+                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                }
+            }
+        }
     }
 }

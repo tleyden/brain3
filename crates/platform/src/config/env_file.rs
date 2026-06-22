@@ -6,9 +6,8 @@ use brain3_core::domain::model::{
     ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig, GatewayConfig,
     HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
 };
-use brain3_core::domain::oauth::{
-    DEFAULT_ACCESS_TOKEN_LIFETIME_SECS, DEFAULT_REFRESH_TOKEN_LIFETIME_SECS,
-};
+const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
+const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 use brain3_core::ports::config::ConfigPort;
 
 pub struct EnvFileConfigAdapter {

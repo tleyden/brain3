@@ -1,7 +1,14 @@
-use brain3_core::domain::oauth::AuthorizeRequest;
-
 const LOGIN_STYLESHEET_PATH: &str = "/oauth/login.css";
 const LOGIN_LOGO_PATH: &str = "/oauth/brain3-lockup-light.svg";
+
+pub struct LoginFormParams {
+    pub response_type: String,
+    pub client_id: String,
+    pub redirect_uri: String,
+    pub state: Option<String>,
+    pub code_challenge: Option<String>,
+    pub code_challenge_method: Option<String>,
+}
 
 fn html_escape(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -49,11 +56,11 @@ fn render_page(title: &str, kicker: &str, heading: &str, body_html: &str) -> Str
     )
 }
 
-pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String {
+pub fn render_login_form(params: &LoginFormParams, error: Option<&str>) -> String {
     let hidden_fields = [
-        ("response_type", &req.response_type),
-        ("client_id", &req.client_id),
-        ("redirect_uri", &req.redirect_uri),
+        ("response_type", params.response_type.as_str()),
+        ("client_id", params.client_id.as_str()),
+        ("redirect_uri", params.redirect_uri.as_str()),
     ];
 
     let mut fields_html = String::new();
@@ -66,7 +73,7 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
         fields_html.push('\n');
     }
 
-    if let Some(state) = &req.state {
+    if let Some(state) = &params.state {
         fields_html.push_str(&format!(
             r#"<input type="hidden" name="state" value="{}">"#,
             html_escape(state),
@@ -74,7 +81,7 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
         fields_html.push('\n');
     }
 
-    if let Some(challenge) = &req.code_challenge {
+    if let Some(challenge) = &params.code_challenge {
         fields_html.push_str(&format!(
             r#"<input type="hidden" name="code_challenge" value="{}">"#,
             html_escape(challenge),
@@ -82,7 +89,10 @@ pub fn render_login_form(req: &AuthorizeRequest, error: Option<&str>) -> String 
         fields_html.push('\n');
     }
 
-    let method = req.code_challenge_method.as_deref().unwrap_or("S256");
+    let method = params
+        .code_challenge_method
+        .as_deref()
+        .unwrap_or("S256");
     fields_html.push_str(&format!(
         r#"<input type="hidden" name="code_challenge_method" value="{}">"#,
         html_escape(method),

@@ -9,7 +9,6 @@ use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::validate_request::validate_host;
 use brain3_core::domain::errors::ProxyError;
 use brain3_core::domain::redact::elide_secret;
-use brain3_core::ports::auth_code_store::AuthCodeStore;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
 use super::state::AppState;
@@ -86,8 +85,8 @@ fn proxy_error_response(err: ProxyError, headers: &HeaderMap) -> Response {
     }
 }
 
-pub async fn protected_resource_metadata<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(state): State<AppState<S, P>>,
+pub async fn protected_resource_metadata<P: McpProxyPort + 'static>(
+    State(state): State<AppState<P>>,
     headers: HeaderMap,
 ) -> Response {
     let host = effective_host(&headers);
@@ -108,8 +107,8 @@ pub async fn protected_resource_metadata<S: AuthCodeStore + 'static, P: McpProxy
     .into_response()
 }
 
-pub async fn mcp_reverse_proxy<S: AuthCodeStore + 'static, P: McpProxyPort + 'static>(
-    State(state): State<AppState<S, P>>,
+pub async fn mcp_reverse_proxy<P: McpProxyPort + 'static>(
+    State(state): State<AppState<P>>,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
