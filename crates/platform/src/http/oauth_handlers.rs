@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use async_trait::async_trait;
+use axum::body::{to_bytes, Body};
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
@@ -20,7 +21,7 @@ use oxide_auth_async::endpoint::{Extension as AsyncExtension, OwnerSolicitor};
 use oxide_auth_async::endpoint::access_token::AccessTokenFlow;
 use oxide_auth_async::endpoint::authorization::AuthorizationFlow;
 use oxide_auth_axum::{OAuthRequest, OAuthResponse, WebError};
-use serde_json::json;
+use serde_json::{Value, json};
 use subtle::ConstantTimeEq;
 
 use brain3_core::ports::mcp_proxy::McpProxyPort;
@@ -50,17 +51,17 @@ impl WebRequest for PostBodyRequest {
     type Error = WebError;
     type Response = OAuthResponse;
 
-    fn query(&mut self) -> Result<Cow<dyn QueryParameter + 'static>, Self::Error> {
+    fn query(&mut self) -> Result<Cow<'_, dyn QueryParameter + 'static>, Self::Error> {
         self.0.body()
             .map(|b| Cow::Borrowed(b as &dyn QueryParameter))
             .ok_or(WebError::Body)
     }
 
-    fn urlbody(&mut self) -> Result<Cow<dyn QueryParameter + 'static>, Self::Error> {
+    fn urlbody(&mut self) -> Result<Cow<'_, dyn QueryParameter + 'static>, Self::Error> {
         self.0.urlbody()
     }
 
-    fn authheader(&mut self) -> Result<Option<Cow<str>>, Self::Error> {
+    fn authheader(&mut self) -> Result<Option<Cow<'_, str>>, Self::Error> {
         self.0.authheader()
     }
 }
@@ -293,6 +294,70 @@ fn parse_params_from_map(map: &HashMap<String, String>) -> LoginFormParams {
     }
 }
 
+struct TokenRequestShape {
+    grant_type: Option<String>,
+    has_client_id: bool,
+    has_redirect_uri: bool,
+    has_code: bool,
+}
+
+fn token_request_shape(request: &OAuthRequest) -> TokenRequestShape {
+    let body = request.body();
+    TokenRequestShape {
+        grant_type: body
+            .and_then(|body| body.unique_value("grant_type"))
+            .map(|value| value.into_owned()),
+        has_client_id: body
+            .and_then(|body| body.unique_value("client_id"))
+            .is_some(),
+        has_redirect_uri: body
+            .and_then(|body| body.unique_value("redirect_uri"))
+            .is_some(),
+        has_code: body.and_then(|body| body.unique_value("code")).is_some(),
+    }
+}
+
+async fn normalize_token_error_response(
+    response: OAuthResponse,
+    request_shape: &TokenRequestShape,
+) -> Response {
+    let response = response.into_response();
+    let should_normalize = response.status() == StatusCode::BAD_REQUEST
+        && request_shape.grant_type.as_deref() == Some("authorization_code")
+        && request_shape.has_client_id
+        && request_shape.has_redirect_uri
+        && request_shape.has_code;
+
+    if !should_normalize {
+        return response;
+    }
+
+    let (parts, body) = response.into_parts();
+    let body_bytes = match to_bytes(body, 16 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(_) => return (parts.status, parts.headers, Body::empty()).into_response(),
+    };
+
+    let mut json_body: Value = match serde_json::from_slice(&body_bytes) {
+        Ok(body) => body,
+        Err(_) => {
+            return (
+                parts.status,
+                parts.headers,
+                String::from_utf8_lossy(&body_bytes).into_owned(),
+            )
+                .into_response()
+        }
+    };
+
+    if json_body.get("error") != Some(&Value::String("invalid_request".into())) {
+        return (parts.status, parts.headers, body_bytes).into_response();
+    }
+
+    json_body["error"] = Value::String("invalid_grant".into());
+    (parts.status, parts.headers, Json(json_body)).into_response()
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -487,6 +552,19 @@ pub async fn oauth_token<P: McpProxyPort + 'static>(
 
     let mut authorizer = state.authorizer.lock().await;
     let mut issuer = state.issuer.lock().await;
+    let request_shape = token_request_shape(&request);
+    if let Some(body) = request.body() {
+        tracing::debug!(
+            grant_type = ?body.unique_value("grant_type"),
+            client_id = ?body.unique_value("client_id"),
+            redirect_uri = ?body.unique_value("redirect_uri"),
+            has_client_secret = body.unique_value("client_secret").is_some(),
+            has_code = body.unique_value("code").is_some(),
+            has_code_verifier = body.unique_value("code_verifier").is_some(),
+            has_authorization = request.authorization_header().is_some(),
+            "oauth token request parsed"
+        );
+    }
 
     let mut extensions = AddonList::new();
     extensions.push_access_token(Pkce::optional());
@@ -506,7 +584,7 @@ pub async fn oauth_token<P: McpProxyPort + 'static>(
         Ok(mut flow) => {
             flow.allow_credentials_in_body(true);
             match flow.execute(request).await {
-                Ok(response) => response.into_response(),
+                Ok(response) => normalize_token_error_response(response, &request_shape).await,
                 Err(e) => {
                     tracing::error!("AccessTokenFlow::execute failed: {:?}", e);
                     StatusCode::INTERNAL_SERVER_ERROR.into_response()

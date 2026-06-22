@@ -6,6 +6,7 @@ use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use oxide_auth::primitives::issuer::TokenMap;
 use oxide_auth::primitives::registrar::{Client, ClientMap, RegisteredUrl};
+use reqwest::Url;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
@@ -209,14 +210,11 @@ fn authorize_params() -> Vec<(&'static str, &'static str)> {
 }
 
 fn extract_code_from_location(location: &str) -> String {
-    location
-        .split("code=")
-        .nth(1)
-        .unwrap()
-        .split('&')
-        .next()
-        .unwrap()
-        .to_string()
+    let url = Url::parse(location).expect("redirect location should be a valid URL");
+    url.query_pairs()
+        .find(|(key, _)| key == "code")
+        .map(|(_, value)| value.into_owned())
+        .expect("redirect location should include code query parameter")
 }
 
 async fn login_and_get_code(server: &TestServer) -> String {
