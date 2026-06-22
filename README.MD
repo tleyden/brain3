@@ -3,6 +3,7 @@
   <a href="https://deepwiki.com/tleyden/brain3"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   <img src="https://img.shields.io/coderabbit/prs/github/tleyden/brain3?utm_source=oss&utm_medium=github&utm_campaign=tleyden%2Fbrain3&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews" alt="CodeRabbit Pull Request Reviews">
   <a href="https://scorecard.dev/viewer/?uri=github.com/tleyden/brain3"><img src="https://api.scorecard.dev/projects/github.com/tleyden/brain3/badge" alt="OpenSSF Scorecard"></a>
+  <a href="https://mcpsafe.io/scan/pubfast7d6fa5a2c28d801f2a93"><img src="https://api.mcpsafe.io/api/badge/pubfast7d6fa5a2c28d801f2a93" alt="MCPSafe"></a>
 </p>
 
 <br/>
