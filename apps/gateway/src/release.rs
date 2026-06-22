@@ -2,6 +2,10 @@ use brain3_core::application::first_run_setup::CURRENT_RELEASE;
 
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const APP_VERSION_DISPLAY: &str = concat!("Brain3 v", env!("CARGO_PKG_VERSION"));
+pub const OAUTH_IMPLEMENTATION: &str = "oxide-auth";
+pub const OXIDE_AUTH_VERSION: &str = "0.6.1";
+pub const OXIDE_AUTH_ASYNC_VERSION: &str = "0.2.1";
+pub const OXIDE_AUTH_AXUM_VERSION: &str = "0.6.0";
 pub const HELP_ABOUT: &str = concat!(
     "Brain3 v",
     env!("CARGO_PKG_VERSION"),

@@ -23,7 +23,7 @@ use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
 use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
-use crate::{apply_runtime_overrides, RuntimeOverrides};
+use crate::{apply_runtime_overrides, release, RuntimeOverrides};
 
 pub struct ConfiguredGatewaySession {
     pub runtime: RuntimeBootstrap,
@@ -102,7 +102,19 @@ where
     let local_url = local_url_from_addr(bind_addr);
     let router = build_gateway_router(Arc::clone(&config), upstream_secret)?;
 
-    tracing::info!(bind_addr = %bind_addr, local_url = %local_url, "starting OAuth2 gateway");
+    tracing::info!(
+        bind_addr = %bind_addr,
+        local_url = %local_url,
+        brain3_version = release::APP_VERSION,
+        oauth_implementation = release::OAUTH_IMPLEMENTATION,
+        oxide_auth_version = release::OXIDE_AUTH_VERSION,
+        oxide_auth_async_version = release::OXIDE_AUTH_ASYNC_VERSION,
+        oxide_auth_axum_version = release::OXIDE_AUTH_AXUM_VERSION,
+        oauth_token_store = "sqlite",
+        client_id = %config.oauth.client_id,
+        pkce_required = config.oauth.pkce_required,
+        "starting OAuth2 gateway"
+    );
     tracing::info!(
         "Proxying MCP traffic to {}",
         config.mcp_reverse_proxy.mcp_upstream_url
@@ -126,12 +138,20 @@ pub async fn spawn_gateway_server(
         .context("failed to resolve bound gateway address")?;
     let bind_addr_display = bind_addr.to_string();
     let local_url = local_url_from_addr(bind_addr);
-    let router = build_gateway_router(config, upstream_secret)?;
+    let router = build_gateway_router(Arc::clone(&config), upstream_secret)?;
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
 
     tracing::info!(
         bind_addr = %bind_addr_display,
         local_url = %local_url,
+        brain3_version = release::APP_VERSION,
+        oauth_implementation = release::OAUTH_IMPLEMENTATION,
+        oxide_auth_version = release::OXIDE_AUTH_VERSION,
+        oxide_auth_async_version = release::OXIDE_AUTH_ASYNC_VERSION,
+        oxide_auth_axum_version = release::OXIDE_AUTH_AXUM_VERSION,
+        oauth_token_store = "sqlite",
+        client_id = %config.oauth.client_id,
+        pkce_required = config.oauth.pkce_required,
         "starting OAuth2 gateway in background"
     );
 
