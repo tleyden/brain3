@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-As of v0.1.7, Brain3 has no HIGH-severity open findings. The prior HIGH finding (MCP container unrestricted outbound internet access) was resolved in this version. All remaining open issues are MEDIUM or LOW. The most impactful open findings are host header injection in `resolve_base_url` (M-1), `redirect_uri` not allowlisted (M-2), upstream secret stored in a predictable `/tmp` path (M-8), and the install script lacking checksum verification (M-11). The gateway process remains unsandboxed (M-12) — a known architectural trade-off documented here but not targeted for this pass.
+As of v0.1.7, Brain3 has no HIGH-severity open findings. The prior HIGH finding (MCP container unrestricted outbound internet access) was resolved in this version. All remaining open issues are MEDIUM or LOW. The most impactful open findings are host header injection in `resolve_base_url` (M-1), `redirect_uri` not allowlisted (M-2), upstream secret stored in a predictable `/tmp` path (M-8), and the unsandboxed gateway process (M-12). 
 
 ---
 
@@ -54,7 +54,7 @@ graph TD
 | Compromised or malicious AI platform | Holds valid OAuth client credentials | Abuse legitimate MCP tool calls to exfiltrate or corrupt vault data | Bounded to whatever the MCP vault tools expose |
 | Supply-chain attacker — **container dependencies** | Malicious Python package in the MCP container image | RCE inside the container | **Yes** — blocked at B4: no egress, mount-only filesystem access |
 | Supply-chain attacker — **Rust host dependencies** | Malicious or compromised crate in the gateway's dependency tree | RCE in the unsandboxed gateway process → read/exfiltrate **any file the host user can access** | **No** — full host access; see M-12 |
-| Protocol-logic attacker against the custom OAuth2.1 server | B2, sends malformed or adversarial requests | Trigger auth bypass, state confusion, or token issuance for wrong identity via a logic bug | Partially — PKCE, rate limiting, and constant-time checks reduce blast radius; see M-13 |
+| Protocol-logic attacker against the Brain3-owned OAuth integration | B2, sends malformed or adversarial requests | Exploit mistakes in Brain3-owned OAuth policy or request handling to trigger auth bypass, bad redirects, or incorrect token issuance | Partially — PKCE, rate limiting, single-client policy, and `oxide-auth` reduce blast radius; see M-13 |
 | Local/LAN actor | B2/B3, only if loopback binding were misconfigured | Bypass OAuth entirely by talking to the gateway or container directly | Mitigated by hardcoded `127.0.0.1` binds |
 
 ### Assets
@@ -87,9 +87,8 @@ graph TD
 | M-8 | 🟡 MEDIUM | Container | Upstream secret stored in `/tmp` with predictable name |
 | M-9 | 🟡 MEDIUM | Credentials | Default username is predictable (`"admin"`) |
 | M-10 | 🟡 MEDIUM | Credentials | 7-character secret prefix logged in tracing output |
-| M-11 | 🟡 MEDIUM | Install | Binary installed without checksum verification |
 | M-12 | 🟡 MEDIUM | Architecture | Gateway process is unsandboxed — full host access if compromised |
-| M-13 | 🟡 MEDIUM | Architecture | Hand-rolled OAuth2.1 implementation carries inherent protocol-logic risk |
+| M-13 | 🟡 MEDIUM | Architecture | Brain3 still owns key OAuth policy and integration code around `oxide-auth` |
 | L-1 | 🟢 LOW | OAuth2 | No background cleanup of expired auth codes |
 | L-2 | 🟢 LOW | OAuth2 | No Content-Security-Policy or security headers on login page |
 | L-3 | 🟢 LOW | OAuth2 | `state` parameter not required or validated |
@@ -304,23 +303,11 @@ The first 7 characters of the upstream shared secret are written to the tracing 
 
 ---
 
-### M-11 🟡 MEDIUM — Install Script Fetches Binary Without Checksum Verification
+### ~~M-11~~ ✅ RESOLVED — Install Script Verifies Signed Checksum Manifest Before Extraction
 
 **File:** `scripts/install.sh`
 
-```sh
-curl -sSfL "$URL" -o "$TMPDIR/$TARBALL"
-tar -xzf "$TMPDIR/$TARBALL" -C "$TMPDIR"
-chmod +x "$TMPDIR/$BINARY"
-mv "$TMPDIR/$BINARY" "$BIN_DIR/$BINARY"
-```
-
-The install script downloads and executes a binary from S3 without verifying a SHA256 checksum or signature. A compromised S3 bucket, DNS hijack, or CDN cache poisoning could deliver a malicious binary. The `S3_BASE_URL` override env var further widens the surface.
-
-**Recommendation:**
-- Publish a `SHA256SUMS` file alongside release tarballs and verify with `sha256sum -c` in the script.
-- Consider Sigstore/cosign signing for release artifacts.
-- Emit a warning if `S3_BASE_URL` is overridden from the default.
+**Resolved in the current codebase.** `install.sh` now downloads the release tarball together with `SHA256SUMS` and `SHA256SUMS.sig`, verifies the signed manifest with the embedded public key via `openssl dgst -verify`, then checks the tarball's SHA256 before extracting or installing the binary.
 
 ---
 
@@ -336,15 +323,26 @@ This is a known, accepted trade-off documented here rather than a regression —
 
 ---
 
-### M-13 🟡 MEDIUM — Oxide-Auth-Based OAuth2.1 Integration Still Carries Protocol-Logic Risk
+### M-13 🟡 MEDIUM — Brain3 Still Owns Key OAuth Policy and Integration Code Around `oxide-auth`
 
 **Files:** `crates/platform/src/http/oauth_handlers.rs`, `crates/platform/src/http/registrar.rs`, `crates/platform/src/token_store/sqlite.rs`
 
-Brain3 now builds its OAuth2.1 authorization server on `oxide-auth` for the authorize and token flows rather than a fully custom implementation. That materially reduces the risk associated with hand-rolled protocol logic, but it does not eliminate OAuth-specific integration risk: Brain3 still owns the registrar policy, the login/consent wiring around `AuthorizationFlow`, token persistence and refresh rotation in the SQLite-backed issuer, and the HTTP-layer request/response mapping. Rust's memory safety rules out entire bug classes — buffer overflows, use-after-free, data races — but it provides no protection against protocol-level logic errors or integration mistakes at those boundaries.
+Brain3 now uses `oxide-auth` for the core authorize and token flows, which is a meaningful improvement over a fully custom OAuth implementation. But several security-relevant OAuth decisions still live in Brain3 code:
 
-The existing controls (mandatory PKCE, rate limiting, constant-time comparisons, single static client, and reuse of a maintained OAuth library) reduce the blast radius of most classes of attack, and several open findings (M-1 through M-4) are specific instances of this broader risk.
+- `oauth_handlers.rs` validates authorize parameters before handing control to `oxide-auth`, maps the login form POST body into `AuthorizationFlow` via `PostBodyRequest`, performs the local username/password gate, enables `client_secret_post`, and rewrites some token errors in `normalize_token_error_response()`.
+- `registrar.rs` implements the single configured client policy and decides how `client_id`, `client_secret`, scope, and runtime `redirect_uri` are accepted and bound into a grant.
+- `sqlite.rs` persists access/refresh tokens, issues fresh token pairs, and performs refresh-token rotation by deleting the old pair and inserting a new one.
 
-**Recommendation:** No action proposed in this pass beyond what's already tracked in section 1. Revisit if the OAuth surface grows further (for example, multiple clients or dynamic registration), or if custom logic around `oxide-auth` expands enough that it starts to dominate the trusted computing base again.
+The concrete security issues already found in this audit sit exactly at those Brain3-owned boundaries:
+
+- **M-1:** Brain3 constructs advertised OAuth URLs from request-supplied forwarded host headers.
+- **M-2:** Brain3 accepts any non-empty `redirect_uri` for the configured client instead of enforcing an allowlist.
+- **M-3:** Brain3 sets a 5-minute auth-code lifetime and does not bind auth codes to a session.
+- **M-4:** Brain3's secret comparisons early-return on length mismatch, so the README's constant-time claim is overstated.
+
+So the relevant takeaway is not the generic statement that “OAuth code can have bugs.” It is that Brain3 still owns the policy and glue code that determines redirect handling, client validation, auth-code behavior, token persistence, and compatibility behavior around `oxide-auth`; those integration points remain part of the trusted computing base.
+
+**Recommendation:** Keep the Brain3-owned OAuth surface small and explicit. Fix the concrete findings above (M-1 through M-4), and revisit this area if Brain3 adds more OAuth features such as multiple clients, redirect allowlists with more policy logic, or dynamic registration.
 
 ---
 
@@ -466,16 +464,15 @@ There is no vulnerability disclosure policy, contact for security reports, or di
 2. **M-2** Allowlist `redirect_uri` — blocks open redirects and code interception; straightforward config addition.
 3. **M-8** Move upstream secret out of `/tmp` — easy default path change plus symlink guard.
 4. **M-10** Replace partial secret logging with `elide_secret` — one-line fix per log call.
-5. **M-11** Add checksum verification to install script — supply chain hygiene.
-6. **M-6** Verify Cloudflare credentials file permissions — startup check, low effort.
-7. **M-3** Reduce auth code lifetime to 60s — one-constant change.
-8. **L-2** Add CSP/security headers — middleware layer addition.
-9. **L-4** Rate-limit `GET /oauth/authorize` — reuse existing `OAuthRateLimiter`.
-10. **M-9** Change `DEFAULT_USERNAME` from `"admin"` — the wizard now prompts users to change it, but the constant itself still defaults to `"admin"`.
-11. **M-12** Scope gateway-process sandboxing — larger investigation (Landlock/sandbox-exec for filesystem restriction); revisit once the rest of this list is clear.
-12. **L-10** Add a root-level `SECURITY.md` — disclosure policy and a pointer to this audit's threat model.
+5. **M-6** Verify Cloudflare credentials file permissions — startup check, low effort.
+6. **M-3** Reduce auth code lifetime to 60s — one-constant change.
+7. **L-2** Add CSP/security headers — middleware layer addition.
+8. **L-4** Rate-limit `GET /oauth/authorize` — reuse existing `OAuthRateLimiter`.
+9. **M-9** Change `DEFAULT_USERNAME` from `"admin"` — the wizard now prompts users to change it, but the constant itself still defaults to `"admin"`.
+10. **M-12** Scope gateway-process sandboxing — larger investigation (Landlock/sandbox-exec for filesystem restriction); revisit once the rest of this list is clear.
+11. **L-10** Add a root-level `SECURITY.md` — disclosure policy and a pointer to this audit's threat model.
 
-M-13 (custom OAuth2.1 implementation risk) has no standalone remediation — it is mitigated incrementally as M-1 through M-4 are addressed.
+M-13 (Brain3-owned OAuth policy/integration surface) has no standalone remediation beyond keeping that layer small and fixing the concrete findings M-1 through M-4.
 
 ---
 
