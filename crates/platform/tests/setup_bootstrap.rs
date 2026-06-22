@@ -64,6 +64,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered
         .contains("B3_CONTAINER_IMAGE_REPO=\"ghcr.io/tleyden/brain3-mcp-vault-tools\""));
     assert!(rendered.contains("B3_CONTAINER_IMAGE_TAG=\"\""));
+    assert!(!rendered.contains("B3_CONTAINER_IMAGE="));
     assert!(rendered.contains("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=\"false\""));
 }
 
