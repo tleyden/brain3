@@ -98,20 +98,32 @@ async fn validate_access_token<P: McpProxyPort + 'static>(
         }
     };
 
-    if grant.until.timestamp() <= unix_now_timestamp() {
+    let now_unix = unix_now_timestamp();
+    if grant.until.timestamp() <= now_unix {
         tracing::warn!(
             received_token_hint = %elide_secret(token),
             client_id = %grant.client_id,
+            expired_at = %grant.until.to_rfc3339(),
+            secs_expired_ago = now_unix - grant.until.timestamp(),
             method = %method,
             path = %uri,
             host = host,
-            "MCP proxy rejected: bearer token expired"
+            "MCP proxy rejected: bearer token EXPIRED"
         );
         return Err(ProxyError::Unauthorized(
             "Missing or invalid bearer token".into(),
         ));
     }
 
+    tracing::debug!(
+        token_hint = %elide_secret(token),
+        client_id = %grant.client_id,
+        expires_at = %grant.until.to_rfc3339(),
+        secs_remaining = grant.until.timestamp() - now_unix,
+        method = %method,
+        path = %uri,
+        "MCP proxy: access token valid"
+    );
     Ok(())
 }
 

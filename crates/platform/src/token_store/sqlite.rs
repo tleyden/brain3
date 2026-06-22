@@ -14,6 +14,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Connection, Row, SqliteConnection};
 
 use brain3_core::domain::errors::TokenStoreError;
+use brain3_core::domain::redact::elide_secret;
 
 pub struct SqliteTokenStore {
     connect_options: SqliteConnectOptions,
@@ -326,6 +327,15 @@ impl Issuer for SqliteTokenStore {
         )
         .map_err(|_| ())?;
 
+        tracing::info!(
+            client_id = %access_grant.client_id,
+            owner_id = %access_grant.owner_id,
+            access_token_hint = %elide_secret(&access_token),
+            refresh_token_hint = %elide_secret(&refresh_token),
+            access_expires_at = %access_grant.until.to_rfc3339(),
+            "issued new access+refresh token pair"
+        );
+
         Ok(IssuedToken {
             token: access_token,
             refresh: Some(refresh_token),
@@ -356,6 +366,16 @@ impl Issuer for SqliteTokenStore {
         )
         .map_err(|_| ())?;
 
+        tracing::info!(
+            client_id = %access_grant.client_id,
+            owner_id = %access_grant.owner_id,
+            old_refresh_hint = %elide_secret(refresh),
+            new_access_hint = %elide_secret(&access_token),
+            new_refresh_hint = %elide_secret(&refresh_token),
+            new_access_expires_at = %access_grant.until.to_rfc3339(),
+            "refresh token rotated, new token pair issued"
+        );
+
         Ok(RefreshedToken {
             token: access_token,
             refresh: Some(refresh_token),
@@ -365,11 +385,73 @@ impl Issuer for SqliteTokenStore {
     }
 
     fn recover_token<'a>(&'a self, token: &'a str) -> Result<Option<Grant>, ()> {
-        self.load_token(token, TokenKind::Access).map_err(|_| ())
+        match self.load_token(token, TokenKind::Access) {
+            Err(e) => {
+                tracing::error!(
+                    token_hint = %elide_secret(token),
+                    error = %e,
+                    "recover_token: DB error looking up access token"
+                );
+                Err(())
+            }
+            Ok(Some(grant)) => {
+                let now = Utc::now();
+                if grant.until <= now {
+                    tracing::warn!(
+                        token_hint = %elide_secret(token),
+                        client_id = %grant.client_id,
+                        expired_at = %grant.until.to_rfc3339(),
+                        secs_expired_ago = (now - grant.until).num_seconds(),
+                        "recover_token: found EXPIRED access token"
+                    );
+                } else {
+                    tracing::debug!(
+                        token_hint = %elide_secret(token),
+                        client_id = %grant.client_id,
+                        expires_at = %grant.until.to_rfc3339(),
+                        secs_remaining = (grant.until - now).num_seconds(),
+                        "recover_token: found valid access token"
+                    );
+                }
+                Ok(Some(grant))
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    token_hint = %elide_secret(token),
+                    "recover_token: access token not found in DB"
+                );
+                Ok(None)
+            }
+        }
     }
 
     fn recover_refresh<'a>(&'a self, token: &'a str) -> Result<Option<Grant>, ()> {
-        self.load_token(token, TokenKind::Refresh).map_err(|_| ())
+        match self.load_token(token, TokenKind::Refresh) {
+            Err(e) => {
+                tracing::error!(
+                    token_hint = %elide_secret(token),
+                    error = %e,
+                    "recover_refresh: DB error looking up refresh token"
+                );
+                Err(())
+            }
+            Ok(Some(grant)) => {
+                tracing::debug!(
+                    token_hint = %elide_secret(token),
+                    client_id = %grant.client_id,
+                    expires_at = %grant.until.to_rfc3339(),
+                    "recover_refresh: found refresh token"
+                );
+                Ok(Some(grant))
+            }
+            Ok(None) => {
+                tracing::warn!(
+                    token_hint = %elide_secret(token),
+                    "recover_refresh: refresh token not found in DB"
+                );
+                Ok(None)
+            }
+        }
     }
 }
 
