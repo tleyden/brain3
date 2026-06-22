@@ -202,7 +202,7 @@ struct BodyRefreshRequest {
 impl BodyRefreshRequest {
     fn from_oauth_request(request: &OAuthRequest) -> Self {
         let body = request.body();
-        Self {
+        let adapted = Self {
             valid: body.is_some(),
             grant_type: body
                 .and_then(|body| body.unique_value("grant_type"))
@@ -219,7 +219,19 @@ impl BodyRefreshRequest {
             scope: body
                 .and_then(|body| body.unique_value("scope"))
                 .map(|value| value.into_owned()),
-        }
+        };
+
+        tracing::trace!(
+            valid = adapted.valid,
+            grant_type = ?adapted.grant_type,
+            has_refresh_token = adapted.refresh_token.is_some(),
+            has_client_id = adapted.client_id.is_some(),
+            has_client_secret = adapted.client_secret.is_some(),
+            has_scope = adapted.scope.is_some(),
+            "adapted OAuth request into refresh request"
+        );
+
+        adapted
     }
 }
 
@@ -534,33 +546,79 @@ fn execute_refresh_token_flow(
     issuer: &mut SqliteTokenStore,
     request: &OAuthRequest,
 ) -> Response {
+    tracing::trace!(
+        has_request_body = request.body().is_some(),
+        has_authorization_header = request.authorization_header().is_some(),
+        "entering refresh token flow"
+    );
+
     let refresh_request = BodyRefreshRequest::from_oauth_request(request);
+    tracing::debug!(
+        valid = refresh_request.valid,
+        grant_type = ?refresh_request.grant_type,
+        client_id = ?refresh_request.client_id,
+        has_refresh_token = refresh_request.refresh_token.is_some(),
+        has_client_secret = refresh_request.client_secret.is_some(),
+        scope = ?refresh_request.scope,
+        "prepared refresh token request"
+    );
+
     let mut endpoint = SimpleRefreshEndpoint { registrar, issuer };
+    tracing::info!(
+        client_id = ?refresh_request.client_id,
+        has_scope = refresh_request.scope.is_some(),
+        "executing refresh token grant"
+    );
 
     match refresh_grant(&mut endpoint, &refresh_request) {
-        Ok(bearer) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "application/json")],
-            bearer.to_json(),
-        )
-            .into_response(),
-        Err(RefreshError::Invalid(description)) => (
-            StatusCode::BAD_REQUEST,
-            [(header::CONTENT_TYPE, "application/json")],
-            description.to_json(),
-        )
-            .into_response(),
-        Err(RefreshError::Unauthorized(description, scheme)) => (
-            StatusCode::UNAUTHORIZED,
-            [
-                (header::CONTENT_TYPE, "application/json"),
-                (header::WWW_AUTHENTICATE, scheme.as_str()),
-            ],
-            description.to_json(),
-        )
-            .into_response(),
+        Ok(bearer) => {
+            tracing::info!(
+                client_id = ?refresh_request.client_id,
+                "refresh token grant succeeded"
+            );
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json")],
+                bearer.to_json(),
+            )
+                .into_response()
+        }
+        Err(RefreshError::Invalid(description)) => {
+            tracing::debug!(
+                client_id = ?refresh_request.client_id,
+                error_body = %description.to_json(),
+                "refresh token grant rejected with invalid request/grant response"
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                [(header::CONTENT_TYPE, "application/json")],
+                description.to_json(),
+            )
+                .into_response()
+        }
+        Err(RefreshError::Unauthorized(description, scheme)) => {
+            tracing::debug!(
+                client_id = ?refresh_request.client_id,
+                auth_scheme = %scheme,
+                error_body = %description.to_json(),
+                "refresh token grant rejected as unauthorized"
+            );
+            (
+                StatusCode::UNAUTHORIZED,
+                [
+                    (header::CONTENT_TYPE, "application/json"),
+                    (header::WWW_AUTHENTICATE, scheme.as_str()),
+                ],
+                description.to_json(),
+            )
+                .into_response()
+        }
         Err(RefreshError::Primitive) => {
-            tracing::error!("refresh token flow failed with primitive error");
+            tracing::error!(
+                client_id = ?refresh_request.client_id,
+                has_refresh_token = refresh_request.refresh_token.is_some(),
+                "refresh token flow failed with primitive error"
+            );
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
@@ -798,6 +856,7 @@ pub async fn oauth_token<P: McpProxyPort + 'static>(
             .await
         }
         Some("refresh_token") => {
+            tracing::trace!("oauth/token dispatching to refresh token flow");
             execute_refresh_token_flow(state.registrar.as_ref(), &mut *issuer, &request)
         }
         grant_type => {
