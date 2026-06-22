@@ -8,13 +8,14 @@
 
 ## One-time GitHub secrets setup
 
-These secrets must be set once per repo. The release and PR workflows both use them to authenticate with AWS.
+These secrets must be set once per repo. The AWS secrets are used to publish release artifacts to S3, and the signing key secret is used by the release workflow to sign `SHA256SUMS`.
 
 ```bash
-gh secret set AWS_ACCESS_KEY_ID     --repo tleyden/brain3 --body "AKIA..."
-gh secret set AWS_SECRET_ACCESS_KEY --repo tleyden/brain3 --body "..."
-gh secret set BRAIN3_S3_BUCKET      --repo tleyden/brain3 --body "your-bucket-name"
-gh secret set AWS_REGION            --repo tleyden/brain3 --body "us-east-1"
+gh secret set AWS_ACCESS_KEY_ID              --repo tleyden/brain3 --body "AKIA..."
+gh secret set AWS_SECRET_ACCESS_KEY          --repo tleyden/brain3 --body "..."
+gh secret set BRAIN3_S3_BUCKET               --repo tleyden/brain3 --body "your-bucket-name"
+gh secret set AWS_REGION                     --repo tleyden/brain3 --body "us-east-1"
+gh secret set BRAIN3_RELEASE_SIGNING_KEY_PEM_B64 --repo tleyden/brain3 < brain3-release-signing-key.pem.b64
 ```
 
 Verify they are set:
@@ -68,7 +69,8 @@ Pushing the tag triggers `.github/workflows/release.yml`, which:
    - `aarch64-unknown-linux-gnu`
    - `x86_64-apple-darwin`
    - `aarch64-apple-darwin`
-2. Creates a GitHub Release and attaches a `.tar.gz` for each target.
+2. Generates and signs `SHA256SUMS` using `BRAIN3_RELEASE_SIGNING_KEY_PEM_B64`.
+3. Publishes the tarballs plus `SHA256SUMS` and `SHA256SUMS.sig` to GitHub Releases and S3.
 
 The workflow takes ~5–10 minutes. Monitor it:
 
@@ -131,30 +133,42 @@ rustc -vV | grep host | awk '{print $2}'
 **2. Build and package for your local platform only:**
 
 ```bash
-TARGET=$(rustc -vV | grep host | awk '{print $2}')
+mkdir -p /tmp/brain3-artifacts
 cargo build --release
-tar -czf brain3-${TARGET}.tar.gz -C target/release brain3
+tar -czf /tmp/brain3-artifacts/brain3-$(rustc -vV | awk '/host:/ {print $2}').tar.gz -C target/release brain3
 ```
 
 Cross-compiling all four targets locally is complex — if you need all platforms, push a branch and let the PR workflow build them.
 
-**3. Upload to S3:**
+**3. Manually generate release signatures:**
+
+```bash
+./scripts/generate-release-manifest.sh
+mkdir -p /tmp/brain3-artifacts
+cargo build --release
+tar -czf /tmp/brain3-artifacts/brain3-$(rustc -vV | awk '/host:/ {print $2}').tar.gz -C target/release brain3
+RELEASE_SIGNING_KEY_FILE=.secrets/brain3-release-signing-key.pem ./scripts/generate-release-manifest.sh /tmp/brain3-artifacts
+```
+
+This creates:
+
+- `/tmp/brain3-artifacts/SHA256SUMS`
+- `/tmp/brain3-artifacts/SHA256SUMS.sig`
+
+**4. Upload to S3:**
 
 ```bash
 # Uploads to releases/dev/ and releases/latest/ by default
-bash scripts/upload-to-s3.sh <bucket-name>
+bash scripts/upload-to-s3.sh <bucket-name> dev /tmp/brain3-artifacts
 
 # Or specify a custom version label
-bash scripts/upload-to-s3.sh <bucket-name> v0.1.6-rc1
-
-# Or point at a directory containing pre-built tarballs
-bash scripts/upload-to-s3.sh <bucket-name> dev /path/to/tarballs
+bash scripts/upload-to-s3.sh <bucket-name> v0.1.6-rc1 /tmp/brain3-artifacts
 ```
 
 The script uploads each tarball it finds to both `releases/<version>/` and `releases/latest/`,
-and also uploads `scripts/install.sh` to `releases/latest/install.sh`.
+uploads `SHA256SUMS` and `SHA256SUMS.sig`, and also uploads `scripts/install.sh` to both the versioned and `latest` S3 paths.
 
-**4. Test the install script against your uploaded artifacts:**
+**5. Test the install script against your uploaded artifacts:**
 
 ```bash
 S3_BASE_URL="https://<bucket>.s3.amazonaws.com/releases/latest" \

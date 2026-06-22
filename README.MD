@@ -302,7 +302,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 ### Known Security Risks
 
 - **Prompt injection** — not mitigated by Brain3; the MCP server has no egress and runs in an isolated container network, but be careful what directory you point it at or what is in your vault.
-- **Tampered release binaries** — release assets on S3/GitHub are not yet signed or checksummed, so a compromised distribution path could serve a modified binary.
+- **Installer trust still depends on the distribution path** — `install.sh` now verifies a signed checksum manifest before extracting a release tarball, but the default `releases/latest/install.sh` bootstrap is still fetched from the distribution path itself. A version-pinned installer URL would be stronger.
 - **Container port exposure (macOS)** — it is not yet confirmed whether the mapped container port is accessible only to the gateway or to any local process, which could allow OAuth bypass.
 - **No process sandboxing** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
 - **Oxide-auth-based OAuth 2.1 integration** — Brain3 now builds OAuth 2.1 on `oxide-auth`, which reduces hand-rolled protocol risk, but Rust memory safety still does not prevent protocol-level integration bugs. See `docs/SECURITY_AUDIT_LATEST.md` §6.4.
