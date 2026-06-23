@@ -258,6 +258,13 @@ fn load_container_startup_config(
         )));
     }
     let tag_override = env_var_or("B3_CONTAINER_IMAGE_TAG", "");
+    if tag_override.contains(':') {
+        return Err(ConfigError::Invalid(
+            "B3_CONTAINER_IMAGE_TAG must not include a colon (':'). \
+             Provide only the tag portion, e.g. v0.1.7 or pr-123."
+                .to_string(),
+        ));
+    }
     let tag = if tag_override.trim().is_empty() {
         CURRENT_RELEASE.to_string()
     } else {
