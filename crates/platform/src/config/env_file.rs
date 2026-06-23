@@ -250,7 +250,8 @@ fn load_container_startup_config(
         "B3_CONTAINER_IMAGE_REPO",
         "when B3_CONTAINER_RUNTIME is set",
     )?;
-    if repo.contains(':') {
+    let image_name = repo.rsplit('/').next().unwrap_or(repo.as_str());
+    if image_name.contains(':') {
         return Err(ConfigError::Invalid(format!(
             "B3_CONTAINER_IMAGE_REPO must not include a tag (found ':'). \
              Use B3_CONTAINER_IMAGE_TAG to pin a version, or leave it empty \
@@ -646,6 +647,36 @@ mod tests {
             assert_eq!(
                 config.container.as_ref().map(|c| c.image.as_str()),
                 Some("ghcr.io/tleyden/brain3-mcp-vault-tools:v0.1.7")
+            );
+        });
+    }
+
+    #[test]
+    fn load_allows_container_image_repo_with_registry_port() {
+        with_clean_config_env(|| {
+            let vault_dir = env::temp_dir().join("brain3-config-test-vault-registry-port");
+            fs::create_dir_all(&vault_dir).unwrap();
+            let token_db = env::temp_dir().join("brain3-config-test-registry-port.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_CF_QUICK_TUNNEL=false\n\
+                 B3_CONTAINER_RUNTIME=macos-container\n\
+                 B3_VAULT_PATH={}\n\
+                 B3_CONTAINER_IMAGE_REPO=localhost:5000/tleyden/brain3-mcp-vault-tools\n\
+                 B3_CONTAINER_IMAGE_TAG=v0.1.7\n",
+                token_db.display(),
+                vault_dir.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+
+            assert_eq!(
+                config.container.as_ref().map(|c| c.image.as_str()),
+                Some("localhost:5000/tleyden/brain3-mcp-vault-tools:v0.1.7")
             );
         });
     }
