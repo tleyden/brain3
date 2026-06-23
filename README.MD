@@ -20,7 +20,6 @@ Save an idea mid-conversation and pull it back later, without switching apps or 
 
 The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
 
-One caveat up front: Model Context Protocol (MCP) connectors connect to a remote server, so Brain3 exposes a local endpoint over a Cloudflare tunnel. Your files stay local, but the service is reachable from the internet while it's running. See [Privacy & Security](#privacy--security) before running this on sensitive data. 
 
 <div align="center">
 
@@ -30,15 +29,12 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 </div>
 
-<details>
-<summary><strong>Use Cases</strong></summary>
+## Use Cases
 
-1. Capture research and design thinking as you work through a problem
-2. Compare new ideas against existing notes
-3. Planning at any scale -- daily todos up to quarterly goals, such as Cal Newport's [Multi-Scale Planning system](https://www.youtube.com/watch?v=3FipKTzkTD4)
-4. Save ideas to quickly [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/)
-
-</details>
+1. Use your markdown vault as a way to do weekly and daily planning, make the AI your planning assistant.
+2. Jot down quick notes and ideas in an "inbox" folder, triage later.  (eg, [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/))
+3. As you are researching a topic with AI, you can just quickly save a summary into your markdown vault.  Your AI will already have the context.
+4. There are many other use cases, typical of note-taking, research and "second brain" workflows.
 
 ## Screenshots - Admin Terminal UI (TUI)
 
@@ -49,6 +45,9 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 
 ## Quick Start
+
+> [!CAUTION]
+> Brain3 is still in alpha. Make sure you have backup copies or version control of your vault data before running this on sensitive data. Your files stay local, but the service is reachable from the internet while it's running, and any errors in the OAuth flow could potentially expose your data. See [Privacy & Security](#privacy--security) for more details. 
 
 ### Install Prerequisites
 

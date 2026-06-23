@@ -364,7 +364,14 @@ impl Issuer for SqliteTokenStore {
             access_grant.clone(),
             refresh_grant,
         )
-        .map_err(|_| ())?;
+        .map_err(|e| {
+            tracing::error!(
+                old_refresh_hint = %elide_secret(refresh),
+                client_id = %access_grant.client_id,
+                error = %e,
+                "Issuer::refresh: rotate_refresh_pair failed — token rotation aborted"
+            );
+        })?;
 
         tracing::info!(
             client_id = %access_grant.client_id,
@@ -436,12 +443,24 @@ impl Issuer for SqliteTokenStore {
                 Err(())
             }
             Ok(Some(grant)) => {
-                tracing::debug!(
-                    token_hint = %elide_secret(token),
-                    client_id = %grant.client_id,
-                    expires_at = %grant.until.to_rfc3339(),
-                    "recover_refresh: found refresh token"
-                );
+                let now = Utc::now();
+                if grant.until <= now {
+                    tracing::warn!(
+                        token_hint = %elide_secret(token),
+                        client_id = %grant.client_id,
+                        expired_at = %grant.until.to_rfc3339(),
+                        secs_expired_ago = (now - grant.until).num_seconds(),
+                        "recover_refresh: found EXPIRED refresh token — client must re-authenticate"
+                    );
+                } else {
+                    tracing::debug!(
+                        token_hint = %elide_secret(token),
+                        client_id = %grant.client_id,
+                        expires_at = %grant.until.to_rfc3339(),
+                        secs_remaining = (grant.until - now).num_seconds(),
+                        "recover_refresh: found valid refresh token"
+                    );
+                }
                 Ok(Some(grant))
             }
             Ok(None) => {

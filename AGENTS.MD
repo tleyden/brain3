@@ -12,6 +12,7 @@
 - We need fairly verbose logging and tracing to diagnose errors.  Just use the appropriate log level so we can control the noise.  Without this, its a black box.
 - Everything in the poc dir is dead legacy.  Ignore it unless specifically asked.  The top level rust project and brain3-mcp-vault-tools are the only active codebases.
 - Run cargo test, which should pass, before considering a change as finished.
+- This project is new, so default to verbose logging.  Of course, never log secrets or sensitive data.
 
 # Rust Development & Hexagonal Architecture: Best Practices
 
