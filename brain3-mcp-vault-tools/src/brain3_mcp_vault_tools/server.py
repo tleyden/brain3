@@ -42,6 +42,7 @@ from .models import (
 from .tools.manage import vault_delete as _vault_delete
 from .tools.manage import vault_list as _vault_list
 from .tools.manage import vault_move as _vault_move
+from .tools.audio import save_audio_file as _save_audio_file
 from .tools.patch import vault_apply_unified_diff as _vault_apply_unified_diff
 from .tools.read import vault_batch_read as _vault_batch_read
 from .tools.read import vault_read as _vault_read
@@ -608,6 +609,24 @@ def vault_move(source: str, destination: str, create_dirs: bool = True) -> str:
 def vault_delete(path: str, confirm: bool = False) -> str:
     inp = VaultDeleteInput(path=path, confirm=confirm)
     return _vault_delete(inp.path, inp.confirm)
+
+
+@mcp.tool(
+    name="save_audio_file",
+    description="Experimental: receive an audio file as base64-encoded bytes, write it to a temp directory, and return the file path and size stats.",
+    annotations={
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+def save_audio_file(
+    audio_data: bytes,
+    extension: str,
+    suggested_filename: str | None = None,
+) -> str:
+    return _save_audio_file(audio_data, extension, suggested_filename)
 
 
 def main() -> None:
