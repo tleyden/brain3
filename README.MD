@@ -29,7 +29,7 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 </div>
 
-<summary><strong>Use Cases</strong></summary>
+## Use Cases
 
 1. Use your markdown vault as a way to do weekly and daily planning, make the AI your planning assistant.
 2. Jot down quick notes and ideas in an "inbox" folder, triage later.  (eg, [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/))
