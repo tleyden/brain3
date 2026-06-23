@@ -20,7 +20,8 @@ Save an idea mid-conversation and pull it back later, without switching apps or 
 
 The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
 
-One caveat up front: Model Context Protocol (MCP) connectors connect to a remote server, so Brain3 exposes a local endpoint over a Cloudflare tunnel. Your files stay local, but the service is reachable from the internet while it's running. See [Privacy & Security](#privacy--security) before running this on sensitive data. 
+> [!CAUTION]
+> Brain3 is still in alpha. Make sure you have backup copies or version control of your vault data before running this on sensitive data. Your files stay local, but the service is reachable from the internet while it's running, and any errors in the OAuth flow could potentially expose your data. See [Privacy & Security](#privacy--security). 
 
 <div align="center">
 
