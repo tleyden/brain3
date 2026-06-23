@@ -224,43 +224,37 @@ fn log_save_audio_file_request_summary(stage: &str, body: &[u8]) {
         return;
     };
 
-    let audio_base64_chars = arguments
-        .get("audio_data")
-        .and_then(Value::as_str)
-        .map(str::len);
-    let audio_estimated_bytes = arguments
-        .get("audio_data")
-        .and_then(Value::as_str)
-        .map(estimate_base64_decoded_bytes);
-    let extension = arguments.get("extension").and_then(Value::as_str);
-    let suggested_filename = arguments
-        .get("suggested_filename")
-        .and_then(Value::as_str);
+    let audio_file = arguments.get("audio_file").and_then(Value::as_object);
+    let Some(audio_file) = audio_file else {
+        return;
+    };
+
+    let download_url = audio_file.get("download_url").and_then(Value::as_str);
+    let download_authority = download_url.and_then(url_authority);
+    let download_path = download_url.and_then(url_path);
     let request_id = json.get("id");
 
     tracing::info!(
         stage = stage,
         request_id = ?request_id,
         body_bytes = body.len(),
-        audio_base64_chars = ?audio_base64_chars,
-        audio_estimated_bytes = ?audio_estimated_bytes,
-        extension = ?extension,
-        suggested_filename = ?suggested_filename,
+        file_id = ?audio_file.get("file_id").and_then(|value| value.as_str()),
+        mime_type = ?audio_file.get("mime_type").and_then(|value| value.as_str()),
+        file_name = ?audio_file.get("file_name").and_then(|value| value.as_str()),
+        download_authority = ?download_authority,
+        download_path = ?download_path,
         "MCP proxy: save_audio_file request summary"
     );
 }
 
-fn estimate_base64_decoded_bytes(input: &str) -> usize {
-    let trimmed = input.trim_end_matches('=');
-    let full_quads = trimmed.len() / 4;
-    let remainder = trimmed.len() % 4;
-    let partial = match remainder {
-        0 => 0,
-        2 => 1,
-        3 => 2,
-        _ => 0,
-    };
-    full_quads * 3 + partial
+fn url_path(url: &str) -> Option<&str> {
+    url.split_once("://").map(|(_, rest)| {
+        let with_slash = match rest.find('/') {
+            Some(index) => &rest[index..],
+            None => "/",
+        };
+        with_slash.split('?').next().unwrap_or(with_slash)
+    })
 }
 
 #[cfg(test)]
