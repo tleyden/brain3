@@ -2,6 +2,7 @@
 
 import hmac
 import ipaddress
+import json
 import logging
 import socket
 import sys
@@ -180,6 +181,53 @@ def _load_upstream_shared_secret() -> str:
     return secret
 
 
+def _estimate_base64_decoded_bytes(value: str) -> int:
+    trimmed = value.rstrip("=")
+    full_quads = len(trimmed) // 4
+    remainder = len(trimmed) % 4
+    partial = {0: 0, 2: 1, 3: 2}.get(remainder, 0)
+    return full_quads * 3 + partial
+
+
+def _log_save_audio_file_request_summary(stage: str, body: bytes) -> None:
+    try:
+        payload = json.loads(body)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return
+
+    if payload.get("method") != "tools/call":
+        return
+
+    params = payload.get("params")
+    if not isinstance(params, dict) or params.get("name") != "save_audio_file":
+        return
+
+    arguments = params.get("arguments")
+    if not isinstance(arguments, dict):
+        return
+
+    audio_data = arguments.get("audio_data")
+    extension = arguments.get("extension")
+    suggested_filename = arguments.get("suggested_filename")
+    audio_base64_chars = len(audio_data) if isinstance(audio_data, str) else None
+    audio_estimated_bytes = (
+        _estimate_base64_decoded_bytes(audio_data)
+        if isinstance(audio_data, str)
+        else None
+    )
+
+    logger.info(
+        "save_audio_file request summary stage=%s request_id=%s body_bytes=%d audio_base64_chars=%s audio_estimated_bytes=%s extension=%r suggested_filename=%r",
+        stage,
+        payload.get("id"),
+        len(body),
+        audio_base64_chars,
+        audio_estimated_bytes,
+        extension,
+        suggested_filename,
+    )
+
+
 class UpstreamSharedSecretMiddleware:
     def __init__(
         self, app: ASGIApp, *, shared_secret: str, header_name: str, protected_path: str
@@ -251,16 +299,20 @@ class InboundRequestLoggingMiddleware:
 
         async def receive_wrapper() -> Message:
             message = await receive()
-            if trace_enabled and message["type"] == "http.request":
+            if message["type"] == "http.request":
                 request_body_chunks.append(message.get("body", b""))
                 if not message.get("more_body", False):
-                    logger.log(
-                        TRACE,
-                        "MCP request body method=%s path=%s body=%s",
-                        scope.get("method", "<unknown>"),
-                        path,
-                        b"".join(request_body_chunks).decode("utf-8", errors="replace"),
-                    )
+                    full_body = b"".join(request_body_chunks)
+                    _log_save_audio_file_request_summary("python_ingress", full_body)
+                    if trace_enabled:
+                        logger.log(
+                            TRACE,
+                            "MCP request body method=%s path=%s body_bytes=%d body=%s",
+                            scope.get("method", "<unknown>"),
+                            path,
+                            len(full_body),
+                            full_body.decode("utf-8", errors="replace"),
+                        )
             return message
 
         response_body_chunks: list[bytes] = []

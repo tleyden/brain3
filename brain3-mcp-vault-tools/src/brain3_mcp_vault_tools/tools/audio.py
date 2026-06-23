@@ -24,8 +24,17 @@ def save_audio_file(
     if not safe_extension:
         raise ValueError("extension must not be empty")
     dest = tmp_dir / f"{stem}_{timestamp}.{safe_extension}"
+    header_hex = audio_data[:16].hex()
     dest.write_bytes(audio_data)
     size_bytes = len(audio_data)
+    logger.info(
+        "save_audio_file: received decoded_bytes=%d extension=%s suggested_filename=%r safe_stem=%s header_hex=%s",
+        size_bytes,
+        safe_extension,
+        suggested_filename,
+        stem,
+        header_hex,
+    )
     logger.info("save_audio_file: wrote path=%s size_bytes=%d", dest, size_bytes)
     return (
         f"Saved audio file\n"

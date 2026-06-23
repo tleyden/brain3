@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
+use serde_json::Value;
+
 use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
 use crate::domain::redact::elide_secret;
@@ -133,6 +135,7 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             body = %String::from_utf8_lossy(&body[..body.len().min(1024)]),
             "MCP proxy: request body"
         );
+        log_save_audio_file_request_summary("gateway_ingress", &body);
 
         let mut final_headers = filtered_headers;
         final_headers.push((
@@ -199,6 +202,65 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
 fn url_authority(url: &str) -> Option<&str> {
     url.split_once("://")
         .map(|(_, rest)| rest.split('/').next().unwrap_or(rest))
+}
+
+fn log_save_audio_file_request_summary(stage: &str, body: &[u8]) {
+    let Ok(json) = serde_json::from_slice::<Value>(body) else {
+        return;
+    };
+
+    let Some("tools/call") = json.get("method").and_then(Value::as_str) else {
+        return;
+    };
+    let params = json.get("params").and_then(Value::as_object);
+    let Some(params) = params else {
+        return;
+    };
+    let Some("save_audio_file") = params.get("name").and_then(Value::as_str) else {
+        return;
+    };
+    let arguments = params.get("arguments").and_then(Value::as_object);
+    let Some(arguments) = arguments else {
+        return;
+    };
+
+    let audio_base64_chars = arguments
+        .get("audio_data")
+        .and_then(Value::as_str)
+        .map(str::len);
+    let audio_estimated_bytes = arguments
+        .get("audio_data")
+        .and_then(Value::as_str)
+        .map(estimate_base64_decoded_bytes);
+    let extension = arguments.get("extension").and_then(Value::as_str);
+    let suggested_filename = arguments
+        .get("suggested_filename")
+        .and_then(Value::as_str);
+    let request_id = json.get("id");
+
+    tracing::info!(
+        stage = stage,
+        request_id = ?request_id,
+        body_bytes = body.len(),
+        audio_base64_chars = ?audio_base64_chars,
+        audio_estimated_bytes = ?audio_estimated_bytes,
+        extension = ?extension,
+        suggested_filename = ?suggested_filename,
+        "MCP proxy: save_audio_file request summary"
+    );
+}
+
+fn estimate_base64_decoded_bytes(input: &str) -> usize {
+    let trimmed = input.trim_end_matches('=');
+    let full_quads = trimmed.len() / 4;
+    let remainder = trimmed.len() % 4;
+    let partial = match remainder {
+        0 => 0,
+        2 => 1,
+        3 => 2,
+        _ => 0,
+    };
+    full_quads * 3 + partial
 }
 
 #[cfg(test)]
