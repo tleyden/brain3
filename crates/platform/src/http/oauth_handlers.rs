@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use axum::body::{to_bytes, Body};
 use axum::extract::State;
-use axum::http::{header, HeaderMap, StatusCode};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{Html, IntoResponse, Response};
 use axum::Json;
 use oxide_auth::code_grant::refresh::{
@@ -314,6 +314,16 @@ fn rate_limit_response(retry_after_secs: u64) -> Response {
         .into_response()
 }
 
+fn add_oauth_token_cache_headers(mut response: Response) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("no-store"),
+    );
+    headers.insert(header::PRAGMA, HeaderValue::from_static("no-cache"));
+    response
+}
+
 fn login_configured(config: &brain3_core::domain::model::GatewayConfig) -> bool {
     !config.oauth.password.is_empty() && !config.oauth.username.is_empty()
 }
@@ -495,15 +505,17 @@ async fn normalize_token_error_response(
         "token endpoint: normalized oxide-auth invalid_request → invalid_grant"
     );
     json_body["error"] = Value::String("invalid_grant".into());
-    (parts.status, parts.headers, Json(json_body)).into_response()
+    add_oauth_token_cache_headers((parts.status, parts.headers, Json(json_body)).into_response())
 }
 
 fn unsupported_grant_type_response() -> Response {
-    (
+    add_oauth_token_cache_headers(
+        (
         StatusCode::BAD_REQUEST,
         Json(json!({"error": "unsupported_grant_type"})),
     )
-        .into_response()
+            .into_response(),
+    )
 }
 
 async fn execute_authorization_code_token_flow(
@@ -526,7 +538,7 @@ async fn execute_authorization_code_token_flow(
     match AccessTokenFlow::prepare(endpoint) {
         Err(e) => {
             tracing::error!("AccessTokenFlow::prepare failed: {:?}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            add_oauth_token_cache_headers(StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
         Ok(mut flow) => {
             flow.allow_credentials_in_body(true);
@@ -534,7 +546,7 @@ async fn execute_authorization_code_token_flow(
                 Ok(response) => normalize_token_error_response(response, request_shape).await,
                 Err(e) => {
                     tracing::error!("AccessTokenFlow::execute failed: {:?}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR.into_response()
+                    add_oauth_token_cache_headers(StatusCode::INTERNAL_SERVER_ERROR.into_response())
                 }
             }
         }
@@ -576,12 +588,14 @@ fn execute_refresh_token_flow(
                 client_id = ?refresh_request.client_id,
                 "refresh token grant succeeded"
             );
-            (
+            add_oauth_token_cache_headers((
                 StatusCode::OK,
-                [(header::CONTENT_TYPE, "application/json")],
+                [
+                    (header::CONTENT_TYPE, "application/json"),
+                ],
                 bearer.to_json(),
             )
-                .into_response()
+                .into_response())
         }
         Err(RefreshError::Invalid(description)) => {
             tracing::debug!(
@@ -589,12 +603,14 @@ fn execute_refresh_token_flow(
                 error_body = %description.to_json(),
                 "refresh token grant rejected with invalid request/grant response"
             );
-            (
+            add_oauth_token_cache_headers((
                 StatusCode::BAD_REQUEST,
-                [(header::CONTENT_TYPE, "application/json")],
+                [
+                    (header::CONTENT_TYPE, "application/json"),
+                ],
                 description.to_json(),
             )
-                .into_response()
+                .into_response())
         }
         Err(RefreshError::Unauthorized(description, scheme)) => {
             tracing::debug!(
@@ -603,7 +619,7 @@ fn execute_refresh_token_flow(
                 error_body = %description.to_json(),
                 "refresh token grant rejected as unauthorized"
             );
-            (
+            add_oauth_token_cache_headers((
                 StatusCode::UNAUTHORIZED,
                 [
                     (header::CONTENT_TYPE, "application/json"),
@@ -611,7 +627,7 @@ fn execute_refresh_token_flow(
                 ],
                 description.to_json(),
             )
-                .into_response()
+                .into_response())
         }
         Err(RefreshError::Primitive) => {
             tracing::error!(
@@ -619,7 +635,7 @@ fn execute_refresh_token_flow(
                 has_refresh_token = refresh_request.refresh_token.is_some(),
                 "refresh token flow failed with primitive error"
             );
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+            add_oauth_token_cache_headers(StatusCode::INTERNAL_SERVER_ERROR.into_response())
         }
     }
 }
