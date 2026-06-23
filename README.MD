@@ -20,8 +20,6 @@ Save an idea mid-conversation and pull it back later, without switching apps or 
 
 The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
 
-> [!CAUTION]
-> Brain3 is still in alpha. Make sure you have backup copies or version control of your vault data before running this on sensitive data. Your files stay local, but the service is reachable from the internet while it's running, and any errors in the OAuth flow could potentially expose your data. See [Privacy & Security](#privacy--security). 
 
 <div align="center">
 
@@ -50,6 +48,9 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 
 ## Quick Start
+
+> [!CAUTION]
+> Brain3 is still in alpha. Make sure you have backup copies or version control of your vault data before running this on sensitive data. Your files stay local, but the service is reachable from the internet while it's running, and any errors in the OAuth flow could potentially expose your data. See [Privacy & Security](#privacy--security). 
 
 ### Install Prerequisites
 
