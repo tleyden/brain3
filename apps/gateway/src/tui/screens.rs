@@ -584,7 +584,7 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Container runtime",
             format_container_runtime(state.draft.container_runtime),
         ),
-        key_value_line("Container image", state.draft.container_image_repo.clone()),
+        key_value_line("Container image repo", state.draft.container_image_repo.clone())
         key_value_line("Tunnel", format_tunnel_mode(&state.draft.tunnel_mode)),
         key_value_line(
             "Env file",
