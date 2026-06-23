@@ -57,7 +57,8 @@ fn build_overrides(
         container_runtime_value(draft.container_runtime).to_string(),
     );
     values.insert("B3_VAULT_PATH", draft.vault_path.display().to_string());
-    values.insert("B3_CONTAINER_IMAGE", draft.container_image.clone());
+    values.insert("B3_CONTAINER_IMAGE_REPO", draft.container_image_repo.clone());
+    values.insert("B3_CONTAINER_IMAGE_TAG", String::new());
     values.insert(
         "B3_CONTAINER_HOST_PORT",
         draft.container_host_port.to_string(),
