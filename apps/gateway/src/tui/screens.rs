@@ -3,7 +3,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use brain3_core::domain::model::ContainerRuntime;
+use brain3_core::domain::model::{AccessMode, ContainerRuntime};
 use brain3_core::domain::setup::{
     AccessModeDraft, DependencyAvailability, PackageManager, SetupStep, TunnelModeDraft,
 };
@@ -726,7 +726,7 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ))];
     };
 
-    vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             "Brain3 is configured and running.",
             success_style(),
@@ -737,12 +737,25 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             connection_heading_style(),
         )),
         blank_line(),
-        key_value_line("Remote MCP Server URL", format!("{}/mcp", card.server_url)),
+        Line::from(Span::styled("Remote MCP", section_heading_style())),
+        key_value_line("Server URL", format!("{}/mcp", card.server_url)),
         key_value_line("Client ID", card.client_id.clone()),
         key_value_line("Client Secret", card.client_secret.clone()),
         key_value_line("Username", card.username.clone()),
         key_value_line("Password", card.password.clone()),
-    ]
+    ];
+
+    if let Some(local_mcp) = state.runtime.as_ref().and_then(|r| r.config.local_mcp.as_ref()) {
+        lines.push(blank_line());
+        lines.push(Line::from(Span::styled("Local MCP", section_heading_style())));
+        lines.push(key_value_line(
+            "Endpoint",
+            format!("http://localhost:{}/mcp", local_mcp.port),
+        ));
+        lines.push(key_value_line("Token", local_mcp.bearer_token.clone()));
+    }
+
+    lines
 }
 
 fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
@@ -827,9 +840,13 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
                 "Endpoint",
                 format!("http://localhost:{}/mcp", local_mcp.port),
             ));
-            lines.push(key_value_line("Token", local_mcp.bearer_token.clone()));
         }
 
+        lines.push(blank_line());
+        lines.push(Line::from(Span::styled(
+            "File Paths",
+            section_heading_style(),
+        )));
         lines.push(key_value_line(
             "Config",
             runtime.launch_plan.env_file.display().to_string(),
