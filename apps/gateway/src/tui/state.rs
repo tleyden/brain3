@@ -32,11 +32,13 @@ pub enum PortsField {
     LocalMcpPort,
     ContainerHostPort,
     ContainerMcpPort,
+    ContainerName,
     AccessTokenLifetimeSecs,
     RefreshTokenLifetimeSecs,
     PkceRequired,
     EnforceHostnameCheck,
     ContainerNetworkIsolation,
+    ContainerNetworkName,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,11 +64,13 @@ pub enum SummaryField {
     LocalMcpPort,
     ContainerHostPort,
     ContainerMcpPort,
+    ContainerName,
     AccessTokenLifetimeSecs,
     RefreshTokenLifetimeSecs,
     PkceRequired,
     HostnameCheck,
     ContainerNetworkIsolation,
+    ContainerNetworkName,
 }
 
 pub struct FirstRunTuiState {
@@ -95,8 +99,10 @@ pub struct FirstRunTuiState {
     pub local_mcp_port_input: String,
     pub container_host_port_input: String,
     pub container_mcp_port_input: String,
+    pub container_name_input: String,
     pub access_token_lifetime_secs_input: String,
     pub refresh_token_lifetime_secs_input: String,
+    pub container_network_name_input: String,
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
     pub summary_focus: SummaryField,
@@ -121,8 +127,10 @@ impl FirstRunTuiState {
         let local_mcp_port_input = draft.local_mcp_port.to_string();
         let container_host_port_input = draft.container_host_port.to_string();
         let container_mcp_port_input = draft.container_mcp_port.to_string();
+        let container_name_input = draft.container_name.clone();
         let access_token_lifetime_secs_input = draft.access_token_lifetime_secs.to_string();
         let refresh_token_lifetime_secs_input = draft.refresh_token_lifetime_secs.to_string();
+        let container_network_name_input = draft.container_network_name.clone();
 
         Self {
             host,
@@ -150,8 +158,10 @@ impl FirstRunTuiState {
             local_mcp_port_input,
             container_host_port_input,
             container_mcp_port_input,
+            container_name_input,
             access_token_lifetime_secs_input,
             refresh_token_lifetime_secs_input,
+            container_network_name_input,
             dependency_focus,
             dependency_action_index: 0,
             summary_focus: SummaryField::VaultPath,
@@ -201,12 +211,14 @@ impl FirstRunTuiState {
         if let Ok(port) = self.container_mcp_port_input.trim().parse::<u16>() {
             self.draft.container_mcp_port = port;
         }
+        self.draft.container_name = self.container_name_input.trim().to_string();
         if let Ok(seconds) = self.access_token_lifetime_secs_input.trim().parse::<u64>() {
             self.draft.access_token_lifetime_secs = seconds;
         }
         if let Ok(seconds) = self.refresh_token_lifetime_secs_input.trim().parse::<u64>() {
             self.draft.refresh_token_lifetime_secs = seconds;
         }
+        self.draft.container_network_name = self.container_network_name_input.trim().to_string();
 
         FinalizeSetupRequest {
             draft: self.draft.clone(),
@@ -270,14 +282,22 @@ impl FirstRunTuiState {
     }
 
     pub fn reset_ports_focus(&mut self) {
-        self.ports_focus = ports_focus_order(&self.draft.access_mode, self.draft.local_mcp_enabled)
-            .into_iter()
-            .next()
-            .unwrap_or(PortsField::GatewayPort);
+        self.ports_focus = ports_focus_order(
+            &self.draft.access_mode,
+            self.draft.local_mcp_enabled,
+            self.draft.container_network_isolated,
+        )
+        .into_iter()
+        .next()
+        .unwrap_or(PortsField::GatewayPort);
     }
 
     pub fn next_ports_focus(&mut self, access_mode: &AccessModeDraft) {
-        let order = ports_focus_order(access_mode, self.draft.local_mcp_enabled);
+        let order = ports_focus_order(
+            access_mode,
+            self.draft.local_mcp_enabled,
+            self.draft.container_network_isolated,
+        );
         let current_index = order
             .iter()
             .position(|field| *field == self.ports_focus)
@@ -286,7 +306,11 @@ impl FirstRunTuiState {
     }
 
     pub fn previous_ports_focus(&mut self, access_mode: &AccessModeDraft) {
-        let order = ports_focus_order(access_mode, self.draft.local_mcp_enabled);
+        let order = ports_focus_order(
+            access_mode,
+            self.draft.local_mcp_enabled,
+            self.draft.container_network_isolated,
+        );
         let current_index = order
             .iter()
             .position(|field| *field == self.ports_focus)
@@ -320,6 +344,20 @@ impl FirstRunTuiState {
                 | PortsField::LocalMcpPort
                 | PortsField::ContainerHostPort
                 | PortsField::ContainerMcpPort
+                | PortsField::ContainerName
+                | PortsField::AccessTokenLifetimeSecs
+                | PortsField::RefreshTokenLifetimeSecs
+                | PortsField::ContainerNetworkName
+        )
+    }
+
+    pub fn ports_focus_is_digits_only(&self) -> bool {
+        matches!(
+            self.ports_focus,
+            PortsField::GatewayPort
+                | PortsField::LocalMcpPort
+                | PortsField::ContainerHostPort
+                | PortsField::ContainerMcpPort
                 | PortsField::AccessTokenLifetimeSecs
                 | PortsField::RefreshTokenLifetimeSecs
         )
@@ -330,6 +368,7 @@ impl FirstRunTuiState {
             &self.draft.access_mode,
             self.generate_password,
             self.draft.local_mcp_enabled,
+            self.draft.container_network_isolated,
         );
         let current_index = order
             .iter()
@@ -343,6 +382,7 @@ impl FirstRunTuiState {
             &self.draft.access_mode,
             self.generate_password,
             self.draft.local_mcp_enabled,
+            self.draft.container_network_isolated,
         );
         let current_index = order
             .iter()
@@ -366,8 +406,10 @@ impl FirstRunTuiState {
                 | SummaryField::LocalMcpPort
                 | SummaryField::ContainerHostPort
                 | SummaryField::ContainerMcpPort
+                | SummaryField::ContainerName
                 | SummaryField::AccessTokenLifetimeSecs
                 | SummaryField::RefreshTokenLifetimeSecs
+                | SummaryField::ContainerNetworkName
         )
     }
 
@@ -393,10 +435,12 @@ impl FirstRunTuiState {
             SummaryField::LocalMcpPort => self.local_mcp_port_input.push(ch),
             SummaryField::ContainerHostPort => self.container_host_port_input.push(ch),
             SummaryField::ContainerMcpPort => self.container_mcp_port_input.push(ch),
+            SummaryField::ContainerName => self.container_name_input.push(ch),
             SummaryField::AccessTokenLifetimeSecs => self.access_token_lifetime_secs_input.push(ch),
             SummaryField::RefreshTokenLifetimeSecs => {
                 self.refresh_token_lifetime_secs_input.push(ch)
             }
+            SummaryField::ContainerNetworkName => self.container_network_name_input.push(ch),
             _ => {}
         }
     }
@@ -427,11 +471,17 @@ impl FirstRunTuiState {
             SummaryField::ContainerMcpPort => {
                 self.container_mcp_port_input.pop();
             }
+            SummaryField::ContainerName => {
+                self.container_name_input.pop();
+            }
             SummaryField::AccessTokenLifetimeSecs => {
                 self.access_token_lifetime_secs_input.pop();
             }
             SummaryField::RefreshTokenLifetimeSecs => {
                 self.refresh_token_lifetime_secs_input.pop();
+            }
+            SummaryField::ContainerNetworkName => {
+                self.container_network_name_input.pop();
             }
             _ => {}
         }
@@ -642,7 +692,11 @@ fn access_mode_for_focus(focus: AccessModeField) -> AccessModeDraft {
     }
 }
 
-fn ports_focus_order(access_mode: &AccessModeDraft, local_mcp_enabled: bool) -> Vec<PortsField> {
+fn ports_focus_order(
+    access_mode: &AccessModeDraft,
+    local_mcp_enabled: bool,
+    container_network_isolated: bool,
+) -> Vec<PortsField> {
     let mut order = Vec::new();
 
     match access_mode {
@@ -650,7 +704,11 @@ fn ports_focus_order(access_mode: &AccessModeDraft, local_mcp_enabled: bool) -> 
             order.push(PortsField::LocalMcpPort);
             order.push(PortsField::ContainerHostPort);
             order.push(PortsField::ContainerMcpPort);
+            order.push(PortsField::ContainerName);
             order.push(PortsField::ContainerNetworkIsolation);
+            if container_network_isolated {
+                order.push(PortsField::ContainerNetworkName);
+            }
         }
         AccessModeDraft::RemoteOnly | AccessModeDraft::Both => {
             order.push(PortsField::GatewayPort);
@@ -659,11 +717,15 @@ fn ports_focus_order(access_mode: &AccessModeDraft, local_mcp_enabled: bool) -> 
             }
             order.push(PortsField::ContainerHostPort);
             order.push(PortsField::ContainerMcpPort);
+            order.push(PortsField::ContainerName);
             order.push(PortsField::AccessTokenLifetimeSecs);
             order.push(PortsField::RefreshTokenLifetimeSecs);
             order.push(PortsField::PkceRequired);
             order.push(PortsField::EnforceHostnameCheck);
             order.push(PortsField::ContainerNetworkIsolation);
+            if container_network_isolated {
+                order.push(PortsField::ContainerNetworkName);
+            }
         }
     }
 
@@ -674,6 +736,7 @@ fn summary_focus_order(
     access_mode: &AccessModeDraft,
     generate_password: bool,
     local_mcp_enabled: bool,
+    container_network_isolated: bool,
 ) -> Vec<SummaryField> {
     let mut order = vec![SummaryField::VaultPath];
 
@@ -682,7 +745,11 @@ fn summary_focus_order(
             order.push(SummaryField::LocalMcpPort);
             order.push(SummaryField::ContainerHostPort);
             order.push(SummaryField::ContainerMcpPort);
+            order.push(SummaryField::ContainerName);
             order.push(SummaryField::ContainerNetworkIsolation);
+            if container_network_isolated {
+                order.push(SummaryField::ContainerNetworkName);
+            }
         }
         AccessModeDraft::RemoteOnly | AccessModeDraft::Both => {
             order.push(SummaryField::Username);
@@ -697,11 +764,15 @@ fn summary_focus_order(
             }
             order.push(SummaryField::ContainerHostPort);
             order.push(SummaryField::ContainerMcpPort);
+            order.push(SummaryField::ContainerName);
             order.push(SummaryField::AccessTokenLifetimeSecs);
             order.push(SummaryField::RefreshTokenLifetimeSecs);
             order.push(SummaryField::PkceRequired);
             order.push(SummaryField::HostnameCheck);
             order.push(SummaryField::ContainerNetworkIsolation);
+            if container_network_isolated {
+                order.push(SummaryField::ContainerNetworkName);
+            }
         }
     }
 
@@ -726,7 +797,7 @@ mod tests {
         state.draft.access_mode = AccessModeDraft::LocalOnly;
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..4 {
+        for _ in 0..6 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -738,7 +809,9 @@ mod tests {
                 SummaryField::LocalMcpPort,
                 SummaryField::ContainerHostPort,
                 SummaryField::ContainerMcpPort,
+                SummaryField::ContainerName,
                 SummaryField::ContainerNetworkIsolation,
+                SummaryField::ContainerNetworkName,
             ]
         );
 
@@ -752,7 +825,13 @@ mod tests {
         state.draft.access_mode = AccessModeDraft::LocalOnly;
 
         state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::ContainerNetworkName);
+
+        state.previous_summary_focus();
         assert_eq!(state.summary_focus, SummaryField::ContainerNetworkIsolation);
+
+        state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::ContainerName);
 
         state.previous_summary_focus();
         assert_eq!(state.summary_focus, SummaryField::ContainerMcpPort);
@@ -773,7 +852,7 @@ mod tests {
         let access_mode = state.draft.access_mode.clone();
 
         let mut actual = vec![state.ports_focus];
-        for _ in 0..8 {
+        for _ in 0..10 {
             state.next_ports_focus(&access_mode);
             actual.push(state.ports_focus);
         }
@@ -785,11 +864,13 @@ mod tests {
                 PortsField::LocalMcpPort,
                 PortsField::ContainerHostPort,
                 PortsField::ContainerMcpPort,
+                PortsField::ContainerName,
                 PortsField::AccessTokenLifetimeSecs,
                 PortsField::RefreshTokenLifetimeSecs,
                 PortsField::PkceRequired,
                 PortsField::EnforceHostnameCheck,
                 PortsField::ContainerNetworkIsolation,
+                PortsField::ContainerNetworkName,
             ]
         );
     }
@@ -799,7 +880,7 @@ mod tests {
         let mut state = sample_state();
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..12 {
+        for _ in 0..14 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -815,11 +896,13 @@ mod tests {
                 SummaryField::LocalMcpPort,
                 SummaryField::ContainerHostPort,
                 SummaryField::ContainerMcpPort,
+                SummaryField::ContainerName,
                 SummaryField::AccessTokenLifetimeSecs,
                 SummaryField::RefreshTokenLifetimeSecs,
                 SummaryField::PkceRequired,
                 SummaryField::HostnameCheck,
                 SummaryField::ContainerNetworkIsolation,
+                SummaryField::ContainerNetworkName,
             ]
         );
     }
@@ -830,7 +913,7 @@ mod tests {
         state.generate_password = false;
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..13 {
+        for _ in 0..15 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -847,16 +930,53 @@ mod tests {
                 SummaryField::LocalMcpPort,
                 SummaryField::ContainerHostPort,
                 SummaryField::ContainerMcpPort,
+                SummaryField::ContainerName,
                 SummaryField::AccessTokenLifetimeSecs,
                 SummaryField::RefreshTokenLifetimeSecs,
                 SummaryField::PkceRequired,
                 SummaryField::HostnameCheck,
                 SummaryField::ContainerNetworkIsolation,
+                SummaryField::ContainerNetworkName,
             ]
         );
 
         state.next_summary_focus();
         assert_eq!(state.summary_focus, SummaryField::VaultPath);
+    }
+
+    #[test]
+    fn ports_focus_skips_container_network_name_when_isolation_is_disabled() {
+        let mut state = sample_state();
+        let access_mode = state.draft.access_mode.clone();
+        state.draft.container_network_isolated = false;
+        state.ports_focus = PortsField::ContainerNetworkIsolation;
+
+        state.next_ports_focus(&access_mode);
+
+        assert_eq!(state.ports_focus, PortsField::GatewayPort);
+    }
+
+    #[test]
+    fn summary_focus_skips_container_network_name_when_isolation_is_disabled() {
+        let mut state = sample_state();
+        state.draft.container_network_isolated = false;
+        state.summary_focus = SummaryField::ContainerNetworkIsolation;
+
+        state.next_summary_focus();
+
+        assert_eq!(state.summary_focus, SummaryField::VaultPath);
+    }
+
+    #[test]
+    fn apply_inputs_to_draft_syncs_container_name_fields() {
+        let mut state = sample_state();
+        state.container_name_input = "custom-container".into();
+        state.container_network_name_input = "custom-network".into();
+
+        let request = state.apply_inputs_to_draft();
+
+        assert_eq!(request.draft.container_name, "custom-container");
+        assert_eq!(request.draft.container_network_name, "custom-network");
     }
 
     #[test]
@@ -896,7 +1016,9 @@ mod tests {
                     container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
                     container_host_port: 8420,
                     container_mcp_port: 8420,
+                    container_name: "brain3-mcp-vault-tools".into(),
                     container_network_isolated: true,
+                    container_network_name: "brain3-mcp-net".into(),
                     local_mcp_enabled: true,
                     local_mcp_port: 8422,
                     local_mcp_bearer_token: "local-token".into(),

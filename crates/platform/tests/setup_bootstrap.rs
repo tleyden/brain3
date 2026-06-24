@@ -44,7 +44,9 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
         container_host_port: 2765,
         container_mcp_port: 2765,
+        container_name: "brain3-mcp-vault-tools".into(),
         container_network_isolated: false,
+        container_network_name: "brain3-mcp-net".into(),
         local_mcp_enabled: true,
         local_mcp_port: 9555,
         local_mcp_bearer_token: "local-token".into(),
@@ -71,7 +73,9 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_CONTAINER_IMAGE_REPO=\"ghcr.io/tleyden/brain3-mcp-vault-tools\""));
     assert!(rendered.contains("B3_CONTAINER_IMAGE_TAG=\"\""));
     assert!(!rendered.contains("B3_CONTAINER_IMAGE="));
+    assert!(rendered.contains("B3_CONTAINER_NAME=\"brain3-mcp-vault-tools\""));
     assert!(rendered.contains("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=\"false\""));
+    assert!(rendered.contains("B3_CONTAINER_NETWORK_NAME=\"brain3-mcp-net\""));
 }
 
 #[test]
@@ -96,7 +100,9 @@ fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
         container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
         container_host_port: 2765,
         container_mcp_port: 2765,
+        container_name: "brain3-mcp-vault-tools".into(),
         container_network_isolated: false,
+        container_network_name: "brain3-mcp-net".into(),
         local_mcp_enabled: true,
         local_mcp_port: 2764,
         local_mcp_bearer_token: "local-token".into(),

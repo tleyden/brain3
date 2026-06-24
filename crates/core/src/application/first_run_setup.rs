@@ -6,8 +6,9 @@ use crate::domain::setup::{
     AccessModeDraft, ConnectionCard, FinalizeSetupRequest, SetupDefaults, SetupDraftConfig,
     SetupPreparation, SetupSummary, TunnelModeDraft, DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
     DEFAULT_CLIENT_ID, DEFAULT_CONTAINER_HOST_PORT, DEFAULT_CONTAINER_MCP_PORT,
-    DEFAULT_GATEWAY_PORT, DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES,
-    DEFAULT_LOCAL_MCP_PORT, DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME,
+    DEFAULT_CONTAINER_NAME, DEFAULT_CONTAINER_NETWORK_NAME, DEFAULT_GATEWAY_PORT,
+    DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES, DEFAULT_LOCAL_MCP_PORT,
+    DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME,
 };
 use crate::ports::setup_system::SetupSystemPort;
 
@@ -44,7 +45,9 @@ impl FirstRunSetupUseCase {
             container_image_repo: self.defaults.default_container_image_repo.clone(),
             container_host_port: DEFAULT_CONTAINER_HOST_PORT,
             container_mcp_port: DEFAULT_CONTAINER_MCP_PORT,
+            container_name: DEFAULT_CONTAINER_NAME.to_string(),
             container_network_isolated: true,
+            container_network_name: DEFAULT_CONTAINER_NETWORK_NAME.to_string(),
             local_mcp_enabled: true,
             local_mcp_port: DEFAULT_LOCAL_MCP_PORT,
             local_mcp_bearer_token: self
@@ -337,7 +340,9 @@ mod tests {
             container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
             container_host_port: 2765,
             container_mcp_port: 2765,
+            container_name: DEFAULT_CONTAINER_NAME.into(),
             container_network_isolated: false,
+            container_network_name: DEFAULT_CONTAINER_NETWORK_NAME.into(),
             local_mcp_enabled: true,
             local_mcp_port: DEFAULT_LOCAL_MCP_PORT,
             local_mcp_bearer_token: "local-secret".into(),
@@ -429,6 +434,20 @@ mod tests {
         assert_eq!(
             preparation.draft.container_image_repo,
             "ghcr.io/tleyden/brain3-mcp-vault-tools"
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_sets_default_container_names() {
+        let port = Arc::new(MockSetupSystemPort::new(vec![]));
+        let use_case = FirstRunSetupUseCase::new(port, sample_defaults());
+
+        let preparation = use_case.prepare().await.expect("prepare should succeed");
+
+        assert_eq!(preparation.draft.container_name, DEFAULT_CONTAINER_NAME);
+        assert_eq!(
+            preparation.draft.container_network_name,
+            DEFAULT_CONTAINER_NETWORK_NAME
         );
     }
 

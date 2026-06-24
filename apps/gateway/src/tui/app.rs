@@ -338,26 +338,39 @@ async fn event_loop(
                         PortsField::ContainerMcpPort => {
                             state.container_mcp_port_input.pop();
                         }
+                        PortsField::ContainerName => {
+                            state.container_name_input.pop();
+                        }
                         PortsField::AccessTokenLifetimeSecs => {
                             state.access_token_lifetime_secs_input.pop();
                         }
                         PortsField::RefreshTokenLifetimeSecs => {
                             state.refresh_token_lifetime_secs_input.pop();
                         }
+                        PortsField::ContainerNetworkName => {
+                            state.container_network_name_input.pop();
+                        }
                         _ => {}
                     }
                 }
-                KeyCode::Char(ch) if state.ports_focus_is_text_field() && ch.is_ascii_digit() => {
+                KeyCode::Char(ch)
+                    if state.ports_focus_is_text_field()
+                        && (!state.ports_focus_is_digits_only() || ch.is_ascii_digit()) =>
+                {
                     match state.ports_focus {
                         PortsField::GatewayPort => state.gateway_port_input.push(ch),
                         PortsField::LocalMcpPort => state.local_mcp_port_input.push(ch),
                         PortsField::ContainerHostPort => state.container_host_port_input.push(ch),
                         PortsField::ContainerMcpPort => state.container_mcp_port_input.push(ch),
+                        PortsField::ContainerName => state.container_name_input.push(ch),
                         PortsField::AccessTokenLifetimeSecs => {
                             state.access_token_lifetime_secs_input.push(ch)
                         }
                         PortsField::RefreshTokenLifetimeSecs => {
                             state.refresh_token_lifetime_secs_input.push(ch)
+                        }
+                        PortsField::ContainerNetworkName => {
+                            state.container_network_name_input.push(ch)
                         }
                         _ => {}
                     }
