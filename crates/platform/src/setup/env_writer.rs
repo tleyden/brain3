@@ -2,9 +2,7 @@ use std::collections::HashMap;
 
 use brain3_core::domain::errors::SetupError;
 use brain3_core::domain::model::ContainerRuntime;
-use brain3_core::domain::setup::{
-    SetupDraftConfig, SetupPaths, TunnelModeDraft, DEFAULT_LOCAL_MCP_PORT,
-};
+use brain3_core::domain::setup::{SetupDraftConfig, SetupPaths, TunnelModeDraft};
 
 use super::env_template::embedded_env_template;
 
@@ -89,7 +87,7 @@ fn build_overrides(
         draft.container_network_isolated.to_string(),
     );
     if draft.local_mcp_enabled {
-        values.insert("B3_LOCAL_MCP_PORT", DEFAULT_LOCAL_MCP_PORT.to_string());
+        values.insert("B3_LOCAL_MCP_PORT", draft.local_mcp_port.to_string());
         values.insert(
             "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
             draft.local_mcp_bearer_token.clone(),

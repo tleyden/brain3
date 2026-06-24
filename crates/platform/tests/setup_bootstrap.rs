@@ -46,6 +46,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         container_mcp_port: 8420,
         container_network_isolated: false,
         local_mcp_enabled: true,
+        local_mcp_port: 9555,
         local_mcp_bearer_token: "local-token".into(),
         pkce_required: true,
         enforce_hostname_check: true,
@@ -62,7 +63,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_USERNAME=\"admin\""));
     assert!(rendered.contains("B3_PASSWORD=\"correct horse battery staple\""));
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));
-    assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"8422\""));
+    assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"9555\""));
     assert!(rendered.contains("LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN=\"local-token\""));
     assert!(rendered.contains("B3_CONTAINER_RUNTIME=\"macos-container\""));
     assert!(rendered.contains("B3_VAULT_PATH=\"/Users/test/My Vault\""));
@@ -96,6 +97,7 @@ fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
         container_mcp_port: 8420,
         container_network_isolated: false,
         local_mcp_enabled: true,
+        local_mcp_port: 8422,
         local_mcp_bearer_token: "local-token".into(),
         pkce_required: true,
         enforce_hostname_check: true,

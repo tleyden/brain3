@@ -7,7 +7,7 @@ use crate::domain::setup::{
     SetupPreparation, SetupSummary, TunnelModeDraft, DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
     DEFAULT_CLIENT_ID, DEFAULT_CONTAINER_HOST_PORT, DEFAULT_CONTAINER_MCP_PORT,
     DEFAULT_GATEWAY_PORT, DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES,
-    DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME,
+    DEFAULT_LOCAL_MCP_PORT, DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME,
 };
 use crate::ports::setup_system::SetupSystemPort;
 
@@ -46,6 +46,7 @@ impl FirstRunSetupUseCase {
             container_mcp_port: DEFAULT_CONTAINER_MCP_PORT,
             container_network_isolated: true,
             local_mcp_enabled: true,
+            local_mcp_port: DEFAULT_LOCAL_MCP_PORT,
             local_mcp_bearer_token: self
                 .port
                 .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?,
@@ -338,6 +339,7 @@ mod tests {
             container_mcp_port: 8420,
             container_network_isolated: false,
             local_mcp_enabled: true,
+            local_mcp_port: DEFAULT_LOCAL_MCP_PORT,
             local_mcp_bearer_token: "local-secret".into(),
             pkce_required: true,
             enforce_hostname_check: true,

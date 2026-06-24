@@ -200,6 +200,9 @@ async fn event_loop(
                         AccessModeDraft::LocalOnly => SetupStep::PortsAndSettings,
                         AccessModeDraft::RemoteOnly | AccessModeDraft::Both => SetupStep::Auth,
                     };
+                    if state.step == SetupStep::PortsAndSettings {
+                        state.reset_ports_focus();
+                    }
                 }
                 _ => {}
             },
@@ -210,6 +213,7 @@ async fn event_loop(
                 }
                 KeyCode::Enter => {
                     state.clear_messages();
+                    state.reset_ports_focus();
                     state.step = SetupStep::PortsAndSettings;
                 }
                 KeyCode::Tab | KeyCode::Down => {
@@ -258,22 +262,30 @@ async fn event_loop(
                 }
                 KeyCode::Enter => {
                     state.clear_messages();
-                    if let Err(msg) = validate_port_input(&state.gateway_port_input, "Gateway port")
-                    {
-                        tracing::debug!(msg, "port validation failed");
-                        state.error_message = Some(msg);
-                    } else if let Err(msg) =
-                        validate_port_input(&state.container_host_port_input, "Container host port")
-                    {
-                        tracing::debug!(msg, "port validation failed");
-                        state.error_message = Some(msg);
-                    } else if let Err(msg) =
-                        validate_port_input(&state.container_mcp_port_input, "Container MCP port")
+                    if let Err(msg) =
+                        validate_port_input(&state.local_mcp_port_input, "Local MCP port")
                     {
                         tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
                     } else if state.draft.access_mode != AccessModeDraft::LocalOnly {
-                        if let Err(msg) = validate_positive_u64_input(
+                        if let Err(msg) =
+                            validate_port_input(&state.gateway_port_input, "Gateway port")
+                        {
+                            tracing::debug!(msg, "port validation failed");
+                            state.error_message = Some(msg);
+                        } else if let Err(msg) = validate_port_input(
+                            &state.container_host_port_input,
+                            "Container host port",
+                        ) {
+                            tracing::debug!(msg, "port validation failed");
+                            state.error_message = Some(msg);
+                        } else if let Err(msg) = validate_port_input(
+                            &state.container_mcp_port_input,
+                            "Container MCP port",
+                        ) {
+                            tracing::debug!(msg, "port validation failed");
+                            state.error_message = Some(msg);
+                        } else if let Err(msg) = validate_positive_u64_input(
                             &state.access_token_lifetime_secs_input,
                             "Access token lifetime",
                         ) {
@@ -288,6 +300,16 @@ async fn event_loop(
                         } else {
                             state.step = SetupStep::Summary;
                         }
+                    } else if let Err(msg) =
+                        validate_port_input(&state.container_host_port_input, "Container host port")
+                    {
+                        tracing::debug!(msg, "port validation failed");
+                        state.error_message = Some(msg);
+                    } else if let Err(msg) =
+                        validate_port_input(&state.container_mcp_port_input, "Container MCP port")
+                    {
+                        tracing::debug!(msg, "port validation failed");
+                        state.error_message = Some(msg);
                     } else {
                         state.step = SetupStep::Summary;
                     }
@@ -308,6 +330,9 @@ async fn event_loop(
                         PortsField::GatewayPort => {
                             state.gateway_port_input.pop();
                         }
+                        PortsField::LocalMcpPort => {
+                            state.local_mcp_port_input.pop();
+                        }
                         PortsField::ContainerHostPort => {
                             state.container_host_port_input.pop();
                         }
@@ -326,6 +351,7 @@ async fn event_loop(
                 KeyCode::Char(ch) if state.ports_focus_is_text_field() && ch.is_ascii_digit() => {
                     match state.ports_focus {
                         PortsField::GatewayPort => state.gateway_port_input.push(ch),
+                        PortsField::LocalMcpPort => state.local_mcp_port_input.push(ch),
                         PortsField::ContainerHostPort => state.container_host_port_input.push(ch),
                         PortsField::ContainerMcpPort => state.container_mcp_port_input.push(ch),
                         PortsField::AccessTokenLifetimeSecs => {

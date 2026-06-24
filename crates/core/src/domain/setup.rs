@@ -68,6 +68,7 @@ pub struct SetupDraftConfig {
     pub container_mcp_port: u16,
     pub container_network_isolated: bool,
     pub local_mcp_enabled: bool,
+    pub local_mcp_port: u16,
     pub local_mcp_bearer_token: String,
     pub pkce_required: bool,
     pub enforce_hostname_check: bool,

@@ -451,11 +451,34 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         blank_line(),
     ];
 
-    lines.push(field_line(
-        "Gateway port",
-        &state.gateway_port_input,
-        state.ports_focus == PortsField::GatewayPort,
-    ));
+    match state.draft.access_mode {
+        AccessModeDraft::LocalOnly => {
+            lines.push(field_line(
+                "Local MCP port",
+                &state.local_mcp_port_input,
+                state.ports_focus == PortsField::LocalMcpPort,
+            ));
+        }
+        AccessModeDraft::RemoteOnly => {
+            lines.push(field_line(
+                "Gateway port",
+                &state.gateway_port_input,
+                state.ports_focus == PortsField::GatewayPort,
+            ));
+        }
+        AccessModeDraft::Both => {
+            lines.push(field_line(
+                "Gateway port",
+                &state.gateway_port_input,
+                state.ports_focus == PortsField::GatewayPort,
+            ));
+            lines.push(field_line(
+                "Local MCP port",
+                &state.local_mcp_port_input,
+                state.ports_focus == PortsField::LocalMcpPort,
+            ));
+        }
+    }
     lines.push(field_line(
         "Container host port",
         &state.container_host_port_input,
@@ -579,12 +602,35 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         }
     }
 
+    match state.draft.access_mode {
+        AccessModeDraft::LocalOnly => {
+            lines.push(field_line(
+                "Local MCP port",
+                &state.local_mcp_port_input,
+                f == SummaryField::LocalMcpPort,
+            ));
+        }
+        AccessModeDraft::RemoteOnly => {
+            lines.push(field_line(
+                "Gateway port",
+                &state.gateway_port_input,
+                f == SummaryField::GatewayPort,
+            ));
+        }
+        AccessModeDraft::Both => {
+            lines.push(field_line(
+                "Gateway port",
+                &state.gateway_port_input,
+                f == SummaryField::GatewayPort,
+            ));
+            lines.push(field_line(
+                "Local MCP port",
+                &state.local_mcp_port_input,
+                f == SummaryField::LocalMcpPort,
+            ));
+        }
+    }
     lines.extend([
-        field_line(
-            "Gateway port",
-            &state.gateway_port_input,
-            f == SummaryField::GatewayPort,
-        ),
         field_line(
             "Container host port",
             &state.container_host_port_input,
@@ -1362,7 +1408,7 @@ mod tests {
             .join("\n");
 
         assert!(text.contains("Vault path"));
-        assert!(text.contains("Gateway port"));
+        assert!(text.contains("Local MCP port"));
         assert!(text.contains("Container host port"));
         assert!(text.contains("Container MCP port"));
         assert!(text.contains("Access mode"));
@@ -1376,11 +1422,45 @@ mod tests {
         assert!(!text.contains("Client ID"));
         assert!(!text.contains("Password mode"));
         assert!(!text.contains("Password"));
+        assert!(!text.contains("Gateway port"));
         assert!(!text.contains("Access token lifetime (secs)"));
         assert!(!text.contains("Refresh token lifetime (secs)"));
         assert!(!text.contains("PKCE required"));
         assert!(!text.contains("Hostname check"));
         assert!(!text.contains("Tunnel"));
+    }
+
+    #[test]
+    fn local_only_ports_screen_shows_local_mcp_port_instead_of_gateway_port() {
+        let mut state = sample_state();
+        state.draft.access_mode = AccessModeDraft::LocalOnly;
+
+        let text = ports_and_settings_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Local MCP port"));
+        assert!(!text.contains("Gateway port"));
+        assert!(!text.contains("Access token lifetime (secs)"));
+        assert!(!text.contains("Refresh token lifetime (secs)"));
+        assert!(!text.contains("PKCE required"));
+        assert!(!text.contains("Enforce hostname check"));
+    }
+
+    #[test]
+    fn both_mode_summary_shows_gateway_and_local_mcp_ports() {
+        let state = sample_state();
+
+        let text = summary_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Gateway port"));
+        assert!(text.contains("Local MCP port"));
     }
 
     fn sample_state() -> FirstRunTuiState {
@@ -1410,6 +1490,7 @@ mod tests {
                     container_mcp_port: 8420,
                     container_network_isolated: true,
                     local_mcp_enabled: true,
+                    local_mcp_port: 8422,
                     local_mcp_bearer_token: "local-token".into(),
                     pkce_required: true,
                     enforce_hostname_check: true,
