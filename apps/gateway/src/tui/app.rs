@@ -14,7 +14,8 @@ use tokio::sync::oneshot;
 
 use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
 use brain3_core::domain::setup::{
-    ConnectionCard, FinalizeSetupRequest, RuntimeLaunchPlan, SetupDefaults, SetupStep,
+    AccessModeDraft, ConnectionCard, FinalizeSetupRequest, RuntimeLaunchPlan, SetupDefaults,
+    SetupStep,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::runtime::probe_mcp_vault_list;
@@ -184,6 +185,24 @@ async fn event_loop(
                 }
                 _ => {}
             },
+            SetupStep::AccessMode => match key.code {
+                KeyCode::Esc => {
+                    state.clear_messages();
+                    state.step = SetupStep::VaultPath;
+                }
+                KeyCode::Up => state.previous_access_mode_focus(),
+                KeyCode::Down => state.next_access_mode_focus(),
+                KeyCode::Char(' ') => {}
+                KeyCode::Enter => {
+                    state.clear_messages();
+                    state.confirm_access_mode();
+                    state.step = match state.draft.access_mode {
+                        AccessModeDraft::LocalOnly => SetupStep::PortsAndSettings,
+                        AccessModeDraft::RemoteOnly | AccessModeDraft::Both => SetupStep::Auth,
+                    };
+                }
+                _ => {}
+            },
             SetupStep::Auth => match key.code {
                 KeyCode::Esc => {
                     state.clear_messages();
@@ -232,7 +251,10 @@ async fn event_loop(
             SetupStep::PortsAndSettings => match key.code {
                 KeyCode::Esc => {
                     state.clear_messages();
-                    state.step = SetupStep::Auth;
+                    state.step = match state.draft.access_mode {
+                        AccessModeDraft::LocalOnly => SetupStep::VaultPath,
+                        AccessModeDraft::RemoteOnly | AccessModeDraft::Both => SetupStep::Auth,
+                    };
                 }
                 KeyCode::Enter => {
                     state.clear_messages();
@@ -250,27 +272,33 @@ async fn event_loop(
                     {
                         tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
-                    } else if let Err(msg) = validate_positive_u64_input(
-                        &state.access_token_lifetime_secs_input,
-                        "Access token lifetime",
-                    ) {
-                        tracing::debug!(msg, "lifetime validation failed");
-                        state.error_message = Some(msg);
-                    } else if let Err(msg) = validate_positive_u64_input(
-                        &state.refresh_token_lifetime_secs_input,
-                        "Refresh token lifetime",
-                    ) {
-                        tracing::debug!(msg, "lifetime validation failed");
-                        state.error_message = Some(msg);
+                    } else if state.draft.access_mode != AccessModeDraft::LocalOnly {
+                        if let Err(msg) = validate_positive_u64_input(
+                            &state.access_token_lifetime_secs_input,
+                            "Access token lifetime",
+                        ) {
+                            tracing::debug!(msg, "lifetime validation failed");
+                            state.error_message = Some(msg);
+                        } else if let Err(msg) = validate_positive_u64_input(
+                            &state.refresh_token_lifetime_secs_input,
+                            "Refresh token lifetime",
+                        ) {
+                            tracing::debug!(msg, "lifetime validation failed");
+                            state.error_message = Some(msg);
+                        } else {
+                            state.step = SetupStep::Summary;
+                        }
                     } else {
                         state.step = SetupStep::Summary;
                     }
                 }
                 KeyCode::Tab | KeyCode::Down => {
-                    state.next_ports_focus();
+                    let access_mode = state.draft.access_mode.clone();
+                    state.next_ports_focus(&access_mode);
                 }
                 KeyCode::BackTab | KeyCode::Up => {
-                    state.previous_ports_focus();
+                    let access_mode = state.draft.access_mode.clone();
+                    state.previous_ports_focus(&access_mode);
                 }
                 KeyCode::Char('t') => {
                     state.toggle_ports_boolean();
@@ -428,7 +456,7 @@ async fn advance_from_vault_path(state: &mut FirstRunTuiState, use_case: &FirstR
     match use_case.validate_vault_path(&vault_path).await {
         Ok(()) => {
             state.vault_path_input = vault_path_input.to_string();
-            state.step = SetupStep::Auth;
+            state.step = SetupStep::AccessMode;
         }
         Err(error) => {
             tracing::error!(error = %error, "vault path validation failed");

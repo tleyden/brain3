@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use brain3_core::domain::model::ContainerRuntime;
 use brain3_core::domain::setup::{
-    DependencyAvailability, PackageManager, SetupStep, TunnelModeDraft,
+    AccessModeDraft, DependencyAvailability, PackageManager, SetupStep, TunnelModeDraft,
 };
 use brain3_platform::runtime::StartupStatus;
 
@@ -14,8 +14,8 @@ use crate::server::GatewayServerStatus;
 
 use super::runtime_logs::RuntimeLogsState;
 use super::state::{
-    install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, PortsField,
-    RuntimeView, SummaryField,
+    install_action_label, AccessModeField, AuthField, DependencyDoctorFocus, FirstRunTuiState,
+    PortsField, RuntimeView, SummaryField,
 };
 
 pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
@@ -68,6 +68,7 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Welcome",
         "Dependencies",
         "Vault",
+        "Access",
         "Auth",
         "Ports",
         "Start",
@@ -80,7 +81,7 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             stage_spans.push(Span::styled(" ─ ", muted_style()));
         }
 
-        let stage_span = if index < current_index {
+        let stage_span = if wizard_stage_complete(state, index, current_index) {
             Span::styled(format!("✓ {stage}"), success_style())
         } else if index == current_index {
             Span::styled(
@@ -116,6 +117,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::Welcome => "Welcome",
         SetupStep::DependencyDoctor => "Dependency Doctor",
         SetupStep::VaultPath => "Vault Path",
+        SetupStep::AccessMode => "Local/Remote Access",
         SetupStep::Auth => "Auth Setup",
         SetupStep::PortsAndSettings => "Ports & Settings",
         SetupStep::Summary => "Summary",
@@ -138,6 +140,7 @@ fn progress_caption(step: SetupStep) -> &'static str {
         SetupStep::Welcome => "Start with the defaults Brain3 prepared for this machine.",
         SetupStep::DependencyDoctor => "Confirm local dependencies and install anything missing.",
         SetupStep::VaultPath => "Choose the Obsidian-compatible vault Brain3 should expose.",
+        SetupStep::AccessMode => "Choose how AI clients will connect to Brain3.",
         SetupStep::Auth => "Review the generated login defaults and customize them if needed.",
         SetupStep::PortsAndSettings => {
             "Override ports and security settings if the defaults conflict."
@@ -154,10 +157,11 @@ fn wizard_stage_index(step: SetupStep) -> usize {
         SetupStep::Welcome => 0,
         SetupStep::DependencyDoctor => 1,
         SetupStep::VaultPath => 2,
-        SetupStep::Auth => 3,
-        SetupStep::PortsAndSettings => 4,
-        SetupStep::Summary => 5,
-        SetupStep::ConnectionCard | SetupStep::RuntimeStatus => 6,
+        SetupStep::AccessMode => 3,
+        SetupStep::Auth => 4,
+        SetupStep::PortsAndSettings => 5,
+        SetupStep::Summary => 6,
+        SetupStep::ConnectionCard | SetupStep::RuntimeStatus => 7,
     }
 }
 
@@ -166,6 +170,7 @@ fn body_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::Welcome => welcome_lines(state),
         SetupStep::DependencyDoctor => dependency_lines(state),
         SetupStep::VaultPath => vault_lines(state),
+        SetupStep::AccessMode => access_mode_lines(state),
         SetupStep::Auth => auth_lines(state),
         SetupStep::PortsAndSettings => ports_and_settings_lines(state),
         SetupStep::Summary => summary_lines(state),
@@ -400,6 +405,44 @@ fn auth_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     ]
 }
 
+fn access_mode_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        muted_line("Choose how Brain3 will be accessed by AI clients."),
+        blank_line(),
+    ];
+
+    lines.extend(access_mode_option_lines(
+        state,
+        AccessModeField::LocalOnly,
+        "Local MCP only",
+        &[
+            "Most secure, but only works from apps running locally on this",
+            "machine. May require directly editing a JSON config file for",
+            "some apps.",
+        ],
+    ));
+    lines.push(blank_line());
+    lines.extend(access_mode_option_lines(
+        state,
+        AccessModeField::RemoteOnly,
+        "Remote MCP only",
+        &[
+            "Your Brain3 gateway will be reachable via the public internet.",
+            "Enables commercial AI mobile and web apps with GUI configuration.",
+            "Higher security risk.",
+        ],
+    ));
+    lines.push(blank_line());
+    lines.extend(access_mode_option_lines(
+        state,
+        AccessModeField::Both,
+        "Both local and remote MCP",
+        &["Combines the tradeoffs of both options."],
+    ));
+
+    lines
+}
+
 fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     let mut lines = vec![
         muted_line("Override ports if the defaults conflict with other services on this machine."),
@@ -423,64 +466,56 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         &state.container_mcp_port_input,
         state.ports_focus == PortsField::ContainerMcpPort,
     ));
-    lines.push(field_line(
-        "Access token lifetime (secs)",
-        &state.access_token_lifetime_secs_input,
-        state.ports_focus == PortsField::AccessTokenLifetimeSecs,
-    ));
-    lines.push(field_line(
-        "Refresh token lifetime (secs)",
-        &state.refresh_token_lifetime_secs_input,
-        state.ports_focus == PortsField::RefreshTokenLifetimeSecs,
-    ));
 
-    lines.push(blank_line());
-    lines.push(field_badge_line(
-        "Local MCP access",
-        if state.draft.local_mcp_enabled {
+    if state.draft.access_mode != AccessModeDraft::LocalOnly {
+        lines.push(field_line(
+            "Access token lifetime (secs)",
+            &state.access_token_lifetime_secs_input,
+            state.ports_focus == PortsField::AccessTokenLifetimeSecs,
+        ));
+        lines.push(field_line(
+            "Refresh token lifetime (secs)",
+            &state.refresh_token_lifetime_secs_input,
+            state.ports_focus == PortsField::RefreshTokenLifetimeSecs,
+        ));
+
+        lines.push(blank_line());
+
+        let pkce_active = state.ports_focus == PortsField::PkceRequired;
+        let pkce_badge = if state.draft.pkce_required {
             badge_span("Enabled", Color::Green)
         } else {
             badge_span("Disabled", Color::Yellow)
-        },
-        state.ports_focus == PortsField::LocalMcpEnabled,
-    ));
-    lines.push(muted_line(
-        "Enabled starts a localhost-only MCP port with a static bearer token.",
-    ));
+        };
+        let pkce_pointer = if pkce_active {
+            Span::styled("▶ ", accent_style())
+        } else {
+            Span::styled("  ", muted_style())
+        };
+        lines.push(Line::from(vec![
+            pkce_pointer,
+            Span::styled(
+                "PKCE required: ".to_string(),
+                if pkce_active {
+                    accent_style()
+                } else {
+                    label_style()
+                },
+            ),
+            pkce_badge,
+        ]));
 
-    let pkce_active = state.ports_focus == PortsField::PkceRequired;
-    let pkce_badge = if state.draft.pkce_required {
-        badge_span("Enabled", Color::Green)
-    } else {
-        badge_span("Disabled", Color::Yellow)
-    };
-    let pkce_pointer = if pkce_active {
-        Span::styled("▶ ", accent_style())
-    } else {
-        Span::styled("  ", muted_style())
-    };
-    lines.push(Line::from(vec![
-        pkce_pointer,
-        Span::styled(
-            "PKCE required: ".to_string(),
-            if pkce_active {
-                accent_style()
+        lines.push(field_badge_line(
+            "Enforce hostname check",
+            if state.draft.enforce_hostname_check {
+                badge_span("Enabled", Color::Green)
             } else {
-                label_style()
+                badge_span("Disabled", Color::Yellow)
             },
-        ),
-        pkce_badge,
-    ]));
+            state.ports_focus == PortsField::EnforceHostnameCheck,
+        ));
+    }
 
-    lines.push(field_badge_line(
-        "Enforce hostname check",
-        if state.draft.enforce_hostname_check {
-            badge_span("Enabled", Color::Green)
-        } else {
-            badge_span("Disabled", Color::Yellow)
-        },
-        state.ports_focus == PortsField::EnforceHostnameCheck,
-    ));
     lines.push(field_badge_line(
         "Internal-only container networking",
         if state.draft.container_network_isolated {
@@ -565,15 +600,7 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             &state.refresh_token_lifetime_secs_input,
             f == SummaryField::RefreshTokenLifetimeSecs,
         ),
-        field_badge_line(
-            "Local MCP access",
-            if state.draft.local_mcp_enabled {
-                badge_span("Enabled", Color::Green)
-            } else {
-                badge_span("Disabled", Color::Yellow)
-            },
-            f == SummaryField::LocalMcpEnabled,
-        ),
+        key_value_line("Access mode", format_access_mode(&state.draft.access_mode)),
         field_badge_line(
             "PKCE required",
             if state.draft.pkce_required {
@@ -818,6 +845,15 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             ("[Esc]", "Back"),
             ("[q]", "Quit"),
         ]),
+        SetupStep::AccessMode => vec![
+            primary_action_line("Lock the access mode before continuing."),
+            hint_line(vec![
+                ("[↑↓]", "Move"),
+                ("[Space]", "Select"),
+                ("[Esc]", "Back"),
+                ("[Enter]", "Continue"),
+            ]),
+        ],
         SetupStep::Auth => continue_action_lines(vec![
             ("[Tab/Up/Down]", "Move"),
             ("[Type]", "Edit field"),
@@ -1094,6 +1130,7 @@ fn format_container_runtime(runtime: ContainerRuntime) -> &'static str {
 
 fn format_tunnel_mode(mode: &TunnelModeDraft) -> String {
     match mode {
+        TunnelModeDraft::Disabled => "Disabled".into(),
         TunnelModeDraft::CloudflareQuick => "Cloudflare quick tunnel".into(),
         TunnelModeDraft::CloudflareNamed {
             tunnel_name,
@@ -1102,6 +1139,68 @@ fn format_tunnel_mode(mode: &TunnelModeDraft) -> String {
         TunnelModeDraft::DirectPublicOrigin { hostname } => {
             format!("Direct public origin ({hostname})")
         }
+    }
+}
+
+fn format_access_mode(mode: &AccessModeDraft) -> &'static str {
+    match mode {
+        AccessModeDraft::LocalOnly => "Local MCP only",
+        AccessModeDraft::RemoteOnly => "Remote MCP only",
+        AccessModeDraft::Both => "Both local and remote MCP",
+    }
+}
+
+fn wizard_stage_complete(state: &FirstRunTuiState, index: usize, current_index: usize) -> bool {
+    if index >= current_index {
+        return false;
+    }
+
+    let auth_stage_index = wizard_stage_index(SetupStep::Auth);
+    if state.draft.access_mode == AccessModeDraft::LocalOnly
+        && index == auth_stage_index
+        && current_index > auth_stage_index
+    {
+        return false;
+    }
+
+    true
+}
+
+fn access_mode_option_lines(
+    state: &FirstRunTuiState,
+    focus: AccessModeField,
+    label: &str,
+    description: &[&str],
+) -> Vec<Line<'static>> {
+    let is_focused = state.access_mode_focus == focus;
+    let is_selected = state.draft.access_mode == format_access_mode_focus(focus);
+    let pointer = if is_focused {
+        Span::styled("▶ ", accent_style())
+    } else {
+        Span::styled("  ", muted_style())
+    };
+    let selection = if is_selected { "●" } else { " " };
+
+    let mut lines = vec![Line::from(vec![
+        pointer,
+        Span::styled(format!("[ {selection} ] {label}"), value_style()),
+    ])];
+
+    for line in description {
+        lines.push(Line::from(vec![
+            Span::styled("        ", muted_style()),
+            Span::styled((*line).to_string(), muted_style()),
+        ]));
+    }
+
+    lines
+}
+
+fn format_access_mode_focus(focus: AccessModeField) -> AccessModeDraft {
+    match focus {
+        AccessModeField::LocalOnly => AccessModeDraft::LocalOnly,
+        AccessModeField::RemoteOnly => AccessModeDraft::RemoteOnly,
+        AccessModeField::Both => AccessModeDraft::Both,
     }
 }
 
@@ -1247,6 +1346,7 @@ mod tests {
                     refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
                     username: "admin".into(),
                     password: String::new(),
+                    access_mode: AccessModeDraft::Both,
                     tunnel_mode: TunnelModeDraft::CloudflareQuick,
                     container_runtime: ContainerRuntime::MacOSContainer,
                     vault_path: PathBuf::from("/tmp/vault"),

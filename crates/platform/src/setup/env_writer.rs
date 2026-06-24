@@ -102,6 +102,13 @@ fn build_overrides(
     );
 
     match &draft.tunnel_mode {
+        TunnelModeDraft::Disabled => {
+            values.insert("B3_CF_QUICK_TUNNEL", "false".into());
+            values.insert("B3_CF_TUNNEL_NAME", String::new());
+            values.insert("B3_CF_DOMAIN", String::new());
+            values.insert("B3_CF_TUNNEL_CONFIG_FILE", String::new());
+            values.insert("B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME", String::new());
+        }
         TunnelModeDraft::CloudflareQuick => {
             values.insert("B3_CF_QUICK_TUNNEL", "true".into());
             values.insert("B3_CF_TUNNEL_NAME", String::new());

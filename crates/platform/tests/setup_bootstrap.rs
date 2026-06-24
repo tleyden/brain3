@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use brain3_core::domain::errors::SetupError;
 use brain3_core::domain::model::ContainerRuntime;
 use brain3_core::domain::setup::{
-    SetupDraftConfig, SetupOperatingSystem, SetupPaths, TunnelModeDraft,
+    AccessModeDraft, SetupDraftConfig, SetupOperatingSystem, SetupPaths, TunnelModeDraft,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::setup::app_home::Brain3AppHome;
@@ -37,6 +37,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         refresh_token_lifetime_secs: 7776000,
         username: "admin".into(),
         password: "correct horse battery staple".into(),
+        access_mode: AccessModeDraft::Both,
         tunnel_mode: TunnelModeDraft::CloudflareQuick,
         container_runtime: ContainerRuntime::MacOSContainer,
         vault_path: PathBuf::from("/Users/test/My Vault"),
@@ -69,6 +70,41 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_CONTAINER_IMAGE_TAG=\"\""));
     assert!(!rendered.contains("B3_CONTAINER_IMAGE="));
     assert!(rendered.contains("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=\"false\""));
+}
+
+#[test]
+fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
+    let paths = SetupPaths::new(
+        PathBuf::from("/tmp/brain3-home"),
+        PathBuf::from("/tmp/brain3-home/.env"),
+        PathBuf::from("/tmp/brain3-home/cloudflared"),
+    );
+    let draft = SetupDraftConfig {
+        gateway_port: 8421,
+        client_id: "custom-client".into(),
+        client_secret: "secret-123".into(),
+        access_token_lifetime_secs: 1234,
+        refresh_token_lifetime_secs: 7776000,
+        username: "admin".into(),
+        password: "correct horse battery staple".into(),
+        access_mode: AccessModeDraft::LocalOnly,
+        tunnel_mode: TunnelModeDraft::Disabled,
+        container_runtime: ContainerRuntime::MacOSContainer,
+        vault_path: PathBuf::from("/Users/test/My Vault"),
+        container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+        container_host_port: 8420,
+        container_mcp_port: 8420,
+        container_network_isolated: false,
+        local_mcp_enabled: true,
+        local_mcp_bearer_token: "local-token".into(),
+        pkce_required: true,
+        enforce_hostname_check: true,
+        direct_public_origin_hostname: None,
+    };
+
+    let rendered = render_env_file(&draft, &paths).expect("env should render");
+
+    assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"false\""));
 }
 
 #[tokio::test]

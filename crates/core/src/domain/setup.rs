@@ -36,7 +36,15 @@ impl SetupPaths {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccessModeDraft {
+    LocalOnly,
+    RemoteOnly,
+    Both,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TunnelModeDraft {
+    Disabled,
     CloudflareQuick,
     CloudflareNamed { tunnel_name: String, domain: String },
     DirectPublicOrigin { hostname: String },
@@ -51,6 +59,7 @@ pub struct SetupDraftConfig {
     pub refresh_token_lifetime_secs: u64,
     pub username: String,
     pub password: String,
+    pub access_mode: AccessModeDraft,
     pub tunnel_mode: TunnelModeDraft,
     pub container_runtime: ContainerRuntime,
     pub vault_path: PathBuf,
@@ -107,6 +116,7 @@ pub enum SetupStep {
     Welcome,
     DependencyDoctor,
     VaultPath,
+    AccessMode,
     Auth,
     PortsAndSettings,
     Summary,
