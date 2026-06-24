@@ -92,7 +92,7 @@ fn build_overrides(
         },
     );
     values.insert(
-        "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
+        "LOCAL_GATEWAY_MCP_BEARER_TOKEN",
         if draft.local_mcp_enabled {
             draft.local_mcp_bearer_token.clone()
         } else {

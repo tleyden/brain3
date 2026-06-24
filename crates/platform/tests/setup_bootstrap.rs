@@ -65,7 +65,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_PASSWORD=\"correct horse battery staple\""));
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));
     assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"9555\""));
-    assert!(rendered.contains("LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN=\"local-token\""));
+    assert!(rendered.contains("LOCAL_GATEWAY_MCP_BEARER_TOKEN=\"local-token\""));
     assert!(rendered.contains("B3_CONTAINER_RUNTIME=\"macos-container\""));
     assert!(rendered.contains("B3_VAULT_PATH=\"/Users/test/My Vault\""));
     assert!(rendered.contains("B3_CONTAINER_IMAGE_REPO=\"ghcr.io/tleyden/brain3-mcp-vault-tools\""));
@@ -110,7 +110,7 @@ fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"false\""));
     assert!(rendered.contains("B3_ACCESS_MODE=\"local\""));
     assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"8422\""));
-    assert!(rendered.contains("LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN=\"local-token\""));
+    assert!(rendered.contains("LOCAL_GATEWAY_MCP_BEARER_TOKEN=\"local-token\""));
 }
 
 #[tokio::test]

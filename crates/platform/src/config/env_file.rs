@@ -269,7 +269,7 @@ fn load_local_mcp_config() -> Result<Option<LocalMcpConfig>, ConfigError> {
         })
         .transpose()?;
 
-    let bearer_token = env::var("LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN")
+    let bearer_token = env::var("LOCAL_GATEWAY_MCP_BEARER_TOKEN")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
@@ -282,8 +282,7 @@ fn load_local_mcp_config() -> Result<Option<LocalMcpConfig>, ConfigError> {
             bearer_token,
         })),
         (Some(_), None) => Err(ConfigError::Missing(
-            "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN is required when B3_LOCAL_MCP_PORT is set"
-                .into(),
+            "LOCAL_GATEWAY_MCP_BEARER_TOKEN is required when B3_LOCAL_MCP_PORT is set".into(),
         )),
     }
 }
@@ -557,7 +556,7 @@ mod tests {
         "B3_CONTAINER_MCP_PORT",
         "B3_ACCESS_MODE",
         "B3_LOCAL_MCP_PORT",
-        "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
+        "LOCAL_GATEWAY_MCP_BEARER_TOKEN",
         "B3_CF_QUICK_TUNNEL",
     ];
 
@@ -828,7 +827,7 @@ mod tests {
                  B3_TOKEN_DB_PATH={}\n\
                  B3_ACCESS_MODE=local\n\
                  B3_LOCAL_MCP_PORT=8422\n\
-                 LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN=local-token\n",
+                 LOCAL_GATEWAY_MCP_BEARER_TOKEN=local-token\n",
                 token_db.display()
             ));
 
@@ -876,7 +875,7 @@ mod tests {
                  B3_USERNAME=test-user\n\
                  B3_PASSWORD=test-password\n\
                  B3_TOKEN_DB_PATH={}\n\
-                 LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN=local-token\n",
+                 LOCAL_GATEWAY_MCP_BEARER_TOKEN=local-token\n",
                 token_db.display()
             ));
 
@@ -911,7 +910,7 @@ mod tests {
 
             match err {
                 ConfigError::Missing(message) => {
-                    assert!(message.contains("LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN"));
+                    assert!(message.contains("LOCAL_GATEWAY_MCP_BEARER_TOKEN"));
                 }
                 other => panic!("expected missing config error, got {other:?}"),
             }
