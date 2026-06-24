@@ -1,5 +1,12 @@
 # Security Review: brain3
 
+Auditor: Codex Security Scan
+Date: 2026-06-24
+Scope: Full codebase — OAuth2 gateway, Cloudflare tunnel, local network / container exposure, default credentials, host process trust boundaries
+Codebase version: 0.2.1
+
+
+
 ## Scope
 
 Repository-wide security scan of the checked-out Brain3 git revision with prior audit context from `SECURITY_AUDIT.MD` and the 2026-06-24 security-audit update plan. High-risk review focused on OAuth policy, public ingress via Cloudflare tunnels, container boundary exposure, local credential handling, and MCP logging.
