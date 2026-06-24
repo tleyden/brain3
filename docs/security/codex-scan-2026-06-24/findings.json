@@ -1,0 +1,590 @@
+{
+  "documentType": "codex-security.findings",
+  "findings": [
+    {
+      "attackPath": {
+        "dataflow": {
+          "outcome": "gateway OAuth, metadata, login, and health routes become internet-reachable without an explicit remote-access opt-in",
+          "sink": "public Cloudflare tunnel startup",
+          "source": "first-run defaults and unset tunnel configuration",
+          "summary": "First-run draft or unset env flag -> `TunnelModeDraft::CloudflareQuick` / `TunnelConfig::CloudflareQuick` -> cloudflared startup -> public gateway ingress"
+        },
+        "evidenceRefs": [
+          "setup-default",
+          "env-default",
+          "template-default"
+        ],
+        "reachability": {
+          "attacker": "internet-origin attacker after default public deployment",
+          "entrypoint": "public gateway routes made reachable by the quick tunnel",
+          "outcome": "any present or future gateway logic bug sits on a broader remote attack surface than a local-only operator may expect",
+          "summary": "No attacker interaction is needed to widen exposure. The risk materializes when an operator accepts defaults on a new deployment or leaves the tunnel flag unset."
+        },
+        "summary": "A new Brain3 deployment starts from defaults, automatically launches a Cloudflare quick tunnel, and exposes gateway routes at the very boundary the threat model treats as most sensitive."
+      },
+      "codeEvidence": [
+        {
+          "code": "let draft = SetupDraftConfig {\n    gateway_port: DEFAULT_GATEWAY_PORT,\n    client_id: DEFAULT_CLIENT_ID.to_string(),\n    client_secret: self\n        .port\n        .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?,\n    access_token_lifetime_secs: DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,\n    refresh_token_lifetime_secs: DEFAULT_REFRESH_TOKEN_LIFETIME_SECS,\n    username: DEFAULT_USERNAME.to_string(),\n    password: String::new(),\n    tunnel_mode: TunnelModeDraft::CloudflareQuick,",
+          "endLine": 40,
+          "explanation": "A fresh setup draft is initialized with `CloudflareQuick` before the operator explicitly chooses a local-only mode.",
+          "id": "setup-default",
+          "label": "First-run setup seeds Cloudflare quick tunnel mode",
+          "language": "rust",
+          "path": "crates/core/src/application/first_run_setup.rs",
+          "startLine": 30
+        },
+        {
+          "code": "// Default: quick tunnel unless explicitly disabled.\nlet quick_default = env_bool(\"B3_CF_QUICK_TUNNEL\", true);\nif quick_default {\n    tracing::info!(\"B3_CF_QUICK_TUNNEL defaulting to true \u2014 using Cloudflare quick tunnel\");\n    return Ok(Some(TunnelConfig::CloudflareQuick {\n        local_port: gateway_port,\n    }));\n}\n\ntracing::info!(\"B3_CF_QUICK_TUNNEL=false and no named tunnel vars set \u2014 no tunnel configured\");",
+          "endLine": 437,
+          "explanation": "When the operator leaves the quick-tunnel flag unset, Brain3 still resolves to a public quick tunnel instead of local-only mode.",
+          "id": "env-default",
+          "label": "Env-file parsing defaults `B3_CF_QUICK_TUNNEL` to true",
+          "language": "rust",
+          "path": "crates/platform/src/config/env_file.rs",
+          "startLine": 428
+        },
+        {
+          "code": "# Option A: Quick tunnel \u2014 no DNS or config needed, URL changes on each restart.\n# Default: true. The gateway will start cloudflared automatically on startup.\n# Set to false (and leave B3_CF_TUNNEL_NAME/B3_CF_DOMAIN empty) to disable all tunneling.\nB3_CF_QUICK_TUNNEL=true",
+          "endLine": 50,
+          "explanation": "The template reinforces that operators start from an internet-reachable tunnel unless they override it.",
+          "id": "template-default",
+          "label": "The shipped env template documents quick tunnel as the default",
+          "language": "dotenv",
+          "path": ".env.template",
+          "startLine": 47
+        }
+      ],
+      "confidence": {
+        "level": "high",
+        "rationale": "The default is directly visible in first-run setup, env parsing, and the checked-in template, with no material ambiguity about the resulting posture."
+      },
+      "findingId": "csf_e3f37341ef604010893794c7",
+      "fingerprints": {
+        "algorithm": "codex-security/v1",
+        "primary": "codex-security/v1:sha256:9679cf091fd1ff592f27e2dee83ac9f67c2ae4c944016ae940e59e47d422cf22"
+      },
+      "identity": {
+        "anchor": "cloudflare-quick-tunnel-default"
+      },
+      "locations": [
+        {
+          "endLine": 40,
+          "path": "crates/core/src/application/first_run_setup.rs",
+          "role": "root_control",
+          "startLine": 30
+        },
+        {
+          "endLine": 437,
+          "path": "crates/platform/src/config/env_file.rs",
+          "role": "supporting",
+          "startLine": 428
+        },
+        {
+          "endLine": 50,
+          "path": ".env.template",
+          "role": "supporting",
+          "startLine": 47
+        }
+      ],
+      "occurrenceId": "occ_e5c31edda85a7624319a1f82",
+      "preventiveControls": [
+        "Keep remote-access mode changes behind explicit operator confirmation.",
+        "Require threat-model updates before adding new public-ingress defaults."
+      ],
+      "provenance": {
+        "source": "codex-security-plugin"
+      },
+      "remediation": "Make local-only operation the default and require an explicit operator action before Brain3 starts any Cloudflare tunnel.",
+      "remediationTests": [
+        "Add an integration test that a fresh setup draft resolves to no tunnel until the operator explicitly selects a tunnel mode.",
+        "Add a config test that an unset `B3_CF_QUICK_TUNNEL` value produces local-only startup instead of `CloudflareQuick`."
+      ],
+      "rootCause": {
+        "evidenceRefs": [
+          "setup-default",
+          "env-default"
+        ],
+        "summary": "The violated invariant is that remote ingress should require an explicit opt-in because Brain3 treats public tunneling as its highest-risk boundary. The default setup and env parsing paths instead select the public quick tunnel automatically."
+      },
+      "ruleId": "configuration.public-ingress-default",
+      "severity": {
+        "changeConditions": "Severity would rise if unauthenticated or weakly authenticated gateway routes remain exposed remotely, and would fall if Brain3 switches to a local-only default with an explicit remote-access confirmation step.",
+        "level": "medium",
+        "rationale": "This default materially broadens attacker reachability at the project\u2019s primary threat boundary, but it does not by itself bypass Brain3\u2019s OAuth or hostname controls."
+      },
+      "summary": "Brain3\u2019s first-run setup and environment fallback both default to `CloudflareQuick`, so a new installation can become internet-reachable without an explicit remote-access opt-in.",
+      "taxonomy": {
+        "category": "Insecure default configuration",
+        "cwe": [
+          "CWE-1188"
+        ]
+      },
+      "title": "Cloudflare quick tunnel is enabled by default on first run",
+      "validation": {
+        "assertions": [
+          "A fresh first-run draft starts in `CloudflareQuick` mode.",
+          "An unset `B3_CF_QUICK_TUNNEL` value is interpreted as `true`.",
+          "The shipped template documents the same internet-reachable default."
+        ],
+        "evidenceRefs": [
+          "setup-default",
+          "env-default",
+          "template-default"
+        ],
+        "limitations": [
+          "No live setup wizard run was executed; validation is based on the checked revision\u2019s source and configuration."
+        ],
+        "method": "static source trace",
+        "summary": "The source trace followed setup draft generation into env-file parsing and the shipped template, showing a consistent default to `CloudflareQuick` when tunneling is not explicitly disabled."
+      }
+    },
+    {
+      "attackPath": {
+        "dataflow": {
+          "outcome": "authorization codes are delivered to attacker-chosen callback endpoints for the configured client",
+          "sink": "bound authorization redirect URI",
+          "source": "caller-controlled `redirect_uri` in the authorize request",
+          "summary": "Authorization request parameters -> `validate_authorize_params()` -> `GatewayRegistrar::bound_redirect()` -> authorization grant redirect URI -> code delivery to callback"
+        },
+        "evidenceRefs": [
+          "authorize-validation",
+          "registrar-binding"
+        ],
+        "reachability": {
+          "attacker": "malicious or compromised preregistered confidential client",
+          "entrypoint": "`/oauth/authorize` request for the fixed client id",
+          "outcome": "Brain3 delivers the code to the attacker-controlled callback, and the same client can then redeem it with the configured secret",
+          "summary": "The attacker must control or compromise the single preregistered confidential client. Within that trust boundary, Brain3 hands the attacker the callback sink instead of enforcing an allowlist."
+        },
+        "summary": "A malicious or compromised preregistered client requests authorization with an attacker-chosen callback URI and receives Brain3 authorization codes at that endpoint."
+      },
+      "codeEvidence": [
+        {
+          "code": "fn validate_authorize_params(\n    params: &LoginFormParams,\n    config: &brain3_core::domain::model::GatewayConfig,\n) -> Result<(), Response> {\n    if params.response_type != \"code\" { /* ... */ }\n\n    if params.client_id.is_empty() || params.client_id != config.oauth.client_id { /* ... */ }\n\n    if params.redirect_uri.is_empty() {\n        return Err((\n            StatusCode::BAD_REQUEST,\n            Json(json!({\"error\": \"invalid_request\", \"error_description\": \"redirect_uri required\"})),\n        )\n            .into_response());\n    }",
+          "endLine": 374,
+          "explanation": "Brain3 validates `response_type`, the fixed `client_id`, and non-emptiness, but it does not constrain the callback origin or path.",
+          "id": "authorize-validation",
+          "label": "Authorize validation only rejects an empty redirect URI",
+          "language": "rust",
+          "path": "crates/platform/src/http/oauth_handlers.rs",
+          "startLine": 347
+        },
+        {
+          "code": "fn bound_redirect<'a>(&self, bound: ClientUrl<'a>) -> Result<BoundClient<'a>, RegistrarError> {\n    if bound.client_id.as_ref() != self.client_id {\n        /* ... */\n        return Err(RegistrarError::Unspecified);\n    }\n    let redirect_uri = bound.redirect_uri.ok_or(RegistrarError::Unspecified)?;\n    Ok(BoundClient {\n        client_id: bound.client_id,\n        redirect_uri: Cow::Owned(redirect_uri.into_owned().into()),\n    })",
+          "endLine": 45,
+          "explanation": "Once the client id matches, Brain3 binds whichever redirect URI the caller supplied instead of comparing it against an approved set.",
+          "id": "registrar-binding",
+          "label": "Registrar preserves the submitted redirect URI unchanged",
+          "language": "rust",
+          "path": "crates/platform/src/http/registrar.rs",
+          "startLine": 32
+        }
+      ],
+      "confidence": {
+        "level": "high",
+        "rationale": "The authorize path and registrar binding logic both show the missing redirect allowlist directly, and the surviving attack path does not depend on speculative code paths."
+      },
+      "findingId": "csf_20398754d3175a8fb40328cd",
+      "fingerprints": {
+        "algorithm": "codex-security/v1",
+        "primary": "codex-security/v1:sha256:6692bc6b859b29555adebb449b44af52ad78ade4d79616c2015d9def227510b4"
+      },
+      "identity": {
+        "anchor": "unallowlisted-redirect-uri-binding"
+      },
+      "locations": [
+        {
+          "endLine": 374,
+          "path": "crates/platform/src/http/oauth_handlers.rs",
+          "role": "entrypoint",
+          "startLine": 347
+        },
+        {
+          "endLine": 45,
+          "path": "crates/platform/src/http/registrar.rs",
+          "role": "root_control",
+          "startLine": 32
+        }
+      ],
+      "occurrenceId": "occ_497b6676e802647dd443608e",
+      "preventiveControls": [
+        "Keep redirect binding policy in Brain3-owned configuration rather than in client-supplied request parameters.",
+        "Re-review redirect policy before introducing any multi-client or broader-scope OAuth modes."
+      ],
+      "provenance": {
+        "source": "codex-security-plugin"
+      },
+      "remediation": "Bind the preregistered client to an explicit allowlist of approved redirect URIs or approved callback origins instead of trusting runtime-supplied redirect values.",
+      "remediationTests": [
+        "Add an authorize-flow test that rejects an unapproved `redirect_uri` even when `client_id` matches.",
+        "Add a token-flow regression test that only previously approved redirect URIs can be bound and redeemed."
+      ],
+      "rootCause": {
+        "evidenceRefs": [
+          "authorize-validation",
+          "registrar-binding"
+        ],
+        "summary": "The violated invariant is that a confidential client\u2019s redirect endpoint must still be constrained to Brain3-approved callback URLs. Brain3 instead treats any non-empty runtime `redirect_uri` as authoritative once the caller uses the fixed `client_id`."
+      },
+      "ruleId": "oauth.redirect-uri-policy",
+      "severity": {
+        "changeConditions": "Severity would rise if Brain3 adds more client identities or broader token privileges without tightening redirect binding, and would fall if redirect URIs are pinned to an explicit allowlist.",
+        "level": "medium",
+        "rationale": "Exploitation requires control of the preregistered confidential client or its secret, but within that threat model the bug lets Brain3 deliver authorization codes to attacker-chosen callback endpoints."
+      },
+      "summary": "Brain3 checks that the caller uses the fixed `client_id`, but it only requires a non-empty `redirect_uri` and then binds the caller-supplied URI directly into the authorization flow.",
+      "taxonomy": {
+        "category": "Open redirect / OAuth redirect URI trust",
+        "cwe": [
+          "CWE-601"
+        ]
+      },
+      "title": "OAuth authorization accepts arbitrary redirect URIs for the preregistered client",
+      "validation": {
+        "assertions": [
+          "Brain3 accepts any non-empty runtime `redirect_uri` for the fixed client id.",
+          "The same caller-supplied URI is bound into the later code-exchange state."
+        ],
+        "evidenceRefs": [
+          "authorize-validation",
+          "registrar-binding"
+        ],
+        "limitations": [
+          "The attack assumes the preregistered client is malicious, compromised, or operating with a leaked client secret."
+        ],
+        "method": "static source trace",
+        "summary": "Validation traced the authorization request from parameter checks into the registrar binding step and found no allowlist, hostname restriction, or exact callback matching in Brain3-owned code."
+      }
+    },
+    {
+      "attackPath": {
+        "dataflow": {
+          "outcome": "OAuth clients can be misdirected during metadata discovery or invalid-token recovery flows",
+          "sink": "publicly emitted OAuth metadata fields and `resource_metadata` challenge URLs",
+          "source": "attacker-controlled request host headers",
+          "summary": "Inbound `Host` / `X-Forwarded-Host` header -> `resolve_base_url()` -> OAuth metadata or bearer challenge output -> client trust decision"
+        },
+        "evidenceRefs": [
+          "oauth-base-url",
+          "oauth-metadata",
+          "mcp-resource-metadata"
+        ],
+        "reachability": {
+          "attacker": "unauthenticated internet client on a public Brain3 deployment",
+          "entrypoint": "`/oauth/metadata` and unauthorized `/mcp` responses",
+          "outcome": "clients that trust Brain3\u2019s emitted metadata can be pointed at attacker-chosen origins or follow-up metadata URLs",
+          "summary": "The issue is reachable before authentication on real gateway routes. It does not require the attacker to compromise a confidential client first."
+        },
+        "summary": "An unauthenticated client reaches Brain3\u2019s metadata or 401 paths with a crafted host header, causing Brain3 to publish attacker-chosen metadata origins to OAuth clients."
+      },
+      "codeEvidence": [
+        {
+          "code": "fn resolve_base_url(headers: &HeaderMap) -> String {\n    let proto = headers\n        .get(\"x-forwarded-proto\")\n        .and_then(|v| v.to_str().ok())\n        .unwrap_or(\"http\");\n    let host = headers\n        .get(\"x-forwarded-host\")\n        .or_else(|| headers.get(\"host\"))\n        .and_then(|v| v.to_str().ok())\n        .unwrap_or(\"localhost\");\n    format!(\"{proto}://{host}\")",
+          "endLine": 299,
+          "explanation": "The public origin is constructed from request headers rather than a configured trusted hostname.",
+          "id": "oauth-base-url",
+          "label": "OAuth metadata base URL comes from forwarded host headers",
+          "language": "rust",
+          "path": "crates/platform/src/http/oauth_handlers.rs",
+          "startLine": 289
+        },
+        {
+          "code": "pub async fn oauth_metadata<P: McpProxyPort + 'static>(\n    State(_state): State<AppState<P>>,\n    headers: HeaderMap,\n) -> impl IntoResponse {\n    let base_url = resolve_base_url(&headers);\n    tracing::info!(/* ... */);\n    Json(json!({\n        \"issuer\": base_url,\n        \"authorization_endpoint\": format!(\"{base_url}/oauth/authorize\"),\n        \"token_endpoint\": format!(\"{base_url}/oauth/token\"),\n        /* ... */\n    }))",
+          "endLine": 666,
+          "explanation": "The request-derived base URL becomes the advertised issuer and OAuth endpoint set.",
+          "id": "oauth-metadata",
+          "label": "The derived base URL feeds OAuth metadata output",
+          "language": "rust",
+          "path": "crates/platform/src/http/oauth_handlers.rs",
+          "startLine": 647
+        },
+        {
+          "code": "fn resolve_base_url(headers: &HeaderMap) -> String {\n    let proto = headers\n        .get(\"x-forwarded-proto\")\n        .and_then(|v| v.to_str().ok())\n        .unwrap_or(\"http\");\n    let host = headers\n        .get(\"x-forwarded-host\")\n        .or_else(|| headers.get(\"host\"))\n        .and_then(|v| v.to_str().ok())\n        .unwrap_or(\"localhost\");\n    format!(\"{proto}://{host}\")",
+          "endLine": 27,
+          "explanation": "The bearer-challenge path duplicates the same request-derived public origin logic.",
+          "id": "mcp-base-url",
+          "label": "The MCP 401 path repeats the same base-URL derivation",
+          "language": "rust",
+          "path": "crates/platform/src/http/mcp_handlers.rs",
+          "startLine": 17
+        },
+        {
+          "code": "fn proxy_error_response(err: ProxyError, headers: &HeaderMap) -> Response {\n    match err {\n        ProxyError::Unauthorized(desc) => {\n            let base_url = resolve_base_url(headers);\n            let www_authenticate = format!(\n                r#\"Bearer error=\"invalid_token\", error_description=\"{desc}\", resource_metadata=\"{}\"\"#,\n                resource_metadata_url(&base_url)\n            );",
+          "endLine": 145,
+          "explanation": "Unauthenticated bearer challenges publish attacker-influenced metadata URLs before Brain3 authenticates the caller.",
+          "id": "mcp-resource-metadata",
+          "label": "Bearer challenge reflects the derived base URL into `resource_metadata`",
+          "language": "rust",
+          "path": "crates/platform/src/http/mcp_handlers.rs",
+          "startLine": 137
+        }
+      ],
+      "confidence": {
+        "level": "high",
+        "rationale": "Both metadata builders and the unauthenticated 401 bearer-challenge path show the same request-derived base-URL behavior directly in source."
+      },
+      "findingId": "csf_05ca2fcc085e38ac24223b93",
+      "fingerprints": {
+        "algorithm": "codex-security/v1",
+        "primary": "codex-security/v1:sha256:6b3d29b042f3a65b3df0cd6a9bdad55f9ea9ab5e1e9f9311d593972cab6fffcc"
+      },
+      "identity": {
+        "anchor": "request-derived-base-url-metadata"
+      },
+      "locations": [
+        {
+          "endLine": 299,
+          "path": "crates/platform/src/http/oauth_handlers.rs",
+          "role": "root_control",
+          "startLine": 289
+        },
+        {
+          "endLine": 666,
+          "path": "crates/platform/src/http/oauth_handlers.rs",
+          "role": "sink",
+          "startLine": 647
+        },
+        {
+          "endLine": 27,
+          "path": "crates/platform/src/http/mcp_handlers.rs",
+          "role": "supporting",
+          "startLine": 17
+        },
+        {
+          "endLine": 145,
+          "path": "crates/platform/src/http/mcp_handlers.rs",
+          "role": "sink",
+          "startLine": 137
+        }
+      ],
+      "occurrenceId": "occ_07071e05bfe19c4bb353385c",
+      "preventiveControls": [
+        "Centralize public-origin resolution behind a trusted configuration source.",
+        "Keep host-header validation and metadata emission on the same invariant path."
+      ],
+      "provenance": {
+        "source": "codex-security-plugin"
+      },
+      "remediation": "Bind metadata and bearer-challenge output to a configured public origin or trusted proxy configuration instead of request-supplied host headers.",
+      "remediationTests": [
+        "Add a metadata test that ignores attacker-supplied `Host`/`X-Forwarded-Host` values and emits the configured public origin.",
+        "Add a 401 challenge test that `resource_metadata` matches the configured public origin even when request host headers differ."
+      ],
+      "rootCause": {
+        "evidenceRefs": [
+          "oauth-base-url",
+          "oauth-metadata",
+          "mcp-base-url",
+          "mcp-resource-metadata"
+        ],
+        "summary": "The violated invariant is that OAuth metadata should advertise Brain3\u2019s configured public origin, not whichever host headers a request presents. Brain3 instead reconstructs its public identity from request headers and emits that value on unauthenticated metadata and challenge paths."
+      },
+      "ruleId": "oauth.host-header-metadata",
+      "severity": {
+        "changeConditions": "Severity would rise if public clients automatically follow Brain3 metadata without an operator trust check, and would fall if Brain3 binds metadata output to a configured public origin instead of request headers.",
+        "level": "medium",
+        "rationale": "The bug sits on a real OAuth trust boundary and is reachable before authentication, but it misdirects metadata consumers rather than directly minting tokens or bypassing authorization."
+      },
+      "summary": "Brain3 derives its public `base_url` from `X-Forwarded-Host` and `Host` request headers, then reuses that value in OAuth metadata and bearer-challenge `resource_metadata` output.",
+      "taxonomy": {
+        "category": "Host header injection / OAuth metadata trust",
+        "cwe": [
+          "CWE-346"
+        ]
+      },
+      "title": "OAuth metadata and bearer challenges trust request-supplied host headers",
+      "validation": {
+        "assertions": [
+          "Metadata output trusts `X-Forwarded-Host` and `Host` directly.",
+          "The same behavior affects `WWW-Authenticate` `resource_metadata` output on unauthenticated MCP failures."
+        ],
+        "evidenceRefs": [
+          "oauth-base-url",
+          "oauth-metadata",
+          "mcp-base-url",
+          "mcp-resource-metadata"
+        ],
+        "limitations": [
+          "Reachability depends on deployment exposing the gateway publicly or through an upstream that forwards attacker-controlled host headers."
+        ],
+        "method": "static source trace",
+        "summary": "Validation followed both the OAuth metadata route and the MCP unauthorized-error path and found no configured-host binding before either output path emits public URLs."
+      }
+    },
+    {
+      "attackPath": {
+        "dataflow": {
+          "outcome": "vault content and sensitive tool data can be exposed outside the intended trust boundary",
+          "sink": "trace logs written to local log files or process logs",
+          "source": "MCP request and response bodies, including vault content and tool payloads",
+          "summary": "MCP request/response body -> trace logging in gateway or Python server -> temp-backed gateway log or process logs -> local reader or shared support artifact"
+        },
+        "evidenceRefs": [
+          "gateway-trace-request",
+          "python-trace-request",
+          "temp-log-file"
+        ],
+        "reachability": {
+          "attacker": "local principal or downstream log recipient",
+          "entrypoint": "trace-level gateway and MCP server logging",
+          "outcome": "sensitive vault contents or tool outputs can leak through logs",
+          "summary": "The issue is local rather than remotely triggerable on its own. It matters when operators enable verbose logging or share logs while diagnosing real MCP traffic."
+        },
+        "summary": "An operator enables trace logging while debugging MCP traffic, Brain3 records vault request/response bodies, and those logs can then leak through local file access or shared diagnostic bundles."
+      },
+      "codeEvidence": [
+        {
+          "code": "tracing::trace!(\n    body = %String::from_utf8_lossy(&body[..body.len().min(1024)]),\n    \"MCP proxy: request body\"",
+          "endLine": 106,
+          "explanation": "The gateway writes the request body itself into trace logs instead of a redacted summary.",
+          "id": "gateway-trace-request",
+          "label": "Gateway traces MCP request bodies",
+          "language": "rust",
+          "path": "crates/core/src/application/proxy_mcp.rs",
+          "startLine": 104
+        },
+        {
+          "code": "tracing::trace!(\n    body = %String::from_utf8_lossy(&response.body[..response.body.len().min(1024)]),\n    \"MCP proxy: response body\"",
+          "endLine": 134,
+          "explanation": "The same gateway path logs response bodies, which can include vault content or tool output.",
+          "id": "gateway-trace-response",
+          "label": "Gateway traces MCP response bodies",
+          "language": "rust",
+          "path": "crates/core/src/application/proxy_mcp.rs",
+          "startLine": 132
+        },
+        {
+          "code": "if trace_enabled and message[\"type\"] == \"http.request\":\n    request_body_chunks.append(message.get(\"body\", b\"\"))\n    if not message.get(\"more_body\", False):\n        logger.log(\n            TRACE,\n            \"MCP request body method=%s path=%s body=%s\",\n            scope.get(\"method\", \"<unknown>\"),\n            path,\n            b\"\".join(request_body_chunks).decode(\"utf-8\", errors=\"replace\"),",
+          "endLine": 250,
+          "explanation": "The Python server reconstructs and logs the full decoded request body when trace logging is enabled.",
+          "id": "python-trace-request",
+          "label": "Python MCP server traces full request bodies",
+          "language": "python",
+          "path": "brain3-mcp-vault-tools/src/brain3_mcp_vault_tools/server.py",
+          "startLine": 242
+        },
+        {
+          "code": "if trace_enabled and message[\"type\"] == \"http.response.body\":\n    response_body_chunks.append(message.get(\"body\", b\"\"))\n    if not message.get(\"more_body\", False):\n        logger.log(\n            TRACE,\n            \"MCP response body method=%s path=%s status=%s body=%s\",\n            scope.get(\"method\", \"<unknown>\"),\n            path,\n            response_status,\n            b\"\".join(response_body_chunks).decode(\"utf-8\", errors=\"replace\"),",
+          "endLine": 269,
+          "explanation": "The Python server also logs full decoded response bodies, which can contain vault note text or other sensitive tool output.",
+          "id": "python-trace-response",
+          "label": "Python MCP server traces full response bodies",
+          "language": "python",
+          "path": "brain3-mcp-vault-tools/src/brain3_mcp_vault_tools/server.py",
+          "startLine": 260
+        },
+        {
+          "code": "async fn create_temp_log_file(&self) -> Result<PathBuf, SetupError> {\n    let temp_dir = env::temp_dir();\n    /* ... */\n    let path = temp_dir.join(format!(\"brain3-{suffix}.log\"));\n    match fs::OpenOptions::new()\n        .create_new(true)\n        .write(true)\n        .open(&path)\n        .await\n    {\n        Ok(_) => return Ok(path),",
+          "endLine": 263,
+          "explanation": "The gateway allocates a temp log file but does not apply an explicit `0600` permission fixup after creation, so actual access depends on host defaults.",
+          "id": "temp-log-file",
+          "label": "Gateway temp log file is created without an explicit permission clamp",
+          "language": "rust",
+          "path": "crates/platform/src/setup/system.rs",
+          "startLine": 242
+        }
+      ],
+      "confidence": {
+        "level": "medium",
+        "rationale": "The body logging is explicit in source, but practical exposure still depends on log level, operator behavior, and host-file permissions."
+      },
+      "findingId": "csf_3d3f729f8076bb7515571737",
+      "fingerprints": {
+        "algorithm": "codex-security/v1",
+        "primary": "codex-security/v1:sha256:86cfc5284a23b53547bc1d3d507148ead0be889ec4387e4c84038264025dec7b"
+      },
+      "identity": {
+        "anchor": "trace-body-logging"
+      },
+      "locations": [
+        {
+          "endLine": 106,
+          "path": "crates/core/src/application/proxy_mcp.rs",
+          "role": "root_control",
+          "startLine": 104
+        },
+        {
+          "endLine": 134,
+          "path": "crates/core/src/application/proxy_mcp.rs",
+          "role": "supporting",
+          "startLine": 132
+        },
+        {
+          "endLine": 250,
+          "path": "brain3-mcp-vault-tools/src/brain3_mcp_vault_tools/server.py",
+          "role": "supporting",
+          "startLine": 242
+        },
+        {
+          "endLine": 269,
+          "path": "brain3-mcp-vault-tools/src/brain3_mcp_vault_tools/server.py",
+          "role": "supporting",
+          "startLine": 260
+        },
+        {
+          "endLine": 263,
+          "path": "crates/platform/src/setup/system.rs",
+          "role": "supporting",
+          "startLine": 242
+        }
+      ],
+      "occurrenceId": "occ_b9d79b38d6adc038d6fe3002",
+      "preventiveControls": [
+        "Redact or hash secret-bearing values before they reach structured logs.",
+        "Treat log sinks as sensitive local storage with explicit permission hardening."
+      ],
+      "provenance": {
+        "source": "codex-security-plugin"
+      },
+      "remediation": "Remove full-body logging from both MCP implementations, log only bounded metadata, and explicitly clamp gateway log-file permissions to `0600`.",
+      "remediationTests": [
+        "Add a focused logging regression test or helper-level assertion that trace logging never serializes raw MCP bodies.",
+        "Add a platform test that created gateway log files receive explicit owner-only permissions on Unix-like hosts."
+      ],
+      "rootCause": {
+        "evidenceRefs": [
+          "gateway-trace-request",
+          "gateway-trace-response",
+          "python-trace-request",
+          "python-trace-response",
+          "temp-log-file"
+        ],
+        "summary": "The violated invariant is that Brain3 should allow verbose diagnostics without logging secrets or vault content. The gateway and Python MCP server instead log full MCP bodies, and the gateway writes them to temp-backed log files without an explicit permission clamp."
+      },
+      "ruleId": "logging.sensitive-mcp-bodies",
+      "severity": {
+        "changeConditions": "Severity would rise if trace logging is routinely enabled in production or logs are shipped off-host automatically, and would fall if body logging is removed or aggressively redacted and log-file permissions are clamped.",
+        "level": "low",
+        "rationale": "The issue is local and requires verbose logging or log sharing, but it directly violates Brain3\u2019s own rule that sensitive data must never be logged."
+      },
+      "summary": "Both the Rust gateway and the Python MCP server log full MCP request and response bodies at trace level, and the gateway writes logs to a temp file whose permissions are not explicitly tightened after creation.",
+      "taxonomy": {
+        "category": "Sensitive data exposure through logs",
+        "cwe": [
+          "CWE-532"
+        ]
+      },
+      "title": "Trace logging can record MCP request and response bodies to temp-backed logs",
+      "validation": {
+        "assertions": [
+          "Both the gateway and the Python MCP server log full MCP bodies at trace level.",
+          "Gateway logs are written to a temp-backed file without an explicit permission clamp after creation."
+        ],
+        "evidenceRefs": [
+          "gateway-trace-request",
+          "gateway-trace-response",
+          "python-trace-request",
+          "python-trace-response",
+          "temp-log-file"
+        ],
+        "limitations": [
+          "Exposure depends on log level, local principal boundaries, and whether operators share or export diagnostic logs."
+        ],
+        "method": "static source trace",
+        "summary": "Validation traced both logging implementations and the gateway log-file allocation path, confirming that body bytes are serialized directly and temp log-file permissions are left to host defaults."
+      }
+    }
+  ],
+  "scanId": "f0d39d2f-76ed-4e13-9611-efee2eedaa6d",
+  "schemaVersion": "1.0"
+}
