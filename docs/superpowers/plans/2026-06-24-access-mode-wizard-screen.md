@@ -216,3 +216,59 @@ Ensure `TunnelModeDraft::Disabled` renders `B3_CF_QUICK_TUNNEL=false` (or is omi
 - `LocalMcpEnabled` is no longer a focusable/togglable field in Ports or Summary — `access_mode` owns it
 - No backward navigation through the AccessMode screen after it is locked
 - OAuth-only Ports fields (token lifetimes, PKCE, hostname check) are hidden for `LocalOnly`
+
+
+## Part 2
+
+**Problem**: When the user picks LocalOnly, the Summary (Details) screen still shows auth fields (Username, Client ID, Password mode) and remote-only settings (token lifetimes, PKCE, hostname check, Tunnel). These are irrelevant/confusing for local-only setups.
+
+**Root causes** (two, independent):
+1. `summary_lines()` in `screens.rs` renders all fields unconditionally.
+2. `next_summary_focus()` / `previous_summary_focus()` in `state.rs` cycle through all `SummaryField` variants unconditionally — so Tab/arrow keys would land on hidden fields.
+
+---
+
+### Change 1 — `apps/gateway/src/tui/screens.rs`
+
+In `summary_lines()`, wrap the auth and remote-only fields in an `if state.draft.access_mode != AccessModeDraft::LocalOnly` guard.
+
+**Fields to hide when LocalOnly:**
+- `Username` (auth was skipped)
+- `Client ID` (auth was skipped)
+- `Password mode` + `Password value` (auth was skipped)
+- `Access token lifetime (secs)`
+- `Refresh token lifetime (secs)`
+- `PKCE required`
+- `Hostname check`
+- `Tunnel` (will be Disabled for LocalOnly; showing "Cloudflare quick tunnel" is misleading)
+
+**Fields always shown:**
+- Vault path, Gateway port, Container host port, Container MCP port, Access mode (read-only label), Internal-only container networking, Container runtime, Container image repo, Env file, Logs
+
+---
+
+### Change 2 — `apps/gateway/src/tui/state.rs`
+
+Refactor `next_summary_focus()` and `previous_summary_focus()` to use a `summary_focus_order()` helper (same pattern as `ports_focus_order()`), reading `self.draft.access_mode` and `self.generate_password` from `self`.
+
+The `SummaryField` order for **LocalOnly** (no auth, no remote fields):
+```
+VaultPath → GatewayPort → ContainerHostPort → ContainerMcpPort → ContainerNetworkIsolation → (wrap)
+```
+
+The `SummaryField` order for **non-LocalOnly** (existing behavior expressed via helper):
+```
+VaultPath → Username → ClientId → PasswordMode → [PasswordValue if !generate_password]
+→ GatewayPort → ContainerHostPort → ContainerMcpPort → AccessTokenLifetimeSecs
+→ RefreshTokenLifetimeSecs → PkceRequired → HostnameCheck → ContainerNetworkIsolation → (wrap)
+```
+
+No changes needed in `app.rs` — the navigation methods are called without arguments (`state.next_summary_focus()` / `state.previous_summary_focus()`).
+
+---
+
+### What does NOT need to change
+
+- `SummaryField` enum — keep all variants; they are just not reachable for LocalOnly.
+- `summary_char_push()`, `summary_char_pop()`, `toggle_summary_field()` — unreachable for hidden fields, no harm leaving them.
+- `first_run_setup.rs` `finalize()` tunnel enforcement — hiding the Tunnel row in the UI is correct regardless of what the draft holds at summary time.
