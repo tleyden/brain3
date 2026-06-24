@@ -195,7 +195,6 @@ async fn event_loop(
                 KeyCode::Char(' ') => {}
                 KeyCode::Enter => {
                     state.clear_messages();
-                    state.confirm_access_mode();
                     state.step = match state.draft.access_mode {
                         AccessModeDraft::LocalOnly => SetupStep::PortsAndSettings,
                         AccessModeDraft::RemoteOnly | AccessModeDraft::Both => SetupStep::Auth,
@@ -209,7 +208,7 @@ async fn event_loop(
             SetupStep::Auth => match key.code {
                 KeyCode::Esc => {
                     state.clear_messages();
-                    state.step = SetupStep::VaultPath;
+                    state.step = SetupStep::AccessMode;
                 }
                 KeyCode::Enter => {
                     state.clear_messages();
@@ -256,7 +255,7 @@ async fn event_loop(
                 KeyCode::Esc => {
                     state.clear_messages();
                     state.step = match state.draft.access_mode {
-                        AccessModeDraft::LocalOnly => SetupStep::VaultPath,
+                        AccessModeDraft::LocalOnly => SetupStep::AccessMode,
                         AccessModeDraft::RemoteOnly | AccessModeDraft::Both => SetupStep::Auth,
                     };
                 }

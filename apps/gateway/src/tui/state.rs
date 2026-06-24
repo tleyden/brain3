@@ -90,7 +90,6 @@ pub struct FirstRunTuiState {
     pub password_input: String,
     pub auth_focus: AuthField,
     pub access_mode_focus: AccessModeField,
-    pub access_mode_locked: bool,
     pub ports_focus: PortsField,
     pub gateway_port_input: String,
     pub local_mcp_port_input: String,
@@ -146,7 +145,6 @@ impl FirstRunTuiState {
             info_message: None,
             auth_focus: AuthField::Username,
             access_mode_focus: AccessModeField::Both,
-            access_mode_locked: false,
             ports_focus: PortsField::GatewayPort,
             gateway_port_input,
             local_mcp_port_input,
@@ -269,10 +267,6 @@ impl FirstRunTuiState {
             AccessModeField::Both => AccessModeField::RemoteOnly,
         };
         self.draft.access_mode = access_mode_for_focus(self.access_mode_focus);
-    }
-
-    pub fn confirm_access_mode(&mut self) {
-        self.access_mode_locked = true;
     }
 
     pub fn reset_ports_focus(&mut self) {
@@ -522,9 +516,9 @@ impl FirstRunTuiState {
             SetupStep::DependencyDoctor => Some(SetupStep::Welcome),
             SetupStep::VaultPath => Some(SetupStep::DependencyDoctor),
             SetupStep::AccessMode => Some(SetupStep::VaultPath),
-            SetupStep::Auth => Some(SetupStep::VaultPath),
+            SetupStep::Auth => Some(SetupStep::AccessMode),
             SetupStep::PortsAndSettings => Some(match self.draft.access_mode {
-                AccessModeDraft::LocalOnly => SetupStep::VaultPath,
+                AccessModeDraft::LocalOnly => SetupStep::AccessMode,
                 AccessModeDraft::RemoteOnly | AccessModeDraft::Both => SetupStep::Auth,
             }),
             SetupStep::Summary => Some(SetupStep::PortsAndSettings),
@@ -863,6 +857,18 @@ mod tests {
 
         state.next_summary_focus();
         assert_eq!(state.summary_focus, SummaryField::VaultPath);
+    }
+
+    #[test]
+    fn local_only_previous_step_returns_access_mode_for_auth_and_ports() {
+        let mut state = sample_state();
+        state.draft.access_mode = AccessModeDraft::LocalOnly;
+
+        state.step = SetupStep::Auth;
+        assert_eq!(state.previous_step(), Some(SetupStep::AccessMode));
+
+        state.step = SetupStep::PortsAndSettings;
+        assert_eq!(state.previous_step(), Some(SetupStep::AccessMode));
     }
 
     fn sample_state() -> FirstRunTuiState {

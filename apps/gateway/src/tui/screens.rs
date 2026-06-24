@@ -745,9 +745,16 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         key_value_line("Password", card.password.clone()),
     ];
 
-    if let Some(local_mcp) = state.runtime.as_ref().and_then(|r| r.config.local_mcp.as_ref()) {
+    if let Some(local_mcp) = state
+        .runtime
+        .as_ref()
+        .and_then(|r| r.config.local_mcp.as_ref())
+    {
         lines.push(blank_line());
-        lines.push(Line::from(Span::styled("Local MCP", section_heading_style())));
+        lines.push(Line::from(Span::styled(
+            "Local MCP",
+            section_heading_style(),
+        )));
         lines.push(key_value_line(
             "Endpoint",
             format!("http://localhost:{}/mcp", local_mcp.port),

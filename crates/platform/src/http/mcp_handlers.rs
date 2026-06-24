@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use oxide_auth::primitives::issuer::Issuer;
 use serde_json::json;
+use subtle::ConstantTimeEq;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::validate_request::validate_host;
@@ -60,18 +61,7 @@ fn parse_bearer_token(headers: &HeaderMap) -> Result<&str, ProxyError> {
 }
 
 fn constant_time_eq(expected: &str, provided: &str) -> bool {
-    let expected = expected.as_bytes();
-    let provided = provided.as_bytes();
-    let max_len = expected.len().max(provided.len());
-    let mut diff = expected.len() ^ provided.len();
-
-    for index in 0..max_len {
-        let expected_byte = expected.get(index).copied().unwrap_or_default();
-        let provided_byte = provided.get(index).copied().unwrap_or_default();
-        diff |= usize::from(expected_byte ^ provided_byte);
-    }
-
-    diff == 0
+    bool::from(expected.as_bytes().ct_eq(provided.as_bytes()))
 }
 
 async fn validate_access_token<P: McpProxyPort + 'static>(
