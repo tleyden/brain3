@@ -1,9 +1,11 @@
 # Security Review: brain3
 
-Auditor: Codex Security Scan
-Date: 2026-06-24
-Scope: Full codebase — OAuth2 gateway, Cloudflare tunnel, local network / container exposure, default credentials, host process trust boundaries
-Codebase version: 0.2.1
+| Field | Value |
+|---|---|
+| **Auditor** | Codex Security Scan |
+| **Date** | 2026-06-24 |
+| **Scope** | Full codebase — OAuth2 gateway, Cloudflare tunnel, local network / container exposure, default credentials, host process trust boundaries |
+| **Codebase version** | 0.2.1 |
 
 
 
