@@ -2,12 +2,12 @@ use std::path::PathBuf;
 
 use crate::domain::model::ContainerRuntime;
 
-pub const DEFAULT_GATEWAY_PORT: u16 = 8421;
+pub const DEFAULT_GATEWAY_PORT: u16 = 2763;
 pub const DEFAULT_CLIENT_ID: &str = "brain3-oauth2-client";
 pub const DEFAULT_USERNAME: &str = "admin";
-pub const DEFAULT_CONTAINER_HOST_PORT: u16 = 8420;
-pub const DEFAULT_CONTAINER_MCP_PORT: u16 = 8420;
-pub const DEFAULT_LOCAL_MCP_PORT: u16 = 8422;
+pub const DEFAULT_CONTAINER_HOST_PORT: u16 = 2765;
+pub const DEFAULT_CONTAINER_MCP_PORT: u16 = 2765;
+pub const DEFAULT_LOCAL_MCP_PORT: u16 = 2764;
 pub const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 pub const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 pub const DEFAULT_GENERATED_SECRET_BYTES: usize = 32;

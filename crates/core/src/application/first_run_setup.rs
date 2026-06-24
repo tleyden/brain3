@@ -323,7 +323,7 @@ mod tests {
 
     fn sample_draft(vault_path: PathBuf) -> SetupDraftConfig {
         SetupDraftConfig {
-            gateway_port: 8421,
+            gateway_port: 2763,
             client_id: "brain3-oauth2-client".into(),
             client_secret: String::new(),
             access_token_lifetime_secs: DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
@@ -335,8 +335,8 @@ mod tests {
             container_runtime: ContainerRuntime::MacOSContainer,
             vault_path,
             container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
-            container_host_port: 8420,
-            container_mcp_port: 8420,
+            container_host_port: 2765,
+            container_mcp_port: 2765,
             container_network_isolated: false,
             local_mcp_enabled: true,
             local_mcp_port: DEFAULT_LOCAL_MCP_PORT,

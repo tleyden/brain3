@@ -49,13 +49,13 @@ class ServerStartupTests(unittest.TestCase):
             os.environ,
             {
                 "B3_VAULT_PATH": str(TEST_VAULT),
-                "B3_VAULT_MCP_PORT": "8420",
+                "B3_VAULT_MCP_PORT": "2765",
             },
             clear=False,
         ):
             server = import_server_module()
 
-        self.assertEqual(server.mcp.settings.port, 8420)
+        self.assertEqual(server.mcp.settings.port, 2765)
 
     def test_upstream_shared_secret_can_be_provided_directly_via_env_var(self):
         with patch.dict(
@@ -75,7 +75,7 @@ class ServerStartupTests(unittest.TestCase):
             os.environ,
             {
                 "B3_VAULT_PATH": str(TEST_VAULT),
-                "B3_VAULT_MCP_PORT": "8420",
+                "B3_VAULT_MCP_PORT": "2765",
             },
             clear=False,
         ):

@@ -34,7 +34,7 @@ class UpstreamAccessControlTests(unittest.TestCase):
             os.environ,
             {
                 "B3_VAULT_PATH": str(self.vault),
-                "B3_VAULT_MCP_PORT": "8420",
+                "B3_VAULT_MCP_PORT": "2765",
                 "B3_UPSTREAM_SHARED_SECRET_FILE": str(self.secret_file),
             },
             clear=False,
@@ -62,19 +62,19 @@ class UpstreamAccessControlTests(unittest.TestCase):
         )
 
     def test_mcp_rejects_requests_without_shared_secret(self):
-        with TestClient(self.app, base_url="http://127.0.0.1:8420") as client:
+        with TestClient(self.app, base_url="http://127.0.0.1:2765") as client:
             response = self._tools_list_request(client)
 
         self.assertEqual(response.status_code, 401)
 
     def test_mcp_rejects_requests_with_wrong_shared_secret(self):
-        with TestClient(self.app, base_url="http://127.0.0.1:8420") as client:
+        with TestClient(self.app, base_url="http://127.0.0.1:2765") as client:
             response = self._tools_list_request(client, secret="wrong-secret")
 
         self.assertEqual(response.status_code, 401)
 
     def test_mcp_allows_requests_with_correct_shared_secret(self):
-        with TestClient(self.app, base_url="http://127.0.0.1:8420") as client:
+        with TestClient(self.app, base_url="http://127.0.0.1:2765") as client:
             response = self._tools_list_request(client, secret="shared-secret")
 
         self.assertEqual(response.status_code, 200)
@@ -85,7 +85,7 @@ class UpstreamAccessControlTests(unittest.TestCase):
                 os.environ,
                 {
                     "B3_VAULT_PATH": str(self.vault),
-                    "B3_VAULT_MCP_PORT": "8420",
+                    "B3_VAULT_MCP_PORT": "2765",
                     "B3_UPSTREAM_SHARED_SECRET_FILE": str(self.secret_file),
                     "B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS": "true",
                 },
@@ -114,7 +114,7 @@ class UpstreamAccessControlTests(unittest.TestCase):
             server = import_server_module()
             app = server.mcp.streamable_http_app()
 
-        with TestClient(app, base_url="http://172.18.0.2:8420") as client:
+        with TestClient(app, base_url="http://172.18.0.2:2765") as client:
             response = self._tools_list_request(client, secret="shared-secret")
 
         self.assertEqual(response.status_code, 200)

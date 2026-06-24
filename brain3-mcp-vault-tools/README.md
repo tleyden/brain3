@@ -22,7 +22,7 @@ It intentionally removes:
 
 Environment variables:
 - `VAULT_PATH`: path to the Obsidian vault
-- `VAULT_MCP_PORT`: HTTP port, defaults to `8420`
+- `VAULT_MCP_PORT`: HTTP port, defaults to `2765`
 - `VAULT_MCP_ALLOWED_HOSTS`: optional comma-separated extra hosts for DNS rebinding protection
 
 See [.env.template](.env.template).
@@ -196,7 +196,7 @@ This:
 - mounts the host directory containing the shared-secret file read-only into `/run/brain3`
 - exposes the shared-secret file inside the container at `/run/brain3/upstream_secret`
 - sets `VAULT_PATH=/vault` inside the container
-- publishes `127.0.0.1:8420` on the host to port `8420` in the container
+- publishes `127.0.0.1:2765` on the host to port `2765` in the container
 
 If your local `.env` already sets `VAULT_PATH` to a host directory, the run script will use that path by default.
 

@@ -11,7 +11,7 @@ use brain3_core::domain::model::{
 use rand::RngExt;
 const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
-const DEFAULT_LOCAL_MCP_PORT: u16 = 8422;
+const DEFAULT_LOCAL_MCP_PORT: u16 = 2764;
 use brain3_core::ports::config::ConfigPort;
 
 pub struct EnvFileConfigAdapter {
@@ -60,7 +60,7 @@ impl ConfigPort for EnvFileConfigAdapter {
     fn load(&self) -> Result<GatewayConfig, ConfigError> {
         self.load_env_file();
 
-        let port = env_var_or("B3_OAUTH2_GATEWAY_PORT", "8421")
+        let port = env_var_or("B3_OAUTH2_GATEWAY_PORT", "2763")
             .parse::<u16>()
             .map_err(|e| ConfigError::Invalid(format!("B3_OAUTH2_GATEWAY_PORT: {e}")))?;
         let access_token_lifetime_secs = env_var_or(
@@ -97,7 +97,7 @@ impl ConfigPort for EnvFileConfigAdapter {
 
         let default_upstream_url = match &container {
             Some(c) => format!("http://127.0.0.1:{}", c.host_port),
-            None => "http://127.0.0.1:8420".to_string(),
+            None => "http://127.0.0.1:2765".to_string(),
         };
 
         let mut missing = Vec::new();
@@ -372,11 +372,11 @@ fn load_container_startup_config(
         }
     };
 
-    let host_port = env_var_or("B3_CONTAINER_HOST_PORT", "8420")
+    let host_port = env_var_or("B3_CONTAINER_HOST_PORT", "2765")
         .parse::<u16>()
         .map_err(|e| ConfigError::Invalid(format!("B3_CONTAINER_HOST_PORT: {e}")))?;
 
-    let container_port = env_var_or("B3_CONTAINER_MCP_PORT", "8420")
+    let container_port = env_var_or("B3_CONTAINER_MCP_PORT", "2765")
         .parse::<u16>()
         .map_err(|e| ConfigError::Invalid(format!("B3_CONTAINER_MCP_PORT: {e}")))?;
     let network_isolated = env_bool("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", true);
@@ -826,7 +826,7 @@ mod tests {
                  B3_PASSWORD=test-password\n\
                  B3_TOKEN_DB_PATH={}\n\
                  B3_ACCESS_MODE=local\n\
-                 B3_LOCAL_MCP_PORT=8422\n\
+                 B3_LOCAL_MCP_PORT=2764\n\
                  LOCAL_GATEWAY_MCP_BEARER_TOKEN=local-token\n",
                 token_db.display()
             ));
@@ -885,7 +885,7 @@ mod tests {
             let local = config
                 .local_mcp
                 .expect("local MCP config should be enabled");
-            assert_eq!(local.port, 8422);
+            assert_eq!(local.port, 2764);
             assert_eq!(local.bearer_token, "local-token");
         });
     }
@@ -899,7 +899,7 @@ mod tests {
                  B3_USERNAME=test-user\n\
                  B3_PASSWORD=test-password\n\
                  B3_TOKEN_DB_PATH={}\n\
-                 B3_LOCAL_MCP_PORT=8422\n",
+                 B3_LOCAL_MCP_PORT=2764\n",
                 token_db.display()
             ));
 

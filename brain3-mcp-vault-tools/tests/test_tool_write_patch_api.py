@@ -39,7 +39,7 @@ class ToolWritePatchApiTests(unittest.TestCase):
             os.environ,
             {
                 "B3_VAULT_PATH": str(self.vault),
-                "B3_VAULT_MCP_PORT": "8420",
+                "B3_VAULT_MCP_PORT": "2765",
             },
             clear=False,
         )

@@ -30,7 +30,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         PathBuf::from("/tmp/brain3-home/cloudflared"),
     );
     let draft = SetupDraftConfig {
-        gateway_port: 8421,
+        gateway_port: 2763,
         client_id: "custom-client".into(),
         client_secret: "secret-123".into(),
         access_token_lifetime_secs: 1234,
@@ -42,8 +42,8 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         container_runtime: ContainerRuntime::MacOSContainer,
         vault_path: PathBuf::from("/Users/test/My Vault"),
         container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
-        container_host_port: 8420,
-        container_mcp_port: 8420,
+        container_host_port: 2765,
+        container_mcp_port: 2765,
         container_network_isolated: false,
         local_mcp_enabled: true,
         local_mcp_port: 9555,
@@ -55,7 +55,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
 
     let rendered = render_env_file(&draft, &paths).expect("env should render");
 
-    assert!(rendered.contains("# Set the local port for this gateway. Default: 8421."));
+    assert!(rendered.contains("# Set the local port for this gateway. Default: 2763."));
     assert!(rendered.contains("B3_OAUTH2_GATEWAY_CLIENT_ID=\"custom-client\""));
     assert!(rendered.contains("B3_OAUTH2_GATEWAY_CLIENT_SECRET=\"secret-123\""));
     assert!(rendered.contains("B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS=\"1234\""));
@@ -82,7 +82,7 @@ fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
         PathBuf::from("/tmp/brain3-home/cloudflared"),
     );
     let draft = SetupDraftConfig {
-        gateway_port: 8421,
+        gateway_port: 2763,
         client_id: "custom-client".into(),
         client_secret: "secret-123".into(),
         access_token_lifetime_secs: 1234,
@@ -94,11 +94,11 @@ fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
         container_runtime: ContainerRuntime::MacOSContainer,
         vault_path: PathBuf::from("/Users/test/My Vault"),
         container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
-        container_host_port: 8420,
-        container_mcp_port: 8420,
+        container_host_port: 2765,
+        container_mcp_port: 2765,
         container_network_isolated: false,
         local_mcp_enabled: true,
-        local_mcp_port: 8422,
+        local_mcp_port: 2764,
         local_mcp_bearer_token: "local-token".into(),
         pkce_required: true,
         enforce_hostname_check: true,
@@ -109,7 +109,7 @@ fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
 
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"false\""));
     assert!(rendered.contains("B3_ACCESS_MODE=\"local\""));
-    assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"8422\""));
+    assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"2764\""));
     assert!(rendered.contains("LOCAL_GATEWAY_MCP_BEARER_TOKEN=\"local-token\""));
 }
 
