@@ -17,6 +17,7 @@ Full release process for Brain3. Execute each step using the Bash tool — do no
 | `crates/core/src/application/first_run_setup.rs` | `CURRENT_RELEASE = "vX.Y.Z"` |
 | `brain3-mcp-vault-tools/tests/test_server_startup.py` | Two version string fixtures |
 | `Cargo.lock` | Auto-updated via `cargo fetch` |
+| `brain3-mcp-vault-tools/uv.lock` | Regenerated via `uv lock --project ./brain3-mcp-vault-tools` |
 
 ---
 
@@ -28,9 +29,16 @@ Run the bump script (it detects the current version from `apps/gateway/Cargo.tom
 bash .claude/skills/bump-version/bump.sh VERSION
 ```
 
+Then refresh and verify the Python lockfile (pyproject.toml was just bumped, so uv.lock will be stale):
+
+```bash
+uv lock --project ./brain3-mcp-vault-tools
+uv lock --project ./brain3-mcp-vault-tools --check
+```
+
 Then run `cargo test` to verify nothing is broken.
 
-Do NOT commit — tell the user to commit themselves, as per project instructions.
+Do NOT commit — tell the user to commit themselves, as per project instructions. Remind them that both `brain3-mcp-vault-tools/pyproject.toml` and `brain3-mcp-vault-tools/uv.lock` must be included in the commit.
 
 ---
 
@@ -73,3 +81,4 @@ Report the listed assets to the user.
 - Push only the tag (`git push origin "$VERSION"`), not all branches — pushing everything can trigger unintended workflows.
 - Tag and push **after** the user has committed the version bump.
 - `cargo fetch` (not `cargo build`) is used to update `Cargo.lock` quickly.
+- Any change to `brain3-mcp-vault-tools/pyproject.toml` or other package metadata requires regenerating `brain3-mcp-vault-tools/uv.lock` in the same commit — `uv lock --project ./brain3-mcp-vault-tools --check` will fail in CI otherwise.
