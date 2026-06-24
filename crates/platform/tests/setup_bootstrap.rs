@@ -60,6 +60,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_OAUTH2_GATEWAY_CLIENT_SECRET=\"secret-123\""));
     assert!(rendered.contains("B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS=\"1234\""));
     assert!(rendered.contains("B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS=\"7776000\""));
+    assert!(rendered.contains("B3_ACCESS_MODE=\"both\""));
     assert!(rendered.contains("B3_USERNAME=\"admin\""));
     assert!(rendered.contains("B3_PASSWORD=\"correct horse battery staple\""));
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));
@@ -107,6 +108,9 @@ fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
     let rendered = render_env_file(&draft, &paths).expect("env should render");
 
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"false\""));
+    assert!(rendered.contains("B3_ACCESS_MODE=\"local\""));
+    assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"8422\""));
+    assert!(rendered.contains("LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN=\"local-token\""));
 }
 
 #[tokio::test]

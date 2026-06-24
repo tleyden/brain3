@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use brain3_core::domain::errors::SetupError;
 use brain3_core::domain::model::ContainerRuntime;
-use brain3_core::domain::setup::{SetupDraftConfig, SetupPaths, TunnelModeDraft};
+use brain3_core::domain::setup::{AccessModeDraft, SetupDraftConfig, SetupPaths, TunnelModeDraft};
 
 use super::env_template::embedded_env_template;
 
@@ -25,18 +25,6 @@ pub fn render_env_file(draft: &SetupDraftConfig, paths: &SetupPaths) -> Result<S
 
         rendered.push_str(line);
         rendered.push('\n');
-    }
-
-    for key in [
-        "B3_LOCAL_MCP_PORT",
-        "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
-    ] {
-        if let Some(value) = overrides.get(key) {
-            rendered.push_str(key);
-            rendered.push('=');
-            rendered.push_str(&quote_env_value(value));
-            rendered.push('\n');
-        }
     }
 
     Ok(rendered)
@@ -62,6 +50,15 @@ fn build_overrides(
         "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS",
         draft.refresh_token_lifetime_secs.to_string(),
     );
+    values.insert(
+        "B3_ACCESS_MODE",
+        match draft.access_mode {
+            AccessModeDraft::LocalOnly => "local",
+            AccessModeDraft::RemoteOnly => "remote",
+            AccessModeDraft::Both => "both",
+        }
+        .to_string(),
+    );
     values.insert("B3_USERNAME", draft.username.clone());
     values.insert("B3_PASSWORD", draft.password.clone());
     values.insert(
@@ -86,13 +83,22 @@ fn build_overrides(
         "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION",
         draft.container_network_isolated.to_string(),
     );
-    if draft.local_mcp_enabled {
-        values.insert("B3_LOCAL_MCP_PORT", draft.local_mcp_port.to_string());
-        values.insert(
-            "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
-            draft.local_mcp_bearer_token.clone(),
-        );
-    }
+    values.insert(
+        "B3_LOCAL_MCP_PORT",
+        if draft.local_mcp_enabled {
+            draft.local_mcp_port.to_string()
+        } else {
+            String::new()
+        },
+    );
+    values.insert(
+        "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
+        if draft.local_mcp_enabled {
+            draft.local_mcp_bearer_token.clone()
+        } else {
+            String::new()
+        },
+    );
     values.insert("B3_OAUTH2_PKCE_REQUIRED", draft.pkce_required.to_string());
     values.insert(
         "B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK",

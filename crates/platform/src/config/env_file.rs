@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use brain3_core::application::first_run_setup::CURRENT_RELEASE;
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
-    ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig, GatewayConfig,
-    HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
+    AccessMode, ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig,
+    GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig, OAuthConfig,
+    TunnelConfig,
 };
 use rand::RngExt;
 const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
@@ -84,6 +85,7 @@ impl ConfigPort for EnvFileConfigAdapter {
                 "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS must be greater than 0".into(),
             ));
         }
+        let access_mode = load_access_mode()?;
 
         let expected_host = resolve_expected_host()?;
         let enforce_hostname = env_bool("B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
@@ -135,6 +137,7 @@ impl ConfigPort for EnvFileConfigAdapter {
                 expected_host,
                 enforce: enforce_hostname,
             },
+            access_mode,
             local_mcp,
             container,
             tunnel,
@@ -144,6 +147,17 @@ impl ConfigPort for EnvFileConfigAdapter {
 
 fn env_var_or(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+fn load_access_mode() -> Result<AccessMode, ConfigError> {
+    match env::var("B3_ACCESS_MODE").as_deref() {
+        Ok("local") => Ok(AccessMode::Local),
+        Ok("remote") => Ok(AccessMode::Remote),
+        Ok("both") | Err(_) => Ok(AccessMode::Both),
+        Ok(other) => Err(ConfigError::Invalid(format!(
+            "B3_ACCESS_MODE must be 'local', 'remote', or 'both'; got '{other}'"
+        ))),
+    }
 }
 
 fn resolve_token_db_path(token_db_home_override: Option<&Path>) -> Result<PathBuf, ConfigError> {
@@ -541,6 +555,7 @@ mod tests {
         "B3_CONTAINER_NETWORK_ISOLATION_STRATEGY",
         "B3_CONTAINER_HOST_PORT",
         "B3_CONTAINER_MCP_PORT",
+        "B3_ACCESS_MODE",
         "B3_LOCAL_MCP_PORT",
         "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
         "B3_CF_QUICK_TUNNEL",
@@ -797,7 +812,58 @@ mod tests {
             let adapter = EnvFileConfigAdapter::new(Some(env_path));
             let config = adapter.load().expect("expected config to load");
 
+            assert_eq!(config.access_mode, AccessMode::Both);
             assert!(config.tunnel.is_none(), "quick tunnel should be opt-in");
+        });
+    }
+
+    #[test]
+    fn load_parses_explicit_local_access_mode() {
+        with_clean_config_env(|| {
+            let token_db = env::temp_dir().join("brain3-config-test-local-access-mode.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_ACCESS_MODE=local\n\
+                 B3_LOCAL_MCP_PORT=8422\n\
+                 LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN=local-token\n",
+                token_db.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+
+            assert_eq!(config.access_mode, AccessMode::Local);
+        });
+    }
+
+    #[test]
+    fn load_rejects_invalid_access_mode() {
+        with_clean_config_env(|| {
+            let token_db = env::temp_dir().join("brain3-config-test-invalid-access-mode.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_ACCESS_MODE=invalid\n",
+                token_db.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let err = adapter.load().expect_err("expected invalid access mode");
+
+            match err {
+                ConfigError::Invalid(message) => {
+                    assert!(message.contains("B3_ACCESS_MODE"));
+                    assert!(message.contains("local"));
+                    assert!(message.contains("remote"));
+                    assert!(message.contains("both"));
+                }
+                other => panic!("expected invalid config error, got {other:?}"),
+            }
         });
     }
 

@@ -1,5 +1,12 @@
 use std::path::PathBuf;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessMode {
+    Local,
+    Remote,
+    Both,
+}
+
 #[derive(Debug, Clone)]
 pub struct GatewayConfig {
     pub port: u16,
@@ -8,6 +15,7 @@ pub struct GatewayConfig {
     pub oauth: OAuthConfig,
     pub mcp_reverse_proxy: MCPReverseProxyConfig,
     pub hostname_validation: HostnameValidationConfig,
+    pub access_mode: AccessMode,
     pub local_mcp: Option<LocalMcpConfig>,
     pub container: Option<ContainerStartupConfig>,
     pub tunnel: Option<TunnelConfig>,

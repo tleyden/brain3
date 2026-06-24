@@ -13,7 +13,8 @@ use tokio::sync::Mutex;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::errors::ProxyError;
 use brain3_core::domain::model::{
-    GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig, OAuthConfig,
+    AccessMode, GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig,
+    OAuthConfig,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
 
@@ -168,6 +169,7 @@ impl TestHarness {
                 upstream_secret: mcp_upstream_secret,
             },
             hostname_validation: self.hostname_validation,
+            access_mode: AccessMode::Both,
             local_mcp: self.local_mcp,
             container: None,
             tunnel: None,
@@ -226,6 +228,7 @@ impl TestHarness {
                 upstream_secret: self.mcp_upstream_secret,
             },
             hostname_validation: self.hostname_validation,
+            access_mode: AccessMode::Both,
             local_mcp: Some(local_mcp),
             container: None,
             tunnel: None,

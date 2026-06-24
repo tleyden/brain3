@@ -2,7 +2,7 @@ use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use tokio::net::TcpListener;
@@ -10,7 +10,7 @@ use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
-use brain3_core::domain::model::GatewayConfig;
+use brain3_core::domain::model::{AccessMode, GatewayConfig};
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::config::ConfigPort;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
@@ -98,53 +98,24 @@ pub async fn run_gateway_server_until<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    let listener = bind_listener(host, config.port).await?;
-    let bind_addr = listener
-        .local_addr()
-        .context("failed to resolve bound gateway address")?;
-    let local_url = local_url_from_addr(bind_addr);
-    let app_state = build_gateway_state(Arc::clone(&config), upstream_secret)?;
-    let router = build_router(app_state.clone());
+    tracing::info!(
+        access_mode = ?config.access_mode,
+        "access mode: binding only needed ports"
+    );
+
+    let oauth_listener = if config.access_mode != AccessMode::Local {
+        Some(bind_listener(host, config.port).await?)
+    } else {
+        None
+    };
     let local_listener = bind_local_mcp_listener(&config).await?;
     let local_mcp_url = local_listener
         .as_ref()
         .and_then(|(listener, _)| listener.local_addr().ok())
         .map(local_url_from_addr);
+    let app_state = build_gateway_state(Arc::clone(&config), upstream_secret)?;
     let (shutdown_tx, _) = watch::channel(false);
-    let local_task = if let Some((listener, local_port)) = local_listener {
-        let router = build_local_router(app_state);
-        let mut shutdown_rx = shutdown_tx.subscribe();
-        tracing::info!(
-            bind_addr = %format!("127.0.0.1:{local_port}"),
-            local_url = local_mcp_url.as_deref().unwrap_or("http://localhost"),
-            "starting local MCP listener"
-        );
-        Some(tokio::spawn(async move {
-            axum::serve(listener, router)
-                .with_graceful_shutdown(async move {
-                    let _ = shutdown_rx.changed().await;
-                })
-                .await
-                .context("local MCP server error")
-        }))
-    } else {
-        None
-    };
 
-    tracing::info!(
-        bind_addr = %bind_addr,
-        local_url = %local_url,
-        token_db_path = %config.token_db_path.display(),
-        brain3_version = release::APP_VERSION,
-        oauth_implementation = release::OAUTH_IMPLEMENTATION,
-        oxide_auth_version = release::OXIDE_AUTH_VERSION,
-        oxide_auth_async_version = release::OXIDE_AUTH_ASYNC_VERSION,
-        oxide_auth_axum_version = release::OXIDE_AUTH_AXUM_VERSION,
-        oauth_token_store = "sqlite",
-        client_id = %config.oauth.client_id,
-        pkce_required = config.oauth.pkce_required,
-        "starting OAuth2 gateway"
-    );
     tracing::info!(
         "Proxying MCP traffic to {}",
         config.mcp_reverse_proxy.mcp_upstream_url
@@ -157,23 +128,85 @@ where
         );
     }
 
-    let shutdown_tx_for_public = shutdown_tx.clone();
-    let serve_result = axum::serve(listener, router)
-        .with_graceful_shutdown(async move {
-            shutdown.await;
-            let _ = shutdown_tx_for_public.send(true);
-        })
-        .await
-        .context("server error");
+    if let Some(listener) = oauth_listener {
+        let bind_addr = listener
+            .local_addr()
+            .context("failed to resolve bound gateway address")?;
+        let local_url = local_url_from_addr(bind_addr);
+        let router = build_router(app_state.clone());
+        let local_task = if let Some((listener, local_port)) = local_listener {
+            let router = build_local_router(app_state);
+            let mut shutdown_rx = shutdown_tx.subscribe();
+            tracing::info!(
+                bind_addr = %format!("127.0.0.1:{local_port}"),
+                local_url = local_mcp_url.as_deref().unwrap_or("http://localhost"),
+                "starting local MCP listener"
+            );
+            Some(tokio::spawn(async move {
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(async move {
+                        let _ = shutdown_rx.changed().await;
+                    })
+                    .await
+                    .context("local MCP server error")
+            }))
+        } else {
+            None
+        };
 
-    let _ = shutdown_tx.send(true);
-    if let Some(local_task) = local_task {
-        local_task
+        tracing::info!(
+            bind_addr = %bind_addr,
+            local_url = %local_url,
+            token_db_path = %config.token_db_path.display(),
+            brain3_version = release::APP_VERSION,
+            oauth_implementation = release::OAUTH_IMPLEMENTATION,
+            oxide_auth_version = release::OXIDE_AUTH_VERSION,
+            oxide_auth_async_version = release::OXIDE_AUTH_ASYNC_VERSION,
+            oxide_auth_axum_version = release::OXIDE_AUTH_AXUM_VERSION,
+            oauth_token_store = "sqlite",
+            client_id = %config.oauth.client_id,
+            pkce_required = config.oauth.pkce_required,
+            "starting OAuth2 gateway"
+        );
+
+        let shutdown_tx_for_public = shutdown_tx.clone();
+        let serve_result = axum::serve(listener, router)
+            .with_graceful_shutdown(async move {
+                shutdown.await;
+                let _ = shutdown_tx_for_public.send(true);
+            })
             .await
-            .context("local MCP server task join failed")??;
-    }
+            .context("server error");
 
-    serve_result
+        let _ = shutdown_tx.send(true);
+        if let Some(local_task) = local_task {
+            local_task
+                .await
+                .context("local MCP server task join failed")??;
+        }
+
+        serve_result
+    } else if let Some((listener, local_port)) = local_listener {
+        let bind_addr = listener
+            .local_addr()
+            .context("failed to resolve bound local MCP address")?;
+        let local_url = local_url_from_addr(bind_addr);
+        let router = build_local_router(app_state);
+
+        tracing::info!(
+            bind_addr = %format!("127.0.0.1:{local_port}"),
+            local_url = %local_url,
+            "starting local MCP listener"
+        );
+        tracing::info!("OAuth gateway port not bound because access mode is local-only");
+
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown)
+            .await
+            .context("local MCP server error")
+    } else {
+        bail!("no gateway listeners enabled; check B3_ACCESS_MODE and local MCP configuration")
+    }
 }
 
 #[allow(dead_code)]
@@ -182,50 +215,79 @@ pub async fn spawn_gateway_server(
     config: Arc<GatewayConfig>,
     upstream_secret: String,
 ) -> Result<GatewayServerHandle> {
-    let listener = bind_listener(host, config.port).await?;
-    let bind_addr = listener
-        .local_addr()
-        .context("failed to resolve bound gateway address")?;
+    tracing::info!(
+        access_mode = ?config.access_mode,
+        "access mode: binding only needed ports"
+    );
+
+    let oauth_listener = if config.access_mode != AccessMode::Local {
+        Some(bind_listener(host, config.port).await?)
+    } else {
+        None
+    };
+    let local_listener = bind_local_mcp_listener(&config).await?;
+    let local_mcp_url = local_listener
+        .as_ref()
+        .and_then(|(listener, _)| listener.local_addr().ok())
+        .map(local_url_from_addr);
+    let bind_addr = if let Some(listener) = oauth_listener.as_ref() {
+        listener
+            .local_addr()
+            .context("failed to resolve bound gateway address")?
+    } else if let Some((listener, _)) = local_listener.as_ref() {
+        listener
+            .local_addr()
+            .context("failed to resolve bound local MCP address")?
+    } else {
+        bail!("no gateway listeners enabled; check B3_ACCESS_MODE and local MCP configuration");
+    };
     let bind_addr_display = bind_addr.to_string();
     let local_url = local_url_from_addr(bind_addr);
     let app_state = build_gateway_state(Arc::clone(&config), upstream_secret)?;
-    let router = build_router(app_state.clone());
-    let local_listener = bind_local_mcp_listener(&config).await?;
     let (shutdown_tx, _) = watch::channel(false);
     let mut join_handles = Vec::new();
 
     tracing::info!(
-        bind_addr = %bind_addr_display,
-        local_url = %local_url,
-        token_db_path = %config.token_db_path.display(),
-        brain3_version = release::APP_VERSION,
-        oauth_implementation = release::OAUTH_IMPLEMENTATION,
-        oxide_auth_version = release::OXIDE_AUTH_VERSION,
-        oxide_auth_async_version = release::OXIDE_AUTH_ASYNC_VERSION,
-        oxide_auth_axum_version = release::OXIDE_AUTH_AXUM_VERSION,
-        oauth_token_store = "sqlite",
-        client_id = %config.oauth.client_id,
-        pkce_required = config.oauth.pkce_required,
-        "starting OAuth2 gateway in background"
+        "Proxying MCP traffic to {}",
+        config.mcp_reverse_proxy.mcp_upstream_url
     );
-    if let Some(local_mcp) = config.local_mcp.as_ref() {
+
+    if let Some(listener) = oauth_listener {
         tracing::info!(
-            url = %format!("http://localhost:{}/mcp", local_mcp.port),
-            "starting local MCP listener in background"
+            bind_addr = %bind_addr_display,
+            local_url = %local_url,
+            token_db_path = %config.token_db_path.display(),
+            brain3_version = release::APP_VERSION,
+            oauth_implementation = release::OAUTH_IMPLEMENTATION,
+            oxide_auth_version = release::OXIDE_AUTH_VERSION,
+            oxide_auth_async_version = release::OXIDE_AUTH_ASYNC_VERSION,
+            oxide_auth_axum_version = release::OXIDE_AUTH_AXUM_VERSION,
+            oauth_token_store = "sqlite",
+            client_id = %config.oauth.client_id,
+            pkce_required = config.oauth.pkce_required,
+            "starting OAuth2 gateway in background"
         );
+        let router = build_router(app_state.clone());
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        join_handles.push(tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.changed().await;
+                })
+                .await
+                .context("server error")
+        }));
+    } else {
+        tracing::info!("OAuth gateway port not bound because access mode is local-only");
     }
 
-    let mut shutdown_rx = shutdown_tx.subscribe();
-    join_handles.push(tokio::spawn(async move {
-        axum::serve(listener, router)
-            .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.changed().await;
-            })
-            .await
-            .context("server error")
-    }));
-
-    if let Some((listener, _)) = local_listener {
+    if let Some((listener, local_port)) = local_listener {
+        tracing::info!(
+            bind_addr = %format!("127.0.0.1:{local_port}"),
+            local_url = %local_mcp_url
+                .unwrap_or_else(|| format!("http://localhost:{local_port}")),
+            "starting local MCP listener in background"
+        );
         let router = build_local_router(app_state);
         let mut shutdown_rx = shutdown_tx.subscribe();
         join_handles.push(tokio::spawn(async move {
@@ -296,6 +358,10 @@ async fn bind_listener(host: &str, port: u16) -> Result<TcpListener> {
 }
 
 async fn bind_local_mcp_listener(config: &GatewayConfig) -> Result<Option<(TcpListener, u16)>> {
+    if config.access_mode == AccessMode::Remote {
+        return Ok(None);
+    }
+
     let Some(local_mcp) = config.local_mcp.as_ref() else {
         return Ok(None);
     };
