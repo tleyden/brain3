@@ -44,6 +44,8 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         container_host_port: 8420,
         container_mcp_port: 8420,
         container_network_isolated: false,
+        local_mcp_enabled: true,
+        local_mcp_bearer_token: "local-token".into(),
         pkce_required: true,
         enforce_hostname_check: true,
         direct_public_origin_hostname: None,
@@ -59,10 +61,11 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_USERNAME=\"admin\""));
     assert!(rendered.contains("B3_PASSWORD=\"correct horse battery staple\""));
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));
+    assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"8422\""));
+    assert!(rendered.contains("LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN=\"local-token\""));
     assert!(rendered.contains("B3_CONTAINER_RUNTIME=\"macos-container\""));
     assert!(rendered.contains("B3_VAULT_PATH=\"/Users/test/My Vault\""));
-    assert!(rendered
-        .contains("B3_CONTAINER_IMAGE_REPO=\"ghcr.io/tleyden/brain3-mcp-vault-tools\""));
+    assert!(rendered.contains("B3_CONTAINER_IMAGE_REPO=\"ghcr.io/tleyden/brain3-mcp-vault-tools\""));
     assert!(rendered.contains("B3_CONTAINER_IMAGE_TAG=\"\""));
     assert!(!rendered.contains("B3_CONTAINER_IMAGE="));
     assert!(rendered.contains("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=\"false\""));

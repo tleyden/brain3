@@ -435,6 +435,18 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     ));
 
     lines.push(blank_line());
+    lines.push(field_badge_line(
+        "Local MCP access",
+        if state.draft.local_mcp_enabled {
+            badge_span("Enabled", Color::Green)
+        } else {
+            badge_span("Disabled", Color::Yellow)
+        },
+        state.ports_focus == PortsField::LocalMcpEnabled,
+    ));
+    lines.push(muted_line(
+        "Enabled starts a localhost-only MCP port with a static bearer token.",
+    ));
 
     let pkce_active = state.ports_focus == PortsField::PkceRequired;
     let pkce_badge = if state.draft.pkce_required {
@@ -554,6 +566,15 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             f == SummaryField::RefreshTokenLifetimeSecs,
         ),
         field_badge_line(
+            "Local MCP access",
+            if state.draft.local_mcp_enabled {
+                badge_span("Enabled", Color::Green)
+            } else {
+                badge_span("Disabled", Color::Yellow)
+            },
+            f == SummaryField::LocalMcpEnabled,
+        ),
+        field_badge_line(
             "PKCE required",
             if state.draft.pkce_required {
                 badge_span("Enabled", Color::Green)
@@ -584,7 +605,10 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Container runtime",
             format_container_runtime(state.draft.container_runtime),
         ),
-        key_value_line("Container image repo", state.draft.container_image_repo.clone()),
+        key_value_line(
+            "Container image repo",
+            state.draft.container_image_repo.clone(),
+        ),
         key_value_line("Tunnel", format_tunnel_mode(&state.draft.tunnel_mode)),
         key_value_line(
             "Env file",
@@ -685,6 +709,19 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
         if let Some(summary) = runtime.tunnel_status.failure_summary() {
             lines.push(key_value_line("Tunnel error", summary.to_string()));
+        }
+
+        if let Some(local_mcp) = runtime.config.local_mcp.as_ref() {
+            lines.push(blank_line());
+            lines.push(Line::from(Span::styled(
+                "Local MCP",
+                section_heading_style(),
+            )));
+            lines.push(key_value_line(
+                "Endpoint",
+                format!("http://localhost:{}/mcp", local_mcp.port),
+            ));
+            lines.push(key_value_line("Token", local_mcp.bearer_token.clone()));
         }
 
         lines.push(key_value_line(
@@ -1217,6 +1254,8 @@ mod tests {
                     container_host_port: 8420,
                     container_mcp_port: 8420,
                     container_network_isolated: true,
+                    local_mcp_enabled: true,
+                    local_mcp_bearer_token: "local-token".into(),
                     pkce_required: true,
                     enforce_hostname_check: true,
                     direct_public_origin_hostname: None,
@@ -1253,12 +1292,16 @@ mod tests {
                 },
                 mcp_reverse_proxy: MCPReverseProxyConfig {
                     mcp_upstream_url: "http://127.0.0.1:8420".into(),
-                    upstream_secret_file: PathBuf::from("/tmp/upstream_secret"),
+                    upstream_secret: "secret".into(),
                 },
                 hostname_validation: HostnameValidationConfig {
                     expected_host: None,
                     enforce: true,
                 },
+                local_mcp: Some(brain3_core::domain::model::LocalMcpConfig {
+                    port: 8422,
+                    bearer_token: "local-token".into(),
+                }),
                 container: Some(brain3_core::domain::model::ContainerStartupConfig {
                     runtime: ContainerRuntime::Docker,
                     image: format!(
@@ -1266,7 +1309,7 @@ mod tests {
                     ),
                     container_name: "brain3-mcp-vault-tools".into(),
                     vault_path: PathBuf::from("/missing/vault"),
-                    upstream_secret_dir: PathBuf::from("/tmp"),
+                    upstream_secret: "secret".into(),
                     host_port: 8420,
                     container_port: 8420,
                     isolation_strategy: Some(brain3_core::domain::model::ContainerNetworkIsolationStrategy::DiscoverContainerIp),

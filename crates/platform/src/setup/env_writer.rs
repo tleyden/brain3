@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use brain3_core::domain::errors::SetupError;
 use brain3_core::domain::model::ContainerRuntime;
-use brain3_core::domain::setup::{SetupDraftConfig, SetupPaths, TunnelModeDraft};
+use brain3_core::domain::setup::{
+    SetupDraftConfig, SetupPaths, TunnelModeDraft, DEFAULT_LOCAL_MCP_PORT,
+};
 
 use super::env_template::embedded_env_template;
 
@@ -25,6 +27,18 @@ pub fn render_env_file(draft: &SetupDraftConfig, paths: &SetupPaths) -> Result<S
 
         rendered.push_str(line);
         rendered.push('\n');
+    }
+
+    for key in [
+        "B3_LOCAL_MCP_PORT",
+        "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
+    ] {
+        if let Some(value) = overrides.get(key) {
+            rendered.push_str(key);
+            rendered.push('=');
+            rendered.push_str(&quote_env_value(value));
+            rendered.push('\n');
+        }
     }
 
     Ok(rendered)
@@ -57,7 +71,10 @@ fn build_overrides(
         container_runtime_value(draft.container_runtime).to_string(),
     );
     values.insert("B3_VAULT_PATH", draft.vault_path.display().to_string());
-    values.insert("B3_CONTAINER_IMAGE_REPO", draft.container_image_repo.clone());
+    values.insert(
+        "B3_CONTAINER_IMAGE_REPO",
+        draft.container_image_repo.clone(),
+    );
     values.insert("B3_CONTAINER_IMAGE_TAG", String::new());
     values.insert(
         "B3_CONTAINER_HOST_PORT",
@@ -71,6 +88,13 @@ fn build_overrides(
         "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION",
         draft.container_network_isolated.to_string(),
     );
+    if draft.local_mcp_enabled {
+        values.insert("B3_LOCAL_MCP_PORT", DEFAULT_LOCAL_MCP_PORT.to_string());
+        values.insert(
+            "LOCAL_GATEWAY_MCP_REVERSE_PROXY_BEARER_TOKEN",
+            draft.local_mcp_bearer_token.clone(),
+        );
+    }
     values.insert("B3_OAUTH2_PKCE_REQUIRED", draft.pkce_required.to_string());
     values.insert(
         "B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK",

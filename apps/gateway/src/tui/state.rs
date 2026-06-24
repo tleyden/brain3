@@ -26,6 +26,7 @@ pub enum PortsField {
     ContainerMcpPort,
     AccessTokenLifetimeSecs,
     RefreshTokenLifetimeSecs,
+    LocalMcpEnabled,
     PkceRequired,
     EnforceHostnameCheck,
     ContainerNetworkIsolation,
@@ -55,6 +56,7 @@ pub enum SummaryField {
     ContainerMcpPort,
     AccessTokenLifetimeSecs,
     RefreshTokenLifetimeSecs,
+    LocalMcpEnabled,
     PkceRequired,
     HostnameCheck,
     ContainerNetworkIsolation,
@@ -240,7 +242,8 @@ impl FirstRunTuiState {
             PortsField::ContainerHostPort => PortsField::ContainerMcpPort,
             PortsField::ContainerMcpPort => PortsField::AccessTokenLifetimeSecs,
             PortsField::AccessTokenLifetimeSecs => PortsField::RefreshTokenLifetimeSecs,
-            PortsField::RefreshTokenLifetimeSecs => PortsField::PkceRequired,
+            PortsField::RefreshTokenLifetimeSecs => PortsField::LocalMcpEnabled,
+            PortsField::LocalMcpEnabled => PortsField::PkceRequired,
             PortsField::PkceRequired => PortsField::EnforceHostnameCheck,
             PortsField::EnforceHostnameCheck => PortsField::ContainerNetworkIsolation,
             PortsField::ContainerNetworkIsolation => PortsField::GatewayPort,
@@ -254,7 +257,8 @@ impl FirstRunTuiState {
             PortsField::ContainerMcpPort => PortsField::ContainerHostPort,
             PortsField::AccessTokenLifetimeSecs => PortsField::ContainerMcpPort,
             PortsField::RefreshTokenLifetimeSecs => PortsField::AccessTokenLifetimeSecs,
-            PortsField::PkceRequired => PortsField::RefreshTokenLifetimeSecs,
+            PortsField::LocalMcpEnabled => PortsField::RefreshTokenLifetimeSecs,
+            PortsField::PkceRequired => PortsField::LocalMcpEnabled,
             PortsField::EnforceHostnameCheck => PortsField::PkceRequired,
             PortsField::ContainerNetworkIsolation => PortsField::EnforceHostnameCheck,
         };
@@ -264,6 +268,9 @@ impl FirstRunTuiState {
         match self.ports_focus {
             PortsField::PkceRequired => {
                 self.draft.pkce_required = !self.draft.pkce_required;
+            }
+            PortsField::LocalMcpEnabled => {
+                self.draft.local_mcp_enabled = !self.draft.local_mcp_enabled;
             }
             PortsField::EnforceHostnameCheck => {
                 self.draft.enforce_hostname_check = !self.draft.enforce_hostname_check;
@@ -303,7 +310,8 @@ impl FirstRunTuiState {
             SummaryField::ContainerHostPort => SummaryField::ContainerMcpPort,
             SummaryField::ContainerMcpPort => SummaryField::AccessTokenLifetimeSecs,
             SummaryField::AccessTokenLifetimeSecs => SummaryField::RefreshTokenLifetimeSecs,
-            SummaryField::RefreshTokenLifetimeSecs => SummaryField::PkceRequired,
+            SummaryField::RefreshTokenLifetimeSecs => SummaryField::LocalMcpEnabled,
+            SummaryField::LocalMcpEnabled => SummaryField::PkceRequired,
             SummaryField::PkceRequired => SummaryField::HostnameCheck,
             SummaryField::HostnameCheck => SummaryField::ContainerNetworkIsolation,
             SummaryField::ContainerNetworkIsolation => SummaryField::VaultPath,
@@ -328,7 +336,8 @@ impl FirstRunTuiState {
             SummaryField::ContainerMcpPort => SummaryField::ContainerHostPort,
             SummaryField::AccessTokenLifetimeSecs => SummaryField::ContainerMcpPort,
             SummaryField::RefreshTokenLifetimeSecs => SummaryField::AccessTokenLifetimeSecs,
-            SummaryField::PkceRequired => SummaryField::RefreshTokenLifetimeSecs,
+            SummaryField::LocalMcpEnabled => SummaryField::RefreshTokenLifetimeSecs,
+            SummaryField::PkceRequired => SummaryField::LocalMcpEnabled,
             SummaryField::HostnameCheck => SummaryField::PkceRequired,
             SummaryField::ContainerNetworkIsolation => SummaryField::HostnameCheck,
         };
@@ -420,6 +429,9 @@ impl FirstRunTuiState {
             }
             SummaryField::PkceRequired => {
                 self.draft.pkce_required = !self.draft.pkce_required;
+            }
+            SummaryField::LocalMcpEnabled => {
+                self.draft.local_mcp_enabled = !self.draft.local_mcp_enabled;
             }
             SummaryField::HostnameCheck => {
                 self.draft.enforce_hostname_check = !self.draft.enforce_hostname_check;

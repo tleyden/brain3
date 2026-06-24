@@ -57,6 +57,19 @@ class ServerStartupTests(unittest.TestCase):
 
         self.assertEqual(server.mcp.settings.port, 8420)
 
+    def test_upstream_shared_secret_can_be_provided_directly_via_env_var(self):
+        with patch.dict(
+            os.environ,
+            {
+                "B3_VAULT_PATH": str(TEST_VAULT),
+                "B3_UPSTREAM_SHARED_SECRET": "shared-secret",
+            },
+            clear=False,
+        ):
+            server = import_server_module()
+
+        self.assertEqual(server._load_upstream_shared_secret(), "shared-secret")
+
     def test_main_runs_streamable_http_without_port_keyword(self):
         with patch.dict(
             os.environ,

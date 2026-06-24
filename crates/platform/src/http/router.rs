@@ -9,7 +9,7 @@ use brain3_core::ports::mcp_proxy::McpProxyPort;
 
 use super::assets::{login_logo, login_stylesheet};
 use super::health::health;
-use super::mcp_handlers::{mcp_reverse_proxy, protected_resource_metadata};
+use super::mcp_handlers::{local_mcp_proxy, mcp_reverse_proxy, protected_resource_metadata};
 use super::oauth_handlers::{
     oauth_authorize_get, oauth_authorize_post, oauth_metadata, oauth_token,
 };
@@ -60,6 +60,32 @@ pub fn build_router<P: McpProxyPort + 'static>(state: AppState<P>) -> Router {
             get(mcp_reverse_proxy::<P>)
                 .post(mcp_reverse_proxy::<P>)
                 .delete(mcp_reverse_proxy::<P>),
+        )
+        .fallback(fallback)
+        .layer(TraceLayer::new_for_http())
+        .with_state(state)
+}
+
+pub fn build_local_router<P: McpProxyPort + 'static>(state: AppState<P>) -> Router {
+    Router::new()
+        .route("/health", get(health))
+        .route(
+            "/mcp",
+            get(local_mcp_proxy::<P>)
+                .post(local_mcp_proxy::<P>)
+                .delete(local_mcp_proxy::<P>),
+        )
+        .route(
+            "/mcp/",
+            get(local_mcp_proxy::<P>)
+                .post(local_mcp_proxy::<P>)
+                .delete(local_mcp_proxy::<P>),
+        )
+        .route(
+            "/mcp/{*path}",
+            get(local_mcp_proxy::<P>)
+                .post(local_mcp_proxy::<P>)
+                .delete(local_mcp_proxy::<P>),
         )
         .fallback(fallback)
         .layer(TraceLayer::new_for_http())

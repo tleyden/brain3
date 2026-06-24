@@ -6,7 +6,7 @@ use brain3_core::domain::model::{ContainerNetworkIsolationStrategy, GatewayConfi
 use brain3_core::domain::setup::RuntimeLaunchPlan;
 use brain3_core::ports::tunnel::TunnelPort;
 
-use crate::config::{log_config, upstream_secret};
+use crate::config::log_config;
 use crate::container::startup::{ensure_mcp_container, stop_mcp_container};
 use crate::tunnel::start_tunnel;
 
@@ -119,8 +119,7 @@ pub async fn bootstrap_configured_runtime(
     ensure_named_tunnel_config_exists(&config)?;
     log_config::log_startup_config(&config);
 
-    let upstream_secret =
-        upstream_secret::read_or_create(&config.mcp_reverse_proxy.upstream_secret_file)?;
+    let upstream_secret = config.mcp_reverse_proxy.upstream_secret.clone();
 
     let mut config = config;
     let container_status = if let Some(startup) = &config.container {

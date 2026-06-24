@@ -8,6 +8,7 @@ pub struct GatewayConfig {
     pub oauth: OAuthConfig,
     pub mcp_reverse_proxy: MCPReverseProxyConfig,
     pub hostname_validation: HostnameValidationConfig,
+    pub local_mcp: Option<LocalMcpConfig>,
     pub container: Option<ContainerStartupConfig>,
     pub tunnel: Option<TunnelConfig>,
 }
@@ -26,7 +27,13 @@ pub struct OAuthConfig {
 #[derive(Debug, Clone)]
 pub struct MCPReverseProxyConfig {
     pub mcp_upstream_url: String,
-    pub upstream_secret_file: PathBuf,
+    pub upstream_secret: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalMcpConfig {
+    pub port: u16,
+    pub bearer_token: String,
 }
 
 #[derive(Debug, Clone)]
@@ -100,7 +107,7 @@ pub struct ContainerStartupConfig {
     pub container_name: String,
     pub network_name: String,
     pub vault_path: PathBuf,
-    pub upstream_secret_dir: PathBuf,
+    pub upstream_secret: String,
     pub host_port: u16,
     pub container_port: u16,
     /// `None` = not isolated; `Some(strategy)` = internal network with given strategy.

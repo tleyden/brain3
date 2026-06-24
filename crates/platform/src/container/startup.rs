@@ -20,7 +20,7 @@ pub async fn ensure_mcp_container(
         image = %startup.image,
         vault = %startup.vault_path.display(),
         host_port = startup.host_port,
-        upstream_secret_dir = %startup.upstream_secret_dir.display(),
+        upstream_secret_configured = !startup.upstream_secret.is_empty(),
         dev_mode,
         "ensuring MCP container is running"
     );
@@ -48,8 +48,8 @@ pub async fn ensure_mcp_container(
         ),
         ("B3_VAULT_PATH".into(), "/vault".into()),
         (
-            "B3_UPSTREAM_SHARED_SECRET_FILE".into(),
-            "/run/brain3/upstream_secret".into(),
+            "B3_UPSTREAM_SHARED_SECRET".into(),
+            startup.upstream_secret.clone(),
         ),
     ];
     if startup.isolation_strategy.is_some() {
@@ -59,18 +59,11 @@ pub async fn ensure_mcp_container(
         env_vars.push(("B3_VAULT_MCP_LOG_LEVEL".into(), level.clone()));
     }
 
-    let mut bind_mounts = vec![
-        BindMount {
-            host_path: startup.vault_path.clone(),
-            container_path: "/vault".into(),
-            readonly: false,
-        },
-        BindMount {
-            host_path: startup.upstream_secret_dir.clone(),
-            container_path: "/run/brain3".into(),
-            readonly: true,
-        },
-    ];
+    let mut bind_mounts = vec![BindMount {
+        host_path: startup.vault_path.clone(),
+        container_path: "/vault".into(),
+        readonly: false,
+    }];
 
     let mut workdir = None;
     let mut command = Vec::new();

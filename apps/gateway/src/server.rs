@@ -3,11 +3,10 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use axum::Router;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use tokio::net::TcpListener;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
@@ -17,7 +16,7 @@ use brain3_core::ports::config::ConfigPort;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
 use brain3_platform::http::registrar::GatewayRegistrar;
-use brain3_platform::http::router::build_router;
+use brain3_platform::http::router::{build_local_router, build_router};
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
@@ -48,8 +47,8 @@ pub enum GatewayServerStatus {
 pub struct GatewayServerHandle {
     bind_addr: String,
     local_url: String,
-    shutdown_tx: Option<oneshot::Sender<()>>,
-    join_handle: JoinHandle<Result<()>>,
+    shutdown_tx: Option<watch::Sender<bool>>,
+    join_handles: Vec<JoinHandle<Result<()>>>,
 }
 
 #[allow(dead_code)]
@@ -63,7 +62,7 @@ impl GatewayServerHandle {
     }
 
     pub fn status(&self) -> GatewayServerStatus {
-        if self.join_handle.is_finished() {
+        if self.join_handles.iter().any(JoinHandle::is_finished) {
             GatewayServerStatus::Stopped {
                 bind_addr: self.bind_addr.clone(),
             }
@@ -77,12 +76,16 @@ impl GatewayServerHandle {
 
     pub async fn shutdown(mut self) -> Result<()> {
         if let Some(tx) = self.shutdown_tx.take() {
-            let _ = tx.send(());
+            let _ = tx.send(true);
         }
 
-        self.join_handle
-            .await
-            .context("gateway server task join failed")?
+        for join_handle in self.join_handles {
+            join_handle
+                .await
+                .context("gateway server task join failed")??;
+        }
+
+        Ok(())
     }
 }
 
@@ -100,7 +103,33 @@ where
         .local_addr()
         .context("failed to resolve bound gateway address")?;
     let local_url = local_url_from_addr(bind_addr);
-    let router = build_gateway_router(Arc::clone(&config), upstream_secret)?;
+    let app_state = build_gateway_state(Arc::clone(&config), upstream_secret)?;
+    let router = build_router(app_state.clone());
+    let local_listener = bind_local_mcp_listener(&config).await?;
+    let local_mcp_url = local_listener
+        .as_ref()
+        .and_then(|(listener, _)| listener.local_addr().ok())
+        .map(local_url_from_addr);
+    let (shutdown_tx, _) = watch::channel(false);
+    let local_task = if let Some((listener, local_port)) = local_listener {
+        let router = build_local_router(app_state);
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        tracing::info!(
+            bind_addr = %format!("127.0.0.1:{local_port}"),
+            local_url = local_mcp_url.as_deref().unwrap_or("http://localhost"),
+            "starting local MCP listener"
+        );
+        Some(tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.changed().await;
+                })
+                .await
+                .context("local MCP server error")
+        }))
+    } else {
+        None
+    };
 
     tracing::info!(
         bind_addr = %bind_addr,
@@ -121,10 +150,30 @@ where
         config.mcp_reverse_proxy.mcp_upstream_url
     );
 
-    axum::serve(listener, router)
-        .with_graceful_shutdown(shutdown)
+    if let Some(local_mcp) = config.local_mcp.as_ref() {
+        tracing::info!(
+            url = %format!("http://localhost:{}/mcp", local_mcp.port),
+            "local MCP access enabled"
+        );
+    }
+
+    let shutdown_tx_for_public = shutdown_tx.clone();
+    let serve_result = axum::serve(listener, router)
+        .with_graceful_shutdown(async move {
+            shutdown.await;
+            let _ = shutdown_tx_for_public.send(true);
+        })
         .await
-        .context("server error")
+        .context("server error");
+
+    let _ = shutdown_tx.send(true);
+    if let Some(local_task) = local_task {
+        local_task
+            .await
+            .context("local MCP server task join failed")??;
+    }
+
+    serve_result
 }
 
 #[allow(dead_code)]
@@ -139,8 +188,11 @@ pub async fn spawn_gateway_server(
         .context("failed to resolve bound gateway address")?;
     let bind_addr_display = bind_addr.to_string();
     let local_url = local_url_from_addr(bind_addr);
-    let router = build_gateway_router(Arc::clone(&config), upstream_secret)?;
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let app_state = build_gateway_state(Arc::clone(&config), upstream_secret)?;
+    let router = build_router(app_state.clone());
+    let local_listener = bind_local_mcp_listener(&config).await?;
+    let (shutdown_tx, _) = watch::channel(false);
+    let mut join_handles = Vec::new();
 
     tracing::info!(
         bind_addr = %bind_addr_display,
@@ -156,21 +208,41 @@ pub async fn spawn_gateway_server(
         pkce_required = config.oauth.pkce_required,
         "starting OAuth2 gateway in background"
     );
+    if let Some(local_mcp) = config.local_mcp.as_ref() {
+        tracing::info!(
+            url = %format!("http://localhost:{}/mcp", local_mcp.port),
+            "starting local MCP listener in background"
+        );
+    }
 
-    let join_handle = tokio::spawn(async move {
+    let mut shutdown_rx = shutdown_tx.subscribe();
+    join_handles.push(tokio::spawn(async move {
         axum::serve(listener, router)
             .with_graceful_shutdown(async move {
-                let _ = shutdown_rx.await;
+                let _ = shutdown_rx.changed().await;
             })
             .await
             .context("server error")
-    });
+    }));
+
+    if let Some((listener, _)) = local_listener {
+        let router = build_local_router(app_state);
+        let mut shutdown_rx = shutdown_tx.subscribe();
+        join_handles.push(tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    let _ = shutdown_rx.changed().await;
+                })
+                .await
+                .context("local MCP server error")
+        }));
+    }
 
     Ok(GatewayServerHandle {
         bind_addr: bind_addr_display,
         local_url,
         shutdown_tx: Some(shutdown_tx),
-        join_handle,
+        join_handles,
     })
 }
 
@@ -223,7 +295,19 @@ async fn bind_listener(host: &str, port: u16) -> Result<TcpListener> {
         .with_context(|| format!("failed to bind to {addr}"))
 }
 
-fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> Result<Router> {
+async fn bind_local_mcp_listener(config: &GatewayConfig) -> Result<Option<(TcpListener, u16)>> {
+    let Some(local_mcp) = config.local_mcp.as_ref() else {
+        return Ok(None);
+    };
+
+    let listener = bind_listener("127.0.0.1", local_mcp.port).await?;
+    Ok(Some((listener, local_mcp.port)))
+}
+
+fn build_gateway_state(
+    config: Arc<GatewayConfig>,
+    upstream_secret: String,
+) -> Result<AppState<ReqwestMcpProxy>> {
     let registrar = Arc::new(GatewayRegistrar::new(
         &config.oauth.client_id,
         config.oauth.client_secret.as_bytes().to_vec(),
@@ -256,7 +340,7 @@ fn build_gateway_router(config: Arc<GatewayConfig>, upstream_secret: String) -> 
         rate_limiter: Arc::new(OAuthRateLimiter::new()),
     };
 
-    Ok(build_router(app_state))
+    Ok(app_state)
 }
 
 fn local_url_from_addr(addr: SocketAddr) -> String {

@@ -44,6 +44,10 @@ impl FirstRunSetupUseCase {
             container_host_port: DEFAULT_CONTAINER_HOST_PORT,
             container_mcp_port: DEFAULT_CONTAINER_MCP_PORT,
             container_network_isolated: true,
+            local_mcp_enabled: true,
+            local_mcp_bearer_token: self
+                .port
+                .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?,
             pkce_required: true,
             enforce_hostname_check: true,
             direct_public_origin_hostname: None,
@@ -101,6 +105,12 @@ impl FirstRunSetupUseCase {
                 .generate_password(DEFAULT_GENERATED_PASSWORD_LENGTH)?;
         } else {
             validate_nonempty("password", &draft.password)?;
+        }
+
+        if draft.local_mcp_enabled && draft.local_mcp_bearer_token.trim().is_empty() {
+            draft.local_mcp_bearer_token = self
+                .port
+                .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?;
         }
 
         let env_contents = self.port.render_env_file(&draft, &paths)?;
@@ -302,6 +312,8 @@ mod tests {
             container_host_port: 8420,
             container_mcp_port: 8420,
             container_network_isolated: false,
+            local_mcp_enabled: true,
+            local_mcp_bearer_token: "local-secret".into(),
             pkce_required: true,
             enforce_hostname_check: true,
             direct_public_origin_hostname: None,
@@ -370,6 +382,8 @@ mod tests {
 
         assert_eq!(preparation.draft.client_id, "brain3-oauth2-client");
         assert!(preparation.draft.container_network_isolated);
+        assert!(preparation.draft.local_mcp_enabled);
+        assert!(!preparation.draft.local_mcp_bearer_token.is_empty());
     }
 
     #[tokio::test]
