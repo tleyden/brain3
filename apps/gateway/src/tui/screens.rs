@@ -737,7 +737,7 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             connection_heading_style(),
         )),
         blank_line(),
-        key_value_line("Server URL", format!("{}/mcp", card.server_url)),
+        key_value_line("Remote MCP Server URL", format!("{}/mcp", card.server_url)),
         key_value_line("Client ID", card.client_id.clone()),
         key_value_line("Client Secret", card.client_secret.clone()),
         key_value_line("Username", card.username.clone()),
@@ -797,16 +797,24 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             ));
         }
 
-        if let Some(url) = &runtime.public_url {
-            lines.push(key_value_line("Public URL", url.clone()));
-        }
-
         if let Some(summary) = runtime.container_status.failure_summary() {
             lines.push(key_value_line("Container error", summary.to_string()));
         }
 
         if let Some(summary) = runtime.tunnel_status.failure_summary() {
             lines.push(key_value_line("Tunnel error", summary.to_string()));
+        }
+
+        if let Some(url) = &runtime.public_url {
+            lines.push(blank_line());
+            lines.push(Line::from(Span::styled(
+                "Remote MCP",
+                section_heading_style(),
+            )));
+            lines.push(key_value_line(
+                "Remote MCP Server URL",
+                format!("{}/mcp", url),
+            ));
         }
 
         if let Some(local_mcp) = runtime.config.local_mcp.as_ref() {
