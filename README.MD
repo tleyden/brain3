@@ -121,10 +121,10 @@ It should launch an interactive setup wizard.
 
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
-Brain3 displays all the connection information you need.  Follow the instructions below for your AI client.
+Brain3 displays all the connection information you need. Follow the instructions below for your AI client.
 
 <details>
-<summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT</strong></summary>
+<summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT — GUI + Remote MCP</strong></summary>
 
 <a href="docs/screenshots/ChatGPTConfig.png">
   <img height="400" alt="ChatGPT connector configuration screenshot" src="docs/screenshots/ChatGPTConfig.png" />
@@ -141,7 +141,39 @@ Once authorization succeeds, Brain3 will be available as a connector in ChatGPT.
 </details>
 
 <details>
-<summary><img height="16" src="docs/logos/claude.svg" alt="Claude"> <strong>Claude</strong></summary>
+<summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT — JSON Config + Local MCP (untested)</strong></summary>
+
+The ChatGPT macOS desktop client does not expose a configuration file on disk; you must link your local server using the internal **Developer Mode** layout.
+
+#### Step 1: Enable Developer Mode
+
+1. Launch ChatGPT Desktop on your Mac.
+2. Open Settings by pressing **Cmd + ,** (or click your profile icon → **Settings**).
+3. Select **Apps & Connectors** (or **Connected Apps**) from the sidebar.
+4. Scroll to the bottom, expand **Advanced Settings**, and toggle **Developer Mode** to **ON**.
+
+#### Step 2: Add Custom App Connector
+
+1. Click the **Create** button next to your Developer Mode options.
+2. Fill out the registration form:
+   - **Name:** `Brain3`
+   - **Connector URL:** Copy the **Local MCP Endpoint** from Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`)
+
+#### Step 3: Configure Direct Bearer Authentication
+
+1. Find the **Authentication** dropdown in the app configuration pane.
+2. Select **Custom Headers** (or **API Key / Token** depending on your build version).
+3. Provide the key-value pair:
+   - **Key:** `Authorization`
+   - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
+4. Click **Save** or **Create**.
+
+> **macOS Sandboxing Note:** If ChatGPT blocks the connection because it is unencrypted `http://` rather than `https://`, you may need to expose the local port via a loopback TLS tunnel such as `ngrok http 8422` and use the resulting `https://` URL instead.
+
+</details>
+
+<details>
+<summary><img height="16" src="docs/logos/claude.svg" alt="Claude"> <strong>Claude — GUI + Remote MCP</strong></summary>
 
 <a href="docs/screenshots/ClaudeConfig.png">
   <img height="400" alt="Claude connector configuration screenshot" src="docs/screenshots/ClaudeConfig.png" />
@@ -154,6 +186,67 @@ Once authorization succeeds, Brain3 will be available as a connector in ChatGPT.
 5. When shown a login screen, enter the **Username** and **Password** displayed in Brain3's MCP Config Settings screen.
 
 Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
+
+</details>
+
+<details>
+<summary><img height="16" src="docs/logos/claude.svg" alt="Claude"> <strong>Claude — JSON Config + Local MCP (untested)</strong></summary>
+
+Claude Desktop on macOS natively supports the `streamable-http` / `http` protocol directly in its configuration file.
+
+#### Step 1: Open the Config File
+
+```bash
+open ~/Library/Application\ Support/Claude/claude_desktop_config.json
+```
+
+Or open it in your editor of choice.
+
+#### Step 2: Add the Brain3 MCP Server
+
+Paste or merge the following block into your JSON. Copy the endpoint URL and token from Brain3's MCP Config Settings screen:
+
+```json
+{
+  "mcpServers": {
+    "brain3": {
+      "type": "http",
+      "url": "http://localhost:8422/mcp",
+      "headers": {
+        "Authorization": "Bearer <token from Brain3's MCP Config Settings screen>"
+      }
+    }
+  }
+}
+```
+
+#### Step 3: Restart Claude Desktop
+
+Quit Claude Desktop entirely (**Cmd + Q**), then relaunch it. Check the plug icon in the lower-right corner of the chat input to confirm Brain3 tools appear.
+
+</details>
+
+<details>
+<summary><img height="16" src="docs/logos/goose_logo_light.png" alt="Goose"> <strong>Goose — GUI + Local MCP</strong></summary>
+
+1. Open Goose settings and navigate to **MCP → Add Server**.
+2. Set the **URL** to the **Local MCP Endpoint** shown in Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`).
+3. Under **Request Headers**, add:
+   - **Header name:** `Authorization`
+   - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
+4. Save and restart Goose if prompted.
+
+</details>
+
+<details>
+<summary><img height="16" src="docs/logos/jan.png" alt="Jan.ai"> <strong>Jan.ai — GUI + Local MCP</strong></summary>
+
+1. Open Jan, go to **Settings → MCP Servers → Add Server**.
+2. Set the **URL** to the **Local MCP Endpoint** shown in Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`).
+3. Add a request header:
+   - **Header name:** `Authorization`
+   - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
+4. Save and reload Jan if prompted.
 
 </details>
 
