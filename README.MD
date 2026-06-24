@@ -110,6 +110,15 @@ It should launch an interactive setup wizard.
 
 ### Configure your AI 
 
+#### Compatibility Matrix
+
+| AI Client | Local MCP | Remote MCP |
+|-----------|-----------|------------|
+| <img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT | ✅ (untested) | ✅ |
+| <img height="16" src="docs/logos/claude.svg" alt="Claude"> Claude | ✅ (untested) | ✅ |
+| <img height="16" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai | ✅ | ❌ |
+| <img height="16" src="docs/logos/goose_logo_light.png" alt="Goose"> Goose | ✅ | ❌ |
+
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
 Brain3 displays all the connection information you need.  Follow the instructions below for your AI client.
