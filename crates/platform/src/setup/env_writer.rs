@@ -14,13 +14,9 @@ pub fn render_env_file(draft: &SetupDraftConfig, paths: &SetupPaths) -> Result<S
         if let Some((key, _)) = line.split_once('=') {
             if is_env_assignment_key(key) {
                 if let Some(value) = overrides.get(key) {
-                    let rendered_value = quote_env_value(value);
-                    if draft.access_mode == AccessModeDraft::LocalOnly && is_remote_only_key(key) {
-                        rendered.push_str("# ");
-                    }
                     rendered.push_str(key);
                     rendered.push('=');
-                    rendered.push_str(&rendered_value);
+                    rendered.push_str(&quote_env_value(value));
                     rendered.push('\n');
                     continue;
                 }
@@ -184,26 +180,6 @@ fn is_env_assignment_key(key: &str) -> bool {
         && key
             .bytes()
             .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
-}
-
-fn is_remote_only_key(key: &str) -> bool {
-    matches!(
-        key,
-        "B3_OAUTH2_GATEWAY_PORT"
-            | "B3_OAUTH2_GATEWAY_CLIENT_ID"
-            | "B3_OAUTH2_GATEWAY_CLIENT_SECRET"
-            | "B3_OAUTH2_PKCE_REQUIRED"
-            | "B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS"
-            | "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS"
-            | "B3_USERNAME"
-            | "B3_PASSWORD"
-            | "B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK"
-            | "B3_CF_QUICK_TUNNEL"
-            | "B3_CF_TUNNEL_NAME"
-            | "B3_CF_DOMAIN"
-            | "B3_CF_TUNNEL_CONFIG_FILE"
-            | "B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME"
-    )
 }
 
 fn quote_env_value(value: &str) -> String {
