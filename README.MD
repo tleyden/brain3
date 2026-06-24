@@ -47,14 +47,14 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 ## Quick Start
 
 > [!CAUTION]
-> Brain3 is still in alpha. Make sure you have backup copies or version control of your vault data before running this on sensitive data. Your files stay local, but the service is reachable from the internet while it's running, and any errors in the OAuth flow could potentially expose your data. See [Privacy & Security](#privacy--security) for more details. 
+> Brain3 is still in alpha. Make sure you have backup copies or version control of your vault data before running this on sensitive data. If you enable remote MCP the service will be reachable from the internet while it's running, and any errors in the OAuth flow could potentially expose your data. See [Privacy & Security](#privacy--security) for more details. 
 
 ### Install Prerequisites
 
 #### <img height="16" src="docs/logos/apple.svg" alt="macOS"> macOS
 
 - Container runtime: `brew install container && brew services start container`
-- Cloudflare Tunnel: `brew install cloudflared`
+- Cloudflare Tunnel (optional, for remote MCP): `brew install cloudflared`
 
 macOS container is recommended, but you can also use [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
 
@@ -191,7 +191,7 @@ Connects your vault directly to your AI via MCP, works with your existing Claude
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Works with subscription billing, not just API keys | Requires publicly accessible network endpoint via Cloudflare tunnel |
+| Works with subscription billing, not just API keys | Remote MCP requires a publicly accessible network endpoint (e.g. Cloudflare tunnel); local MCP (e.g. Claude Code) works without a tunnel |
 | AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
 | Will immediately work when real-time voice conversation is enabled for MCP | For certain tasks, an additional local agent might be required, increasing latency further |
 | No need to leave the app context you're already in | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
@@ -255,15 +255,12 @@ brain3.yourdomain.com {
 
 ### Remote MCP & Cloudflare Tunnels
 
-Brain3 is a **remote MCP server that runs on your own machine**. 
+Brain3 runs an MCP server on your own machine. It supports two access modes:
 
-Major AI apps like Claude and ChatGPT currently require remote MCP connectors to be publicly accessible on the internet via TLS + OAuth2.1/PKCE in order to be configured via their UI and accessible across all of their supported apps (web, mobile, desktop).
+- **Local MCP** — local clients like Claude Code connect directly on a localhost port using a static bearer token. No tunnel, no OAuth required.
+- **Remote MCP** — major AI apps like Claude and ChatGPT require remote MCP connectors to be publicly accessible on the internet via TLS + OAuth2.1/PKCE in order to be configured via their UI and accessible across all supported apps (web, mobile, desktop). A Cloudflare tunnel gives Brain3 a reachable TLS endpoint, and OAuth2.1/PKCE is used for auth, with a locally configured username and password.
 
-While there are ways to use purely local MCP, Brain3 is designed to be used as a remote MCP so that it can be easily accessible from AI.  This unfortunately makes the system quite complex and risky when trying to run it locally, but I don't know of any other way to do it.  Please file an issue if you know otherwise.    
-
-That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable TLS endpoint, and OAuth2.1/PKCE is used for auth, with a locally configured username and password.  
-
-- ⚠️ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
+- ⚠️ If you use remote MCP via a Cloudflare tunnel, you should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
 - Tunnels are cleaned up automatically when Brain3 stops.
 
 ### Security Audit and Known Security Risks
@@ -279,7 +276,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 ### Network layer security + Auth
 
 - The container uses **internal-only networking by default** and cannot make outbound connections to the public internet.  
-- Your machine doesn't need a "hole poked in the firewall" since it uses **outbound-only Cloudflare tunnel connections**.  However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security. 
+- When using a Cloudflare tunnel for remote MCP, your machine doesn't need a "hole poked in the firewall" since it uses **outbound-only Cloudflare tunnel connections**. However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security.
 - It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is **no open registration** as both Dynamic Client Registration (DCR) and Client ID Meta Documents (CIMD) are disabled.
 - OAuth is built on `oxide-auth` rather than a fully hand-rolled implementation.
 - Client secret is required at token exchange (`client_secret_post`).
