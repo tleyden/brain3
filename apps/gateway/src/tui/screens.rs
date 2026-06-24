@@ -428,8 +428,8 @@ fn access_mode_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Remote MCP only",
         &[
             "Your Brain3 gateway will be reachable via the public internet.",
-            "Enables commercial AI mobile and web apps with GUI configuration.",
-            "Higher security risk.",
+            "Enables cloud AI apps (Claude, ChatGPT, and others) with GUI",
+            "configuration. Higher security risk.",
         ],
     ));
     lines.push(blank_line());
@@ -437,7 +437,10 @@ fn access_mode_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         state,
         AccessModeField::Both,
         "Both local and remote MCP",
-        &["Combines the tradeoffs of both options."],
+        &[
+            "Local apps connect directly; cloud apps connect via the internet.",
+            "Higher security risk than local only.",
+        ],
     ));
 
     lines
