@@ -1,13 +1,6 @@
 use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
 
 pub fn log_startup_config(config: &GatewayConfig) {
-    let upstream_secret_dir = config
-        .mcp_reverse_proxy
-        .upstream_secret_file
-        .parent()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<unknown>".into());
-
     tracing::info!(
         port = config.port,
         token_db_path = %config.token_db_path.display(),
@@ -19,10 +12,14 @@ pub fn log_startup_config(config: &GatewayConfig) {
         password = mask(&config.oauth.password),
         pkce_required = config.oauth.pkce_required,
         upstream_url = %config.mcp_reverse_proxy.mcp_upstream_url,
-        upstream_secret_file = %config.mcp_reverse_proxy.upstream_secret_file.display(),
-        upstream_secret_dir = %upstream_secret_dir,
+        upstream_secret_configured = !config.mcp_reverse_proxy.upstream_secret.is_empty(),
         expected_host = ?config.hostname_validation.expected_host,
         enforce_hostname = config.hostname_validation.enforce,
+        local_mcp = ?config.local_mcp.as_ref().map(|cfg| format!(
+            "port={} token_configured={}",
+            cfg.port,
+            !cfg.bearer_token.is_empty()
+        )),
         container = ?config.container.as_ref().map(|c| format!(
             "{:?} image={} name={} vault={} port={}",
             c.runtime, c.image, c.container_name, c.vault_path.display(), c.host_port

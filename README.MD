@@ -47,14 +47,14 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 ## Quick Start
 
 > [!CAUTION]
-> Brain3 is still in alpha. Make sure you have backup copies or version control of your vault data before running this on sensitive data. Your files stay local, but the service is reachable from the internet while it's running, and any errors in the OAuth flow could potentially expose your data. See [Privacy & Security](#privacy--security) for more details. 
+> Brain3 is still in alpha. Make sure you have backup copies or version control of your vault data before running this on sensitive data. If you enable remote MCP the service will be reachable from the internet while it's running, and any errors in the OAuth flow could potentially expose your data. See [Privacy & Security](#privacy--security) for more details. 
 
 ### Install Prerequisites
 
 #### <img height="16" src="docs/logos/apple.svg" alt="macOS"> macOS
 
 - Container runtime: `brew install container && brew services start container`
-- Cloudflare Tunnel: `brew install cloudflared`
+- Cloudflare Tunnel (optional, for remote MCP): `brew install cloudflared`
 
 macOS container is recommended, but you can also use [Docker Desktop for Mac](https://docs.docker.com/desktop/setup/install/mac-install/)
 
@@ -93,7 +93,7 @@ sudo apt-get install cloudflared
 ### Install and run Brain3
 
 ```bash
-curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.2.1/install.sh | sh
+curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.2.2/install.sh | sh
 ```
 
 Now run it:
@@ -110,12 +110,21 @@ It should launch an interactive setup wizard.
 
 ### Configure your AI 
 
+#### Compatibility Matrix
+
+| AI Client | Local MCP | Remote MCP |
+|-----------|-----------|------------|
+| <img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT | ✅ (untested) | ✅ |
+| <img height="16" src="docs/logos/claude.svg" alt="Claude"> Claude | ✅ (untested) | ✅ |
+| <img height="16" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai | ✅ | ❌ |
+| <img height="16" src="docs/logos/goose_logo_light.png" alt="Goose"> Goose | ✅ | ❌ |
+
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
 
-Brain3 displays all the connection information you need.  Follow the instructions below for your AI client.
+Brain3 displays all the connection information you need. Follow the instructions below for your AI client.
 
 <details>
-<summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT</strong></summary>
+<summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT — GUI + Remote MCP</strong></summary>
 
 <a href="docs/screenshots/ChatGPTConfig.png">
   <img height="400" alt="ChatGPT connector configuration screenshot" src="docs/screenshots/ChatGPTConfig.png" />
@@ -132,7 +141,39 @@ Once authorization succeeds, Brain3 will be available as a connector in ChatGPT.
 </details>
 
 <details>
-<summary><img height="16" src="docs/logos/claude.svg" alt="Claude"> <strong>Claude</strong></summary>
+<summary><img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> <strong>ChatGPT — JSON Config + Local MCP (untested)</strong></summary>
+
+The ChatGPT macOS desktop client does not expose a configuration file on disk; you must link your local server using the internal **Developer Mode** layout.
+
+#### Step 1: Enable Developer Mode
+
+1. Launch ChatGPT Desktop on your Mac.
+2. Open Settings by pressing **Cmd + ,** (or click your profile icon → **Settings**).
+3. Select **Apps & Connectors** (or **Connected Apps**) from the sidebar.
+4. Scroll to the bottom, expand **Advanced Settings**, and toggle **Developer Mode** to **ON**.
+
+#### Step 2: Add Custom App Connector
+
+1. Click the **Create** button next to your Developer Mode options.
+2. Fill out the registration form:
+   - **Name:** `Brain3`
+   - **Connector URL:** Copy the **Local MCP Endpoint** from Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`)
+
+#### Step 3: Configure Direct Bearer Authentication
+
+1. Find the **Authentication** dropdown in the app configuration pane.
+2. Select **Custom Headers** (or **API Key / Token** depending on your build version).
+3. Provide the key-value pair:
+   - **Key:** `Authorization`
+   - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
+4. Click **Save** or **Create**.
+
+> **macOS Sandboxing Note:** If ChatGPT blocks the connection because it is unencrypted `http://` rather than `https://`, you may need to expose the local port via a loopback TLS tunnel such as `ngrok http 8422` and use the resulting `https://` URL instead.
+
+</details>
+
+<details>
+<summary><img height="16" src="docs/logos/claude.svg" alt="Claude"> <strong>Claude — GUI + Remote MCP</strong></summary>
 
 <a href="docs/screenshots/ClaudeConfig.png">
   <img height="400" alt="Claude connector configuration screenshot" src="docs/screenshots/ClaudeConfig.png" />
@@ -145,6 +186,67 @@ Once authorization succeeds, Brain3 will be available as a connector in ChatGPT.
 5. When shown a login screen, enter the **Username** and **Password** displayed in Brain3's MCP Config Settings screen.
 
 Once authorization succeeds, Brain3 will appear as a custom connector in Claude.
+
+</details>
+
+<details>
+<summary><img height="16" src="docs/logos/claude.svg" alt="Claude"> <strong>Claude — JSON Config + Local MCP (untested)</strong></summary>
+
+Claude Desktop on macOS natively supports the `streamable-http` / `http` protocol directly in its configuration file.
+
+#### Step 1: Open the Config File
+
+```bash
+open ~/Library/Application\ Support/Claude/claude_desktop_config.json
+```
+
+Or open it in your editor of choice.
+
+#### Step 2: Add the Brain3 MCP Server
+
+Paste or merge the following block into your JSON. Copy the endpoint URL and token from Brain3's MCP Config Settings screen:
+
+```json
+{
+  "mcpServers": {
+    "brain3": {
+      "type": "http",
+      "url": "http://localhost:8422/mcp",
+      "headers": {
+        "Authorization": "Bearer <token from Brain3's MCP Config Settings screen>"
+      }
+    }
+  }
+}
+```
+
+#### Step 3: Restart Claude Desktop
+
+Quit Claude Desktop entirely (**Cmd + Q**), then relaunch it. Check the plug icon in the lower-right corner of the chat input to confirm Brain3 tools appear.
+
+</details>
+
+<details>
+<summary><img height="16" src="docs/logos/goose_logo_light.png" alt="Goose"> <strong>Goose — GUI + Local MCP</strong></summary>
+
+1. Open Goose settings and navigate to **MCP → Add Server**.
+2. Set the **URL** to the **Local MCP Endpoint** shown in Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`).
+3. Under **Request Headers**, add:
+   - **Header name:** `Authorization`
+   - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
+4. Save and restart Goose if prompted.
+
+</details>
+
+<details>
+<summary><img height="16" src="docs/logos/jan.png" alt="Jan.ai"> <strong>Jan.ai — GUI + Local MCP</strong></summary>
+
+1. Open Jan, go to **Settings → MCP Servers → Add Server**.
+2. Set the **URL** to the **Local MCP Endpoint** shown in Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`).
+3. Add a request header:
+   - **Header name:** `Authorization`
+   - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
+4. Save and reload Jan if prompted.
 
 </details>
 
@@ -191,7 +293,7 @@ Connects your vault directly to your AI via MCP, works with your existing Claude
 
 | ✅ Pros | 🔴 Cons |
 |------|------|
-| Works with subscription billing, not just API keys | Requires publicly accessible network endpoint via Cloudflare tunnel |
+| Works with subscription billing, not just API keys | Remote MCP requires a publicly accessible network endpoint (e.g. Cloudflare tunnel); local MCP (e.g. Claude Code) works without a tunnel |
 | AI-native voice transcription (STT) and playback (TTS) | Potentially higher round-trip latency, especially with multiple tool calls |
 | Will immediately work when real-time voice conversation is enabled for MCP | For certain tasks, an additional local agent might be required, increasing latency further |
 | No need to leave the app context you're already in | More limited by the MCP interface, whereas OpenClaw and Hermes can basically do anything you imagine |
@@ -255,15 +357,12 @@ brain3.yourdomain.com {
 
 ### Remote MCP & Cloudflare Tunnels
 
-Brain3 is a **remote MCP server that runs on your own machine**. 
+Brain3 runs an MCP server on your own machine. It supports two access modes:
 
-Major AI apps like Claude and ChatGPT currently require remote MCP connectors to be publicly accessible on the internet via TLS + OAuth2.1/PKCE in order to be configured via their UI and accessible across all of their supported apps (web, mobile, desktop).
+- **Local MCP** — local clients like Claude Code connect directly on a localhost port using a static bearer token. No tunnel, no OAuth required.
+- **Remote MCP** — major AI apps like Claude and ChatGPT require remote MCP connectors to be publicly accessible on the internet via TLS + OAuth2.1/PKCE in order to be configured via their UI and accessible across all supported apps (web, mobile, desktop). A Cloudflare tunnel gives Brain3 a reachable TLS endpoint, and OAuth2.1/PKCE is used for auth, with a locally configured username and password.
 
-While there are ways to use purely local MCP, Brain3 is designed to be used as a remote MCP so that it can be easily accessible from AI.  This unfortunately makes the system quite complex and risky when trying to run it locally, but I don't know of any other way to do it.  Please file an issue if you know otherwise.    
-
-That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a reachable TLS endpoint, and OAuth2.1/PKCE is used for auth, with a locally configured username and password.  
-
-- ⚠️ You should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
+- ⚠️ If you use remote MCP via a Cloudflare tunnel, you should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
 - Tunnels are cleaned up automatically when Brain3 stops.
 
 ### Security Audit and Known Security Risks
@@ -279,7 +378,7 @@ That constraint drives most of the stack: the Cloudflare tunnel gives Brain3 a r
 ### Network layer security + Auth
 
 - The container uses **internal-only networking by default** and cannot make outbound connections to the public internet.  
-- Your machine doesn't need a "hole poked in the firewall" since it uses **outbound-only Cloudflare tunnel connections**.  However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security. 
+- When using a Cloudflare tunnel for remote MCP, your machine doesn't need a "hole poked in the firewall" since it uses **outbound-only Cloudflare tunnel connections**. However, that public Cloudflare endpoint does become an entry point to your system, and is fully dependent on the OAuth layer for security.
 - It uses OAuth2.1 with PKCE to authenticate with the AI provider; only the client you configure can get tokens, there is **no open registration** as both Dynamic Client Registration (DCR) and Client ID Meta Documents (CIMD) are disabled.
 - OAuth is built on `oxide-auth` rather than a fully hand-rolled implementation.
 - Client secret is required at token exchange (`client_secret_post`).

@@ -44,3 +44,7 @@ Based on the provided sources, here is a summary of best practices for Rust deve
 ## Updating new release
 
 - Do not update anything in docs folder.  Just update these files: Cargo.toml, main.rs, release.rs, screens.rs, pyproject.toml, test_server_startup.py, uv.lock, first_run_setup.rs, and importantly README.md
+
+## Planning
+
+- When creating plans, write the plan into docs/superpowers/plans as markdown files.

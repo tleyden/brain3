@@ -1,3 +1,4 @@
+#![deny(warnings)]
 mod logging;
 mod release;
 mod server;

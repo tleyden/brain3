@@ -4,11 +4,14 @@ use std::path::{Path, PathBuf};
 use brain3_core::application::first_run_setup::CURRENT_RELEASE;
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
-    ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig, GatewayConfig,
-    HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig, TunnelConfig,
+    AccessMode, ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig,
+    GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig, OAuthConfig,
+    TunnelConfig,
 };
+use rand::RngExt;
 const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
+const DEFAULT_LOCAL_MCP_PORT: u16 = 8422;
 use brain3_core::ports::config::ConfigPort;
 
 pub struct EnvFileConfigAdapter {
@@ -82,17 +85,15 @@ impl ConfigPort for EnvFileConfigAdapter {
                 "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS must be greater than 0".into(),
             ));
         }
+        let access_mode = load_access_mode()?;
 
         let expected_host = resolve_expected_host()?;
         let enforce_hostname = env_bool("B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", true);
         let token_db_path = resolve_token_db_path(self.token_db_home_override.as_deref())?;
 
-        let upstream_secret_file = PathBuf::from(env_var_or(
-            "B3_OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE",
-            "/tmp/brain3-mcp-upstream-secret",
-        ));
-
-        let container = load_container_startup_config(&upstream_secret_file)?;
+        let upstream_secret = load_upstream_shared_secret();
+        let local_mcp = load_local_mcp_config()?;
+        let container = load_container_startup_config(&upstream_secret)?;
 
         let default_upstream_url = match &container {
             Some(c) => format!("http://127.0.0.1:{}", c.host_port),
@@ -130,12 +131,14 @@ impl ConfigPort for EnvFileConfigAdapter {
                     "B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL",
                     &default_upstream_url,
                 ),
-                upstream_secret_file,
+                upstream_secret,
             },
             hostname_validation: HostnameValidationConfig {
                 expected_host,
                 enforce: enforce_hostname,
             },
+            access_mode,
+            local_mcp,
             container,
             tunnel,
         })
@@ -144,6 +147,17 @@ impl ConfigPort for EnvFileConfigAdapter {
 
 fn env_var_or(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.to_string())
+}
+
+fn load_access_mode() -> Result<AccessMode, ConfigError> {
+    match env::var("B3_ACCESS_MODE").as_deref() {
+        Ok("local") => Ok(AccessMode::Local),
+        Ok("remote") => Ok(AccessMode::Remote),
+        Ok("both") | Err(_) => Ok(AccessMode::Both),
+        Ok(other) => Err(ConfigError::Invalid(format!(
+            "B3_ACCESS_MODE must be 'local', 'remote', or 'both'; got '{other}'"
+        ))),
+    }
 }
 
 fn resolve_token_db_path(token_db_home_override: Option<&Path>) -> Result<PathBuf, ConfigError> {
@@ -243,8 +257,57 @@ fn direct_public_origin_hostname() -> Option<String> {
     }
 }
 
+fn load_local_mcp_config() -> Result<Option<LocalMcpConfig>, ConfigError> {
+    let port = env::var("B3_LOCAL_MCP_PORT")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            value
+                .parse::<u16>()
+                .map_err(|e| ConfigError::Invalid(format!("B3_LOCAL_MCP_PORT: {e}")))
+        })
+        .transpose()?;
+
+    let bearer_token = env::var("LOCAL_GATEWAY_MCP_BEARER_TOKEN")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    match (port, bearer_token) {
+        (None, None) => Ok(None),
+        (Some(port), Some(bearer_token)) => Ok(Some(LocalMcpConfig { port, bearer_token })),
+        (None, Some(bearer_token)) => Ok(Some(LocalMcpConfig {
+            port: DEFAULT_LOCAL_MCP_PORT,
+            bearer_token,
+        })),
+        (Some(_), None) => Err(ConfigError::Missing(
+            "LOCAL_GATEWAY_MCP_BEARER_TOKEN is required when B3_LOCAL_MCP_PORT is set".into(),
+        )),
+    }
+}
+
+fn load_upstream_shared_secret() -> String {
+    if let Some(secret) = env::var("B3_UPSTREAM_SHARED_SECRET")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        tracing::info!("using pinned MCP upstream shared secret from B3_UPSTREAM_SHARED_SECRET");
+        return secret;
+    }
+
+    let secret: String = rand::rng()
+        .sample_iter(rand::distr::Alphanumeric)
+        .take(64)
+        .map(char::from)
+        .collect();
+    tracing::info!("generated in-memory MCP upstream shared secret for this gateway process");
+    secret
+}
+
 fn load_container_startup_config(
-    upstream_secret_file: &PathBuf,
+    upstream_secret: &str,
 ) -> Result<Option<ContainerStartupConfig>, ConfigError> {
     let runtime_str = env_var_or("B3_CONTAINER_RUNTIME", "");
     let runtime_str = runtime_str.trim();
@@ -342,11 +405,6 @@ fn load_container_startup_config(
         None
     };
 
-    let upstream_secret_dir = upstream_secret_file
-        .parent()
-        .unwrap_or(std::path::Path::new("/tmp"))
-        .to_path_buf();
-
     let dev_mount_source = env::var("B3_DEV_CONTAINER_MOUNT_SOURCE")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -363,7 +421,7 @@ fn load_container_startup_config(
         container_name,
         network_name,
         vault_path: PathBuf::from(vault_path_str),
-        upstream_secret_dir,
+        upstream_secret: upstream_secret.to_string(),
         host_port,
         container_port,
         isolation_strategy,
@@ -425,16 +483,18 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
         }));
     }
 
-    // Default: quick tunnel unless explicitly disabled.
-    let quick_default = env_bool("B3_CF_QUICK_TUNNEL", true);
+    // Default: tunneling is disabled unless explicitly enabled.
+    let quick_default = env_bool("B3_CF_QUICK_TUNNEL", false);
     if quick_default {
-        tracing::info!("B3_CF_QUICK_TUNNEL defaulting to true — using Cloudflare quick tunnel");
+        tracing::info!("B3_CF_QUICK_TUNNEL=true — using Cloudflare quick tunnel");
         return Ok(Some(TunnelConfig::CloudflareQuick {
             local_port: gateway_port,
         }));
     }
 
-    tracing::info!("B3_CF_QUICK_TUNNEL=false and no named tunnel vars set — no tunnel configured");
+    tracing::info!(
+        "B3_CF_QUICK_TUNNEL is not enabled and no named tunnel vars set — no tunnel configured"
+    );
     Ok(None)
 }
 
@@ -485,6 +545,7 @@ mod tests {
         "B3_USERNAME",
         "B3_PASSWORD",
         "B3_TOKEN_DB_PATH",
+        "B3_UPSTREAM_SHARED_SECRET",
         "B3_CONTAINER_RUNTIME",
         "B3_VAULT_PATH",
         "B3_CONTAINER_IMAGE_REPO",
@@ -493,6 +554,9 @@ mod tests {
         "B3_CONTAINER_NETWORK_ISOLATION_STRATEGY",
         "B3_CONTAINER_HOST_PORT",
         "B3_CONTAINER_MCP_PORT",
+        "B3_ACCESS_MODE",
+        "B3_LOCAL_MCP_PORT",
+        "LOCAL_GATEWAY_MCP_BEARER_TOKEN",
         "B3_CF_QUICK_TUNNEL",
     ];
 
@@ -729,6 +793,150 @@ mod tests {
                 }
                 other => panic!("expected invalid config error, got {other:?}"),
             }
+        });
+    }
+
+    #[test]
+    fn load_defaults_quick_tunnel_to_disabled() {
+        with_clean_config_env(|| {
+            let token_db = env::temp_dir().join("brain3-config-test-no-tunnel.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n",
+                token_db.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+
+            assert_eq!(config.access_mode, AccessMode::Both);
+            assert!(config.tunnel.is_none(), "quick tunnel should be opt-in");
+        });
+    }
+
+    #[test]
+    fn load_parses_explicit_local_access_mode() {
+        with_clean_config_env(|| {
+            let token_db = env::temp_dir().join("brain3-config-test-local-access-mode.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_ACCESS_MODE=local\n\
+                 B3_LOCAL_MCP_PORT=8422\n\
+                 LOCAL_GATEWAY_MCP_BEARER_TOKEN=local-token\n",
+                token_db.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+
+            assert_eq!(config.access_mode, AccessMode::Local);
+        });
+    }
+
+    #[test]
+    fn load_rejects_invalid_access_mode() {
+        with_clean_config_env(|| {
+            let token_db = env::temp_dir().join("brain3-config-test-invalid-access-mode.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_ACCESS_MODE=invalid\n",
+                token_db.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let err = adapter.load().expect_err("expected invalid access mode");
+
+            match err {
+                ConfigError::Invalid(message) => {
+                    assert!(message.contains("B3_ACCESS_MODE"));
+                    assert!(message.contains("local"));
+                    assert!(message.contains("remote"));
+                    assert!(message.contains("both"));
+                }
+                other => panic!("expected invalid config error, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn load_enables_local_mcp_on_default_port_when_only_token_is_set() {
+        with_clean_config_env(|| {
+            let token_db = env::temp_dir().join("brain3-config-test-local-mcp-default-port.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 LOCAL_GATEWAY_MCP_BEARER_TOKEN=local-token\n",
+                token_db.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+
+            let local = config
+                .local_mcp
+                .expect("local MCP config should be enabled");
+            assert_eq!(local.port, 8422);
+            assert_eq!(local.bearer_token, "local-token");
+        });
+    }
+
+    #[test]
+    fn load_rejects_local_mcp_port_without_token() {
+        with_clean_config_env(|| {
+            let token_db = env::temp_dir().join("brain3-config-test-local-mcp-missing-token.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_LOCAL_MCP_PORT=8422\n",
+                token_db.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let err = adapter
+                .load()
+                .expect_err("expected missing token to be rejected");
+
+            match err {
+                ConfigError::Missing(message) => {
+                    assert!(message.contains("LOCAL_GATEWAY_MCP_BEARER_TOKEN"));
+                }
+                other => panic!("expected missing config error, got {other:?}"),
+            }
+        });
+    }
+
+    #[test]
+    fn load_uses_host_upstream_secret_when_set() {
+        with_clean_config_env(|| {
+            let token_db = env::temp_dir().join("brain3-config-test-host-upstream-secret.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_UPSTREAM_SHARED_SECRET=pinned-upstream-secret\n",
+                token_db.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+
+            assert_eq!(
+                config.mcp_reverse_proxy.upstream_secret,
+                "pinned-upstream-secret"
+            );
         });
     }
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use brain3_core::domain::errors::SetupError;
 use brain3_core::domain::model::ContainerRuntime;
-use brain3_core::domain::setup::{SetupDraftConfig, SetupPaths, TunnelModeDraft};
+use brain3_core::domain::setup::{AccessModeDraft, SetupDraftConfig, SetupPaths, TunnelModeDraft};
 
 use super::env_template::embedded_env_template;
 
@@ -50,6 +50,15 @@ fn build_overrides(
         "B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS",
         draft.refresh_token_lifetime_secs.to_string(),
     );
+    values.insert(
+        "B3_ACCESS_MODE",
+        match draft.access_mode {
+            AccessModeDraft::LocalOnly => "local",
+            AccessModeDraft::RemoteOnly => "remote",
+            AccessModeDraft::Both => "both",
+        }
+        .to_string(),
+    );
     values.insert("B3_USERNAME", draft.username.clone());
     values.insert("B3_PASSWORD", draft.password.clone());
     values.insert(
@@ -57,7 +66,10 @@ fn build_overrides(
         container_runtime_value(draft.container_runtime).to_string(),
     );
     values.insert("B3_VAULT_PATH", draft.vault_path.display().to_string());
-    values.insert("B3_CONTAINER_IMAGE_REPO", draft.container_image_repo.clone());
+    values.insert(
+        "B3_CONTAINER_IMAGE_REPO",
+        draft.container_image_repo.clone(),
+    );
     values.insert("B3_CONTAINER_IMAGE_TAG", String::new());
     values.insert(
         "B3_CONTAINER_HOST_PORT",
@@ -71,6 +83,22 @@ fn build_overrides(
         "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION",
         draft.container_network_isolated.to_string(),
     );
+    values.insert(
+        "B3_LOCAL_MCP_PORT",
+        if draft.local_mcp_enabled {
+            draft.local_mcp_port.to_string()
+        } else {
+            String::new()
+        },
+    );
+    values.insert(
+        "LOCAL_GATEWAY_MCP_BEARER_TOKEN",
+        if draft.local_mcp_enabled {
+            draft.local_mcp_bearer_token.clone()
+        } else {
+            String::new()
+        },
+    );
     values.insert("B3_OAUTH2_PKCE_REQUIRED", draft.pkce_required.to_string());
     values.insert(
         "B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK",
@@ -78,6 +106,13 @@ fn build_overrides(
     );
 
     match &draft.tunnel_mode {
+        TunnelModeDraft::Disabled => {
+            values.insert("B3_CF_QUICK_TUNNEL", "false".into());
+            values.insert("B3_CF_TUNNEL_NAME", String::new());
+            values.insert("B3_CF_DOMAIN", String::new());
+            values.insert("B3_CF_TUNNEL_CONFIG_FILE", String::new());
+            values.insert("B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME", String::new());
+        }
         TunnelModeDraft::CloudflareQuick => {
             values.insert("B3_CF_QUICK_TUNNEL", "true".into());
             values.insert("B3_CF_TUNNEL_NAME", String::new());

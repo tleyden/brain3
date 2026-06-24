@@ -3,15 +3,15 @@ use std::sync::Arc;
 use crate::domain::errors::SetupError;
 use crate::domain::model::ContainerRuntime;
 use crate::domain::setup::{
-    ConnectionCard, FinalizeSetupRequest, SetupDefaults, SetupDraftConfig, SetupPreparation,
-    SetupSummary, TunnelModeDraft, DEFAULT_ACCESS_TOKEN_LIFETIME_SECS, DEFAULT_CLIENT_ID,
-    DEFAULT_CONTAINER_HOST_PORT, DEFAULT_CONTAINER_MCP_PORT, DEFAULT_GATEWAY_PORT,
-    DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES,
-    DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME,
+    AccessModeDraft, ConnectionCard, FinalizeSetupRequest, SetupDefaults, SetupDraftConfig,
+    SetupPreparation, SetupSummary, TunnelModeDraft, DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
+    DEFAULT_CLIENT_ID, DEFAULT_CONTAINER_HOST_PORT, DEFAULT_CONTAINER_MCP_PORT,
+    DEFAULT_GATEWAY_PORT, DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES,
+    DEFAULT_LOCAL_MCP_PORT, DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME,
 };
 use crate::ports::setup_system::SetupSystemPort;
 
-pub const CURRENT_RELEASE: &str = "v0.2.1";
+pub const CURRENT_RELEASE: &str = "v0.2.2";
 
 pub struct FirstRunSetupUseCase {
     port: Arc<dyn SetupSystemPort>,
@@ -37,6 +37,7 @@ impl FirstRunSetupUseCase {
             refresh_token_lifetime_secs: DEFAULT_REFRESH_TOKEN_LIFETIME_SECS,
             username: DEFAULT_USERNAME.to_string(),
             password: String::new(),
+            access_mode: AccessModeDraft::Both,
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
             container_runtime: default_container_runtime(self.port.operating_system()),
             vault_path: std::path::PathBuf::new(),
@@ -44,6 +45,11 @@ impl FirstRunSetupUseCase {
             container_host_port: DEFAULT_CONTAINER_HOST_PORT,
             container_mcp_port: DEFAULT_CONTAINER_MCP_PORT,
             container_network_isolated: true,
+            local_mcp_enabled: true,
+            local_mcp_port: DEFAULT_LOCAL_MCP_PORT,
+            local_mcp_bearer_token: self
+                .port
+                .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?,
             pkce_required: true,
             enforce_hostname_check: true,
             direct_public_origin_hostname: None,
@@ -103,6 +109,14 @@ impl FirstRunSetupUseCase {
             validate_nonempty("password", &draft.password)?;
         }
 
+        apply_access_mode_policy(&mut draft);
+
+        if draft.local_mcp_enabled && draft.local_mcp_bearer_token.trim().is_empty() {
+            draft.local_mcp_bearer_token = self
+                .port
+                .generate_secret_hex(DEFAULT_GENERATED_SECRET_BYTES)?;
+        }
+
         let env_contents = self.port.render_env_file(&draft, &paths)?;
         self.port.ensure_app_home_dirs(&paths).await?;
         self.port
@@ -158,6 +172,27 @@ fn validate_positive_u64(label: &str, value: u64) -> Result<(), SetupError> {
     Ok(())
 }
 
+fn apply_access_mode_policy(draft: &mut SetupDraftConfig) {
+    match draft.access_mode {
+        AccessModeDraft::LocalOnly => {
+            draft.local_mcp_enabled = true;
+            draft.tunnel_mode = TunnelModeDraft::Disabled;
+        }
+        AccessModeDraft::RemoteOnly => {
+            draft.local_mcp_enabled = false;
+            if matches!(draft.tunnel_mode, TunnelModeDraft::Disabled) {
+                draft.tunnel_mode = TunnelModeDraft::CloudflareQuick;
+            }
+        }
+        AccessModeDraft::Both => {
+            draft.local_mcp_enabled = true;
+            if matches!(draft.tunnel_mode, TunnelModeDraft::Disabled) {
+                draft.tunnel_mode = TunnelModeDraft::CloudflareQuick;
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -166,9 +201,9 @@ mod tests {
     use crate::domain::errors::SetupError;
     use crate::domain::model::ContainerRuntime;
     use crate::domain::setup::{
-        ConnectionCard, DependencyAvailability, DependencyStatus, FinalizeSetupRequest,
-        PackageManager, SetupDefaults, SetupDraftConfig, SetupOperatingSystem, SetupPaths,
-        TunnelModeDraft,
+        AccessModeDraft, ConnectionCard, DependencyAvailability, DependencyStatus,
+        FinalizeSetupRequest, PackageManager, SetupDefaults, SetupDraftConfig,
+        SetupOperatingSystem, SetupPaths, TunnelModeDraft,
     };
     use crate::ports::setup_system::SetupSystemPort;
 
@@ -295,6 +330,7 @@ mod tests {
             refresh_token_lifetime_secs: DEFAULT_REFRESH_TOKEN_LIFETIME_SECS,
             username: "admin".into(),
             password: String::new(),
+            access_mode: AccessModeDraft::Both,
             tunnel_mode: TunnelModeDraft::CloudflareQuick,
             container_runtime: ContainerRuntime::MacOSContainer,
             vault_path,
@@ -302,6 +338,9 @@ mod tests {
             container_host_port: 8420,
             container_mcp_port: 8420,
             container_network_isolated: false,
+            local_mcp_enabled: true,
+            local_mcp_port: DEFAULT_LOCAL_MCP_PORT,
+            local_mcp_bearer_token: "local-secret".into(),
             pkce_required: true,
             enforce_hostname_check: true,
             direct_public_origin_hostname: None,
@@ -369,7 +408,10 @@ mod tests {
         let preparation = use_case.prepare().await.expect("prepare should succeed");
 
         assert_eq!(preparation.draft.client_id, "brain3-oauth2-client");
+        assert_eq!(preparation.draft.access_mode, AccessModeDraft::Both);
         assert!(preparation.draft.container_network_isolated);
+        assert!(preparation.draft.local_mcp_enabled);
+        assert!(!preparation.draft.local_mcp_bearer_token.is_empty());
     }
 
     #[tokio::test]
@@ -450,5 +492,60 @@ mod tests {
                 log_file: PathBuf::from("/tmp/brain3.log"),
             }
         );
+    }
+
+    #[tokio::test]
+    async fn finalize_local_only_forces_local_mcp_and_disables_tunnel() {
+        let vault_path = PathBuf::from("/Users/test/vault");
+        let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
+        let use_case = FirstRunSetupUseCase::new(port.clone(), sample_defaults());
+
+        let summary = use_case
+            .finalize(FinalizeSetupRequest {
+                draft: SetupDraftConfig {
+                    access_mode: AccessModeDraft::LocalOnly,
+                    local_mcp_enabled: false,
+                    local_mcp_bearer_token: String::new(),
+                    tunnel_mode: TunnelModeDraft::CloudflareQuick,
+                    password: "chosen-password".into(),
+                    client_secret: "chosen-secret".into(),
+                    ..sample_draft(vault_path)
+                },
+                generate_password: false,
+            })
+            .await
+            .expect("finalize should succeed");
+
+        assert_eq!(summary.draft.access_mode, AccessModeDraft::LocalOnly);
+        assert!(summary.draft.local_mcp_enabled);
+        assert_eq!(summary.draft.tunnel_mode, TunnelModeDraft::Disabled);
+        assert_eq!(summary.draft.local_mcp_bearer_token, "generated-secret-1");
+        assert_eq!(port.snapshot().generated_secret_count, 1);
+    }
+
+    #[tokio::test]
+    async fn finalize_remote_only_disables_local_mcp_and_restores_quick_tunnel() {
+        let vault_path = PathBuf::from("/Users/test/vault");
+        let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
+        let use_case = FirstRunSetupUseCase::new(port, sample_defaults());
+
+        let summary = use_case
+            .finalize(FinalizeSetupRequest {
+                draft: SetupDraftConfig {
+                    access_mode: AccessModeDraft::RemoteOnly,
+                    local_mcp_enabled: true,
+                    tunnel_mode: TunnelModeDraft::Disabled,
+                    password: "chosen-password".into(),
+                    client_secret: "chosen-secret".into(),
+                    ..sample_draft(vault_path)
+                },
+                generate_password: false,
+            })
+            .await
+            .expect("finalize should succeed");
+
+        assert_eq!(summary.draft.access_mode, AccessModeDraft::RemoteOnly);
+        assert!(!summary.draft.local_mcp_enabled);
+        assert_eq!(summary.draft.tunnel_mode, TunnelModeDraft::CloudflareQuick);
     }
 }

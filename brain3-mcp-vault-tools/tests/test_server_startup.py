@@ -57,6 +57,19 @@ class ServerStartupTests(unittest.TestCase):
 
         self.assertEqual(server.mcp.settings.port, 8420)
 
+    def test_upstream_shared_secret_can_be_provided_directly_via_env_var(self):
+        with patch.dict(
+            os.environ,
+            {
+                "B3_VAULT_PATH": str(TEST_VAULT),
+                "B3_UPSTREAM_SHARED_SECRET": "shared-secret",
+            },
+            clear=False,
+        ):
+            server = import_server_module()
+
+        self.assertEqual(server._load_upstream_shared_secret(), "shared-secret")
+
     def test_main_runs_streamable_http_without_port_keyword(self):
         with patch.dict(
             os.environ,
@@ -71,7 +84,7 @@ class ServerStartupTests(unittest.TestCase):
         with (
             patch.object(server, "_start_process_resources"),
             patch.object(server, "_stop_process_resources"),
-            patch.object(server, "_package_version", return_value="0.2.1"),
+            patch.object(server, "_package_version", return_value="0.2.2"),
             patch.object(server.logger, "info") as info_mock,
             patch.object(server.mcp, "run") as run_mock,
         ):
@@ -79,7 +92,7 @@ class ServerStartupTests(unittest.TestCase):
 
         run_mock.assert_called_once_with(transport="streamable-http")
         info_mock.assert_any_call(
-            "Starting authless MCP server version=%s on port %s", "0.2.1", ANY
+            "Starting authless MCP server version=%s on port %s", "0.2.2", ANY
         )
 
 

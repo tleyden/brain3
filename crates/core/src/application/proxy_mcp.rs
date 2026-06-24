@@ -74,6 +74,34 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             self.hostname_validation.enforce,
         )?;
 
+        self.forward_request(request_host, method, path, query, headers, body)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn handle_unvalidated(
+        &self,
+        request_host: &str,
+        method: &str,
+        path: &str,
+        query: Option<&str>,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    ) -> Result<McpProxyResponse, ProxyError> {
+        self.forward_request(request_host, method, path, query, headers, body)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn forward_request(
+        &self,
+        request_host: &str,
+        method: &str,
+        path: &str,
+        query: Option<&str>,
+        headers: Vec<(String, String)>,
+        body: Vec<u8>,
+    ) -> Result<McpProxyResponse, ProxyError> {
         let upstream_url = self.build_upstream_url(path, query);
         let original_host_header = header_value(&headers, "host").map(str::to_owned);
         let original_x_forwarded_host =

@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use brain3_core::domain::model::ContainerRuntime;
 use brain3_core::domain::setup::{
-    DependencyAvailability, PackageManager, SetupStep, TunnelModeDraft,
+    AccessModeDraft, DependencyAvailability, PackageManager, SetupStep, TunnelModeDraft,
 };
 use brain3_platform::runtime::StartupStatus;
 
@@ -14,8 +14,8 @@ use crate::server::GatewayServerStatus;
 
 use super::runtime_logs::RuntimeLogsState;
 use super::state::{
-    install_action_label, AuthField, DependencyDoctorFocus, FirstRunTuiState, PortsField,
-    RuntimeView, SummaryField,
+    install_action_label, AccessModeField, AuthField, DependencyDoctorFocus, FirstRunTuiState,
+    PortsField, RuntimeView, SummaryField,
 };
 
 pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
@@ -68,6 +68,7 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Welcome",
         "Dependencies",
         "Vault",
+        "Access",
         "Auth",
         "Ports",
         "Start",
@@ -80,7 +81,7 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             stage_spans.push(Span::styled(" ─ ", muted_style()));
         }
 
-        let stage_span = if index < current_index {
+        let stage_span = if wizard_stage_complete(state, index, current_index) {
             Span::styled(format!("✓ {stage}"), success_style())
         } else if index == current_index {
             Span::styled(
@@ -116,6 +117,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::Welcome => "Welcome",
         SetupStep::DependencyDoctor => "Dependency Doctor",
         SetupStep::VaultPath => "Vault Path",
+        SetupStep::AccessMode => "Local/Remote Access",
         SetupStep::Auth => "Auth Setup",
         SetupStep::PortsAndSettings => "Ports & Settings",
         SetupStep::Summary => "Summary",
@@ -138,6 +140,7 @@ fn progress_caption(step: SetupStep) -> &'static str {
         SetupStep::Welcome => "Start with the defaults Brain3 prepared for this machine.",
         SetupStep::DependencyDoctor => "Confirm local dependencies and install anything missing.",
         SetupStep::VaultPath => "Choose the Obsidian-compatible vault Brain3 should expose.",
+        SetupStep::AccessMode => "Choose how AI clients will connect to Brain3.",
         SetupStep::Auth => "Review the generated login defaults and customize them if needed.",
         SetupStep::PortsAndSettings => {
             "Override ports and security settings if the defaults conflict."
@@ -154,10 +157,11 @@ fn wizard_stage_index(step: SetupStep) -> usize {
         SetupStep::Welcome => 0,
         SetupStep::DependencyDoctor => 1,
         SetupStep::VaultPath => 2,
-        SetupStep::Auth => 3,
-        SetupStep::PortsAndSettings => 4,
-        SetupStep::Summary => 5,
-        SetupStep::ConnectionCard | SetupStep::RuntimeStatus => 6,
+        SetupStep::AccessMode => 3,
+        SetupStep::Auth => 4,
+        SetupStep::PortsAndSettings => 5,
+        SetupStep::Summary => 6,
+        SetupStep::ConnectionCard | SetupStep::RuntimeStatus => 7,
     }
 }
 
@@ -166,6 +170,7 @@ fn body_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::Welcome => welcome_lines(state),
         SetupStep::DependencyDoctor => dependency_lines(state),
         SetupStep::VaultPath => vault_lines(state),
+        SetupStep::AccessMode => access_mode_lines(state),
         SetupStep::Auth => auth_lines(state),
         SetupStep::PortsAndSettings => ports_and_settings_lines(state),
         SetupStep::Summary => summary_lines(state),
@@ -400,6 +405,47 @@ fn auth_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     ]
 }
 
+fn access_mode_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        muted_line("Choose how Brain3 will be accessed by AI clients."),
+        blank_line(),
+    ];
+
+    lines.extend(access_mode_option_lines(
+        state,
+        AccessModeField::LocalOnly,
+        "Local MCP only",
+        &[
+            "Most secure, but only works from apps running locally on this",
+            "machine. May require directly editing a JSON config file for",
+            "some apps.",
+        ],
+    ));
+    lines.push(blank_line());
+    lines.extend(access_mode_option_lines(
+        state,
+        AccessModeField::RemoteOnly,
+        "Remote MCP only",
+        &[
+            "Your Brain3 gateway will be reachable via the public internet.",
+            "Enables cloud AI apps (Claude, ChatGPT, and others) with GUI",
+            "configuration. Higher security risk.",
+        ],
+    ));
+    lines.push(blank_line());
+    lines.extend(access_mode_option_lines(
+        state,
+        AccessModeField::Both,
+        "Both local and remote MCP",
+        &[
+            "Local apps connect directly; cloud apps connect via the internet.",
+            "Higher security risk than local only.",
+        ],
+    ));
+
+    lines
+}
+
 fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     let mut lines = vec![
         muted_line("Override ports if the defaults conflict with other services on this machine."),
@@ -408,11 +454,34 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         blank_line(),
     ];
 
-    lines.push(field_line(
-        "Gateway port",
-        &state.gateway_port_input,
-        state.ports_focus == PortsField::GatewayPort,
-    ));
+    match state.draft.access_mode {
+        AccessModeDraft::LocalOnly => {
+            lines.push(field_line(
+                "Local MCP port",
+                &state.local_mcp_port_input,
+                state.ports_focus == PortsField::LocalMcpPort,
+            ));
+        }
+        AccessModeDraft::RemoteOnly => {
+            lines.push(field_line(
+                "Gateway port",
+                &state.gateway_port_input,
+                state.ports_focus == PortsField::GatewayPort,
+            ));
+        }
+        AccessModeDraft::Both => {
+            lines.push(field_line(
+                "Gateway port",
+                &state.gateway_port_input,
+                state.ports_focus == PortsField::GatewayPort,
+            ));
+            lines.push(field_line(
+                "Local MCP port",
+                &state.local_mcp_port_input,
+                state.ports_focus == PortsField::LocalMcpPort,
+            ));
+        }
+    }
     lines.push(field_line(
         "Container host port",
         &state.container_host_port_input,
@@ -423,52 +492,56 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         &state.container_mcp_port_input,
         state.ports_focus == PortsField::ContainerMcpPort,
     ));
-    lines.push(field_line(
-        "Access token lifetime (secs)",
-        &state.access_token_lifetime_secs_input,
-        state.ports_focus == PortsField::AccessTokenLifetimeSecs,
-    ));
-    lines.push(field_line(
-        "Refresh token lifetime (secs)",
-        &state.refresh_token_lifetime_secs_input,
-        state.ports_focus == PortsField::RefreshTokenLifetimeSecs,
-    ));
 
-    lines.push(blank_line());
+    if state.draft.access_mode != AccessModeDraft::LocalOnly {
+        lines.push(field_line(
+            "Access token lifetime (secs)",
+            &state.access_token_lifetime_secs_input,
+            state.ports_focus == PortsField::AccessTokenLifetimeSecs,
+        ));
+        lines.push(field_line(
+            "Refresh token lifetime (secs)",
+            &state.refresh_token_lifetime_secs_input,
+            state.ports_focus == PortsField::RefreshTokenLifetimeSecs,
+        ));
 
-    let pkce_active = state.ports_focus == PortsField::PkceRequired;
-    let pkce_badge = if state.draft.pkce_required {
-        badge_span("Enabled", Color::Green)
-    } else {
-        badge_span("Disabled", Color::Yellow)
-    };
-    let pkce_pointer = if pkce_active {
-        Span::styled("▶ ", accent_style())
-    } else {
-        Span::styled("  ", muted_style())
-    };
-    lines.push(Line::from(vec![
-        pkce_pointer,
-        Span::styled(
-            "PKCE required: ".to_string(),
-            if pkce_active {
-                accent_style()
-            } else {
-                label_style()
-            },
-        ),
-        pkce_badge,
-    ]));
+        lines.push(blank_line());
 
-    lines.push(field_badge_line(
-        "Enforce hostname check",
-        if state.draft.enforce_hostname_check {
+        let pkce_active = state.ports_focus == PortsField::PkceRequired;
+        let pkce_badge = if state.draft.pkce_required {
             badge_span("Enabled", Color::Green)
         } else {
             badge_span("Disabled", Color::Yellow)
-        },
-        state.ports_focus == PortsField::EnforceHostnameCheck,
-    ));
+        };
+        let pkce_pointer = if pkce_active {
+            Span::styled("▶ ", accent_style())
+        } else {
+            Span::styled("  ", muted_style())
+        };
+        lines.push(Line::from(vec![
+            pkce_pointer,
+            Span::styled(
+                "PKCE required: ".to_string(),
+                if pkce_active {
+                    accent_style()
+                } else {
+                    label_style()
+                },
+            ),
+            pkce_badge,
+        ]));
+
+        lines.push(field_badge_line(
+            "Enforce hostname check",
+            if state.draft.enforce_hostname_check {
+                badge_span("Enabled", Color::Green)
+            } else {
+                badge_span("Disabled", Color::Yellow)
+            },
+            state.ports_focus == PortsField::EnforceHostnameCheck,
+        ));
+    }
+
     lines.push(field_badge_line(
         "Internal-only container networking",
         if state.draft.container_network_isolated {
@@ -498,41 +571,69 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             &state.vault_path_input,
             f == SummaryField::VaultPath,
         ),
-        field_line(
-            "Username",
-            &state.username_input,
-            f == SummaryField::Username,
-        ),
-        field_line(
-            "Client ID",
-            &state.client_id_input,
-            f == SummaryField::ClientId,
-        ),
-        field_badge_line(
-            "Password mode",
-            if state.generate_password {
-                badge_span("Auto-generated", Color::Green)
-            } else {
-                badge_span("Custom password", Color::Cyan)
-            },
-            f == SummaryField::PasswordMode,
-        ),
     ];
 
-    if !state.generate_password {
-        lines.push(field_line(
-            "Password",
-            &state.password_input,
-            f == SummaryField::PasswordValue,
-        ));
+    if state.draft.access_mode != AccessModeDraft::LocalOnly {
+        lines.extend([
+            field_line(
+                "Username",
+                &state.username_input,
+                f == SummaryField::Username,
+            ),
+            field_line(
+                "Client ID",
+                &state.client_id_input,
+                f == SummaryField::ClientId,
+            ),
+            field_badge_line(
+                "Password mode",
+                if state.generate_password {
+                    badge_span("Auto-generated", Color::Green)
+                } else {
+                    badge_span("Custom password", Color::Cyan)
+                },
+                f == SummaryField::PasswordMode,
+            ),
+        ]);
+
+        if !state.generate_password {
+            lines.push(field_line(
+                "Password",
+                &state.password_input,
+                f == SummaryField::PasswordValue,
+            ));
+        }
     }
 
+    match state.draft.access_mode {
+        AccessModeDraft::LocalOnly => {
+            lines.push(field_line(
+                "Local MCP port",
+                &state.local_mcp_port_input,
+                f == SummaryField::LocalMcpPort,
+            ));
+        }
+        AccessModeDraft::RemoteOnly => {
+            lines.push(field_line(
+                "Gateway port",
+                &state.gateway_port_input,
+                f == SummaryField::GatewayPort,
+            ));
+        }
+        AccessModeDraft::Both => {
+            lines.push(field_line(
+                "Gateway port",
+                &state.gateway_port_input,
+                f == SummaryField::GatewayPort,
+            ));
+            lines.push(field_line(
+                "Local MCP port",
+                &state.local_mcp_port_input,
+                f == SummaryField::LocalMcpPort,
+            ));
+        }
+    }
     lines.extend([
-        field_line(
-            "Gateway port",
-            &state.gateway_port_input,
-            f == SummaryField::GatewayPort,
-        ),
         field_line(
             "Container host port",
             &state.container_host_port_input,
@@ -543,34 +644,43 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             &state.container_mcp_port_input,
             f == SummaryField::ContainerMcpPort,
         ),
-        field_line(
-            "Access token lifetime (secs)",
-            &state.access_token_lifetime_secs_input,
-            f == SummaryField::AccessTokenLifetimeSecs,
-        ),
-        field_line(
-            "Refresh token lifetime (secs)",
-            &state.refresh_token_lifetime_secs_input,
-            f == SummaryField::RefreshTokenLifetimeSecs,
-        ),
-        field_badge_line(
-            "PKCE required",
-            if state.draft.pkce_required {
-                badge_span("Enabled", Color::Green)
-            } else {
-                badge_span("Disabled", Color::Yellow)
-            },
-            f == SummaryField::PkceRequired,
-        ),
-        field_badge_line(
-            "Hostname check",
-            if state.draft.enforce_hostname_check {
-                badge_span("Enabled", Color::Green)
-            } else {
-                badge_span("Disabled", Color::Yellow)
-            },
-            f == SummaryField::HostnameCheck,
-        ),
+    ]);
+
+    if state.draft.access_mode != AccessModeDraft::LocalOnly {
+        lines.extend([
+            field_line(
+                "Access token lifetime (secs)",
+                &state.access_token_lifetime_secs_input,
+                f == SummaryField::AccessTokenLifetimeSecs,
+            ),
+            field_line(
+                "Refresh token lifetime (secs)",
+                &state.refresh_token_lifetime_secs_input,
+                f == SummaryField::RefreshTokenLifetimeSecs,
+            ),
+            field_badge_line(
+                "PKCE required",
+                if state.draft.pkce_required {
+                    badge_span("Enabled", Color::Green)
+                } else {
+                    badge_span("Disabled", Color::Yellow)
+                },
+                f == SummaryField::PkceRequired,
+            ),
+            field_badge_line(
+                "Hostname check",
+                if state.draft.enforce_hostname_check {
+                    badge_span("Enabled", Color::Green)
+                } else {
+                    badge_span("Disabled", Color::Yellow)
+                },
+                f == SummaryField::HostnameCheck,
+            ),
+        ]);
+    }
+
+    lines.extend([
+        key_value_line("Access mode", format_access_mode(&state.draft.access_mode)),
         field_badge_line(
             "Internal-only container networking",
             if state.draft.container_network_isolated {
@@ -584,8 +694,20 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Container runtime",
             format_container_runtime(state.draft.container_runtime),
         ),
-        key_value_line("Container image repo", state.draft.container_image_repo.clone()),
-        key_value_line("Tunnel", format_tunnel_mode(&state.draft.tunnel_mode)),
+        key_value_line(
+            "Container image repo",
+            state.draft.container_image_repo.clone(),
+        ),
+    ]);
+
+    if state.draft.access_mode != AccessModeDraft::LocalOnly {
+        lines.push(key_value_line(
+            "Tunnel",
+            format_tunnel_mode(&state.draft.tunnel_mode),
+        ));
+    }
+
+    lines.extend([
         key_value_line(
             "Env file",
             state.preparation.paths.env_file.display().to_string(),
@@ -604,7 +726,7 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ))];
     };
 
-    vec![
+    let mut lines = vec![
         Line::from(Span::styled(
             "Brain3 is configured and running.",
             success_style(),
@@ -615,12 +737,32 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             connection_heading_style(),
         )),
         blank_line(),
+        Line::from(Span::styled("Remote MCP", section_heading_style())),
         key_value_line("Server URL", format!("{}/mcp", card.server_url)),
         key_value_line("Client ID", card.client_id.clone()),
         key_value_line("Client Secret", card.client_secret.clone()),
         key_value_line("Username", card.username.clone()),
         key_value_line("Password", card.password.clone()),
-    ]
+    ];
+
+    if let Some(local_mcp) = state
+        .runtime
+        .as_ref()
+        .and_then(|r| r.config.local_mcp.as_ref())
+    {
+        lines.push(blank_line());
+        lines.push(Line::from(Span::styled(
+            "Local MCP",
+            section_heading_style(),
+        )));
+        lines.push(key_value_line(
+            "Endpoint",
+            format!("http://localhost:{}/mcp", local_mcp.port),
+        ));
+        lines.push(key_value_line("Token", local_mcp.bearer_token.clone()));
+    }
+
+    lines
 }
 
 fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
@@ -675,10 +817,6 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             ));
         }
 
-        if let Some(url) = &runtime.public_url {
-            lines.push(key_value_line("Public URL", url.clone()));
-        }
-
         if let Some(summary) = runtime.container_status.failure_summary() {
             lines.push(key_value_line("Container error", summary.to_string()));
         }
@@ -687,6 +825,35 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             lines.push(key_value_line("Tunnel error", summary.to_string()));
         }
 
+        if let Some(url) = &runtime.public_url {
+            lines.push(blank_line());
+            lines.push(Line::from(Span::styled(
+                "Remote MCP",
+                section_heading_style(),
+            )));
+            lines.push(key_value_line(
+                "Remote MCP Server URL",
+                format!("{}/mcp", url),
+            ));
+        }
+
+        if let Some(local_mcp) = runtime.config.local_mcp.as_ref() {
+            lines.push(blank_line());
+            lines.push(Line::from(Span::styled(
+                "Local MCP",
+                section_heading_style(),
+            )));
+            lines.push(key_value_line(
+                "Endpoint",
+                format!("http://localhost:{}/mcp", local_mcp.port),
+            ));
+        }
+
+        lines.push(blank_line());
+        lines.push(Line::from(Span::styled(
+            "File Paths",
+            section_heading_style(),
+        )));
         lines.push(key_value_line(
             "Config",
             runtime.launch_plan.env_file.display().to_string(),
@@ -781,6 +948,15 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             ("[Esc]", "Back"),
             ("[q]", "Quit"),
         ]),
+        SetupStep::AccessMode => vec![
+            primary_action_line("Lock the access mode before continuing."),
+            hint_line(vec![
+                ("[↑↓]", "Move"),
+                ("[Space]", "Select"),
+                ("[Esc]", "Back"),
+                ("[Enter]", "Continue"),
+            ]),
+        ],
         SetupStep::Auth => continue_action_lines(vec![
             ("[Tab/Up/Down]", "Move"),
             ("[Type]", "Edit field"),
@@ -1057,6 +1233,7 @@ fn format_container_runtime(runtime: ContainerRuntime) -> &'static str {
 
 fn format_tunnel_mode(mode: &TunnelModeDraft) -> String {
     match mode {
+        TunnelModeDraft::Disabled => "Disabled".into(),
         TunnelModeDraft::CloudflareQuick => "Cloudflare quick tunnel".into(),
         TunnelModeDraft::CloudflareNamed {
             tunnel_name,
@@ -1065,6 +1242,68 @@ fn format_tunnel_mode(mode: &TunnelModeDraft) -> String {
         TunnelModeDraft::DirectPublicOrigin { hostname } => {
             format!("Direct public origin ({hostname})")
         }
+    }
+}
+
+fn format_access_mode(mode: &AccessModeDraft) -> &'static str {
+    match mode {
+        AccessModeDraft::LocalOnly => "Local MCP only",
+        AccessModeDraft::RemoteOnly => "Remote MCP only",
+        AccessModeDraft::Both => "Both local and remote MCP",
+    }
+}
+
+fn wizard_stage_complete(state: &FirstRunTuiState, index: usize, current_index: usize) -> bool {
+    if index >= current_index {
+        return false;
+    }
+
+    let auth_stage_index = wizard_stage_index(SetupStep::Auth);
+    if state.draft.access_mode == AccessModeDraft::LocalOnly
+        && index == auth_stage_index
+        && current_index > auth_stage_index
+    {
+        return false;
+    }
+
+    true
+}
+
+fn access_mode_option_lines(
+    state: &FirstRunTuiState,
+    focus: AccessModeField,
+    label: &str,
+    description: &[&str],
+) -> Vec<Line<'static>> {
+    let is_focused = state.access_mode_focus == focus;
+    let is_selected = state.draft.access_mode == format_access_mode_focus(focus);
+    let pointer = if is_focused {
+        Span::styled("▶ ", accent_style())
+    } else {
+        Span::styled("  ", muted_style())
+    };
+    let selection = if is_selected { "●" } else { " " };
+
+    let mut lines = vec![Line::from(vec![
+        pointer,
+        Span::styled(format!("[ {selection} ] {label}"), value_style()),
+    ])];
+
+    for line in description {
+        lines.push(Line::from(vec![
+            Span::styled("        ", muted_style()),
+            Span::styled((*line).to_string(), muted_style()),
+        ]));
+    }
+
+    lines
+}
+
+fn format_access_mode_focus(focus: AccessModeField) -> AccessModeDraft {
+    match focus {
+        AccessModeField::LocalOnly => AccessModeDraft::LocalOnly,
+        AccessModeField::RemoteOnly => AccessModeDraft::RemoteOnly,
+        AccessModeField::Both => AccessModeDraft::Both,
     }
 }
 
@@ -1151,8 +1390,8 @@ mod tests {
 
     use brain3_core::application::first_run_setup::CURRENT_RELEASE;
     use brain3_core::domain::model::{
-        ContainerRuntime, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
-        OAuthConfig,
+        AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig,
+        MCPReverseProxyConfig, OAuthConfig,
     };
     use brain3_core::domain::setup::{
         DependencyAvailability, DependencyStatus, PackageManager, RuntimeLaunchPlan,
@@ -1192,6 +1431,73 @@ mod tests {
         assert!(text.contains("Gateway:  Not started"));
     }
 
+    #[test]
+    fn local_only_summary_hides_auth_and_remote_only_fields() {
+        let mut state = sample_state();
+        state.draft.access_mode = AccessModeDraft::LocalOnly;
+        state.generate_password = false;
+        let text = summary_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Vault path"));
+        assert!(text.contains("Local MCP port"));
+        assert!(text.contains("Container host port"));
+        assert!(text.contains("Container MCP port"));
+        assert!(text.contains("Access mode"));
+        assert!(text.contains("Internal-only container networking"));
+        assert!(text.contains("Container runtime"));
+        assert!(text.contains("Container image repo"));
+        assert!(text.contains("Env file"));
+        assert!(text.contains("Logs"));
+
+        assert!(!text.contains("Username"));
+        assert!(!text.contains("Client ID"));
+        assert!(!text.contains("Password mode"));
+        assert!(!text.contains("Password"));
+        assert!(!text.contains("Gateway port"));
+        assert!(!text.contains("Access token lifetime (secs)"));
+        assert!(!text.contains("Refresh token lifetime (secs)"));
+        assert!(!text.contains("PKCE required"));
+        assert!(!text.contains("Hostname check"));
+        assert!(!text.contains("Tunnel"));
+    }
+
+    #[test]
+    fn local_only_ports_screen_shows_local_mcp_port_instead_of_gateway_port() {
+        let mut state = sample_state();
+        state.draft.access_mode = AccessModeDraft::LocalOnly;
+
+        let text = ports_and_settings_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Local MCP port"));
+        assert!(!text.contains("Gateway port"));
+        assert!(!text.contains("Access token lifetime (secs)"));
+        assert!(!text.contains("Refresh token lifetime (secs)"));
+        assert!(!text.contains("PKCE required"));
+        assert!(!text.contains("Enforce hostname check"));
+    }
+
+    #[test]
+    fn both_mode_summary_shows_gateway_and_local_mcp_ports() {
+        let state = sample_state();
+
+        let text = summary_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Gateway port"));
+        assert!(text.contains("Local MCP port"));
+    }
+
     fn sample_state() -> FirstRunTuiState {
         FirstRunTuiState::new(
             "127.0.0.1".into(),
@@ -1210,6 +1516,7 @@ mod tests {
                     refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
                     username: "admin".into(),
                     password: String::new(),
+                    access_mode: AccessModeDraft::Both,
                     tunnel_mode: TunnelModeDraft::CloudflareQuick,
                     container_runtime: ContainerRuntime::MacOSContainer,
                     vault_path: PathBuf::from("/tmp/vault"),
@@ -1217,6 +1524,9 @@ mod tests {
                     container_host_port: 8420,
                     container_mcp_port: 8420,
                     container_network_isolated: true,
+                    local_mcp_enabled: true,
+                    local_mcp_port: 8422,
+                    local_mcp_bearer_token: "local-token".into(),
                     pkce_required: true,
                     enforce_hostname_check: true,
                     direct_public_origin_hostname: None,
@@ -1253,12 +1563,17 @@ mod tests {
                 },
                 mcp_reverse_proxy: MCPReverseProxyConfig {
                     mcp_upstream_url: "http://127.0.0.1:8420".into(),
-                    upstream_secret_file: PathBuf::from("/tmp/upstream_secret"),
+                    upstream_secret: "secret".into(),
                 },
                 hostname_validation: HostnameValidationConfig {
                     expected_host: None,
                     enforce: true,
                 },
+                access_mode: AccessMode::Both,
+                local_mcp: Some(brain3_core::domain::model::LocalMcpConfig {
+                    port: 8422,
+                    bearer_token: "local-token".into(),
+                }),
                 container: Some(brain3_core::domain::model::ContainerStartupConfig {
                     runtime: ContainerRuntime::Docker,
                     image: format!(
@@ -1266,7 +1581,7 @@ mod tests {
                     ),
                     container_name: "brain3-mcp-vault-tools".into(),
                     vault_path: PathBuf::from("/missing/vault"),
-                    upstream_secret_dir: PathBuf::from("/tmp"),
+                    upstream_secret: "secret".into(),
                     host_port: 8420,
                     container_port: 8420,
                     isolation_strategy: Some(brain3_core::domain::model::ContainerNetworkIsolationStrategy::DiscoverContainerIp),

@@ -13,12 +13,13 @@ use tokio::sync::Mutex;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::errors::ProxyError;
 use brain3_core::domain::model::{
-    GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig, OAuthConfig,
+    AccessMode, GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig,
+    OAuthConfig,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
 
 use brain3_platform::http::registrar::GatewayRegistrar;
-use brain3_platform::http::router::build_router;
+use brain3_platform::http::router::{build_local_router, build_router};
 use brain3_platform::http::state::AppState;
 use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
@@ -102,6 +103,7 @@ struct TestHarness {
     hostname_validation: HostnameValidationConfig,
     mcp_upstream_url: String,
     mcp_upstream_secret: String,
+    local_mcp: Option<LocalMcpConfig>,
 }
 
 impl Default for TestHarness {
@@ -122,6 +124,7 @@ impl Default for TestHarness {
             },
             mcp_upstream_url: "http://127.0.0.1:8420".into(),
             mcp_upstream_secret: "shared-secret".into(),
+            local_mcp: None,
         }
     }
 }
@@ -148,10 +151,11 @@ impl TestHarness {
         ));
 
         let proxy = Arc::new(proxy);
+        let mcp_upstream_secret = self.mcp_upstream_secret.clone();
         let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
             proxy,
             self.mcp_upstream_url,
-            self.mcp_upstream_secret,
+            mcp_upstream_secret.clone(),
             self.hostname_validation.clone(),
         ));
 
@@ -162,9 +166,11 @@ impl TestHarness {
             oauth: self.oauth,
             mcp_reverse_proxy: MCPReverseProxyConfig {
                 mcp_upstream_url: "http://127.0.0.1:8420".into(),
-                upstream_secret_file: "/dev/null".into(),
+                upstream_secret: mcp_upstream_secret,
             },
             hostname_validation: self.hostname_validation,
+            access_mode: AccessMode::Both,
+            local_mcp: self.local_mcp,
             container: None,
             tunnel: None,
         });
@@ -180,6 +186,65 @@ impl TestHarness {
 
         BuiltServer {
             server: TestServer::new(build_router(state)),
+            issuer,
+        }
+    }
+
+    fn build_local_server(self, proxy: MockMcpProxy) -> BuiltServer {
+        let registrar = Arc::new(GatewayRegistrar::new(
+            &self.oauth.client_id,
+            self.oauth.client_secret.as_bytes().to_vec(),
+        ));
+
+        let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
+        let issuer = Arc::new(Mutex::new(
+            SqliteTokenStore::in_memory(
+                self.oauth.access_token_lifetime_secs,
+                self.oauth.refresh_token_lifetime_secs,
+            )
+            .expect("in-memory issuer should initialize"),
+        ));
+
+        let proxy = Arc::new(proxy);
+        let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
+            proxy,
+            self.mcp_upstream_url,
+            self.mcp_upstream_secret.clone(),
+            self.hostname_validation.clone(),
+        ));
+
+        let local_mcp = self
+            .local_mcp
+            .clone()
+            .expect("local MCP config should be present for local server tests");
+
+        let config = Arc::new(GatewayConfig {
+            port: 0,
+            host: "127.0.0.1".into(),
+            token_db_path: "/tmp/brain3-test-brain3.db".into(),
+            oauth: self.oauth,
+            mcp_reverse_proxy: MCPReverseProxyConfig {
+                mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                upstream_secret: self.mcp_upstream_secret,
+            },
+            hostname_validation: self.hostname_validation,
+            access_mode: AccessMode::Both,
+            local_mcp: Some(local_mcp),
+            container: None,
+            tunnel: None,
+        });
+
+        let state = AppState {
+            registrar,
+            authorizer,
+            issuer: Arc::clone(&issuer),
+            proxy_mcp,
+            config,
+            rate_limiter: Arc::new(brain3_platform::http::rate_limit::OAuthRateLimiter::new()),
+        };
+
+        BuiltServer {
+            server: TestServer::new(build_local_router(state)),
             issuer,
         }
     }
@@ -296,6 +361,26 @@ async fn call_mcp(server: &TestServer, token: &str) -> axum_test::TestResponse {
             "params": {}
         }))
         .await
+}
+
+async fn call_local_mcp(server: &TestServer, token: Option<&str>) -> axum_test::TestResponse {
+    let mut request =
+        server
+            .post("/mcp")
+            .content_type("application/json")
+            .json(&serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+                "params": {}
+            }));
+    if let Some(token) = token {
+        request = request.add_header(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+        );
+    }
+    request.await
 }
 
 #[tokio::test]
@@ -480,12 +565,8 @@ async fn refresh_token_exchange_succeeds() {
         .expect("refresh_token should be present")
         .to_string();
 
-    let refresh_response = exchange_refresh_token(
-        &built.server,
-        &original_refresh_token,
-        Some(CLIENT_SECRET),
-    )
-    .await;
+    let refresh_response =
+        exchange_refresh_token(&built.server, &original_refresh_token, Some(CLIENT_SECRET)).await;
     refresh_response.assert_status_ok();
 
     let refreshed_body: Value = refresh_response.json();
@@ -501,12 +582,8 @@ async fn refresh_token_exchange_succeeds() {
     assert_ne!(refreshed_access_token, original_access_token);
     assert_ne!(refreshed_refresh_token, original_refresh_token);
 
-    let replay_response = exchange_refresh_token(
-        &built.server,
-        &original_refresh_token,
-        Some(CLIENT_SECRET),
-    )
-    .await;
+    let replay_response =
+        exchange_refresh_token(&built.server, &original_refresh_token, Some(CLIENT_SECRET)).await;
     assert_eq!(replay_response.status_code(), 400);
     let replay_body: Value = replay_response.json();
     assert_eq!(replay_body["error"], "invalid_grant");
@@ -567,6 +644,48 @@ async fn mcp_accepts_valid_bearer_token() {
         .headers
         .iter()
         .all(|(name, _)| name != "authorization"));
+}
+
+#[tokio::test]
+async fn local_mcp_rejects_missing_or_invalid_static_bearer_without_oauth_hint() {
+    let built = TestHarness {
+        local_mcp: Some(LocalMcpConfig {
+            port: 8422,
+            bearer_token: "local-secret".into(),
+        }),
+        ..TestHarness::default()
+    }
+    .build_local_server(MockMcpProxy::should_not_be_called());
+
+    let response = call_local_mcp(&built.server, None).await;
+    assert_eq!(response.status_code(), 401);
+    assert!(response.maybe_header("www-authenticate").is_none());
+    let body: Value = response.json();
+    assert_eq!(body["error"], "invalid_token");
+
+    let wrong = call_local_mcp(&built.server, Some("wrong-secret")).await;
+    assert_eq!(wrong.status_code(), 401);
+    assert!(wrong.maybe_header("www-authenticate").is_none());
+}
+
+#[tokio::test]
+async fn local_mcp_accepts_configured_static_bearer_token() {
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let built = TestHarness {
+        local_mcp: Some(LocalMcpConfig {
+            port: 8422,
+            bearer_token: "local-secret".into(),
+        }),
+        ..TestHarness::default()
+    }
+    .build_local_server(MockMcpProxy::capturing(Arc::clone(&captured)));
+
+    let response = call_local_mcp(&built.server, Some("local-secret")).await;
+
+    response.assert_status_ok();
+    let requests = captured.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].url, "http://127.0.0.1:8420/mcp");
 }
 
 #[tokio::test]

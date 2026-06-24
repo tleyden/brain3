@@ -16,6 +16,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import (
     VAULT_MCP_ALLOW_SELF_IP_HOSTS,
+    UPSTREAM_SHARED_SECRET,
     UPSTREAM_SHARED_SECRET_FILE,
     UPSTREAM_SHARED_SECRET_HEADER,
     VAULT_MCP_EXTRA_ALLOWED_HOSTS,
@@ -148,6 +149,19 @@ def _elide(s: str) -> str:
 
 
 def _load_upstream_shared_secret() -> str:
+    if UPSTREAM_SHARED_SECRET:
+        logger.info(
+            "Loaded upstream shared secret directly from env secret=%s",
+            _elide(UPSTREAM_SHARED_SECRET),
+        )
+        return UPSTREAM_SHARED_SECRET
+
+    if not UPSTREAM_SHARED_SECRET_FILE:
+        raise RuntimeError(
+            "MCP upstream shared secret is not configured; set "
+            "B3_UPSTREAM_SHARED_SECRET or B3_UPSTREAM_SHARED_SECRET_FILE"
+        )
+
     try:
         secret = Path(UPSTREAM_SHARED_SECRET_FILE).read_text(encoding="utf-8").strip()
     except OSError as exc:

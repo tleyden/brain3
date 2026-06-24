@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use brain3_core::domain::errors::SetupError;
 use brain3_core::domain::model::ContainerRuntime;
 use brain3_core::domain::setup::{
-    SetupDraftConfig, SetupOperatingSystem, SetupPaths, TunnelModeDraft,
+    AccessModeDraft, SetupDraftConfig, SetupOperatingSystem, SetupPaths, TunnelModeDraft,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::setup::app_home::Brain3AppHome;
@@ -37,6 +37,7 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         refresh_token_lifetime_secs: 7776000,
         username: "admin".into(),
         password: "correct horse battery staple".into(),
+        access_mode: AccessModeDraft::Both,
         tunnel_mode: TunnelModeDraft::CloudflareQuick,
         container_runtime: ContainerRuntime::MacOSContainer,
         vault_path: PathBuf::from("/Users/test/My Vault"),
@@ -44,6 +45,9 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         container_host_port: 8420,
         container_mcp_port: 8420,
         container_network_isolated: false,
+        local_mcp_enabled: true,
+        local_mcp_port: 9555,
+        local_mcp_bearer_token: "local-token".into(),
         pkce_required: true,
         enforce_hostname_check: true,
         direct_public_origin_hostname: None,
@@ -56,16 +60,57 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
     assert!(rendered.contains("B3_OAUTH2_GATEWAY_CLIENT_SECRET=\"secret-123\""));
     assert!(rendered.contains("B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS=\"1234\""));
     assert!(rendered.contains("B3_OAUTH2_REFRESH_TOKEN_LIFETIME_SECS=\"7776000\""));
+    assert!(rendered.contains("B3_ACCESS_MODE=\"both\""));
     assert!(rendered.contains("B3_USERNAME=\"admin\""));
     assert!(rendered.contains("B3_PASSWORD=\"correct horse battery staple\""));
     assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"true\""));
+    assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"9555\""));
+    assert!(rendered.contains("LOCAL_GATEWAY_MCP_BEARER_TOKEN=\"local-token\""));
     assert!(rendered.contains("B3_CONTAINER_RUNTIME=\"macos-container\""));
     assert!(rendered.contains("B3_VAULT_PATH=\"/Users/test/My Vault\""));
-    assert!(rendered
-        .contains("B3_CONTAINER_IMAGE_REPO=\"ghcr.io/tleyden/brain3-mcp-vault-tools\""));
+    assert!(rendered.contains("B3_CONTAINER_IMAGE_REPO=\"ghcr.io/tleyden/brain3-mcp-vault-tools\""));
     assert!(rendered.contains("B3_CONTAINER_IMAGE_TAG=\"\""));
     assert!(!rendered.contains("B3_CONTAINER_IMAGE="));
     assert!(rendered.contains("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=\"false\""));
+}
+
+#[test]
+fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
+    let paths = SetupPaths::new(
+        PathBuf::from("/tmp/brain3-home"),
+        PathBuf::from("/tmp/brain3-home/.env"),
+        PathBuf::from("/tmp/brain3-home/cloudflared"),
+    );
+    let draft = SetupDraftConfig {
+        gateway_port: 8421,
+        client_id: "custom-client".into(),
+        client_secret: "secret-123".into(),
+        access_token_lifetime_secs: 1234,
+        refresh_token_lifetime_secs: 7776000,
+        username: "admin".into(),
+        password: "correct horse battery staple".into(),
+        access_mode: AccessModeDraft::LocalOnly,
+        tunnel_mode: TunnelModeDraft::Disabled,
+        container_runtime: ContainerRuntime::MacOSContainer,
+        vault_path: PathBuf::from("/Users/test/My Vault"),
+        container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+        container_host_port: 8420,
+        container_mcp_port: 8420,
+        container_network_isolated: false,
+        local_mcp_enabled: true,
+        local_mcp_port: 8422,
+        local_mcp_bearer_token: "local-token".into(),
+        pkce_required: true,
+        enforce_hostname_check: true,
+        direct_public_origin_hostname: None,
+    };
+
+    let rendered = render_env_file(&draft, &paths).expect("env should render");
+
+    assert!(rendered.contains("B3_CF_QUICK_TUNNEL=\"false\""));
+    assert!(rendered.contains("B3_ACCESS_MODE=\"local\""));
+    assert!(rendered.contains("B3_LOCAL_MCP_PORT=\"8422\""));
+    assert!(rendered.contains("LOCAL_GATEWAY_MCP_BEARER_TOKEN=\"local-token\""));
 }
 
 #[tokio::test]

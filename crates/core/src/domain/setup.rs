@@ -7,6 +7,7 @@ pub const DEFAULT_CLIENT_ID: &str = "brain3-oauth2-client";
 pub const DEFAULT_USERNAME: &str = "admin";
 pub const DEFAULT_CONTAINER_HOST_PORT: u16 = 8420;
 pub const DEFAULT_CONTAINER_MCP_PORT: u16 = 8420;
+pub const DEFAULT_LOCAL_MCP_PORT: u16 = 8422;
 pub const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 pub const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 pub const DEFAULT_GENERATED_SECRET_BYTES: usize = 32;
@@ -35,7 +36,15 @@ impl SetupPaths {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AccessModeDraft {
+    LocalOnly,
+    RemoteOnly,
+    Both,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TunnelModeDraft {
+    Disabled,
     CloudflareQuick,
     CloudflareNamed { tunnel_name: String, domain: String },
     DirectPublicOrigin { hostname: String },
@@ -50,6 +59,7 @@ pub struct SetupDraftConfig {
     pub refresh_token_lifetime_secs: u64,
     pub username: String,
     pub password: String,
+    pub access_mode: AccessModeDraft,
     pub tunnel_mode: TunnelModeDraft,
     pub container_runtime: ContainerRuntime,
     pub vault_path: PathBuf,
@@ -57,6 +67,9 @@ pub struct SetupDraftConfig {
     pub container_host_port: u16,
     pub container_mcp_port: u16,
     pub container_network_isolated: bool,
+    pub local_mcp_enabled: bool,
+    pub local_mcp_port: u16,
+    pub local_mcp_bearer_token: String,
     pub pkce_required: bool,
     pub enforce_hostname_check: bool,
     pub direct_public_origin_hostname: Option<String>,
@@ -104,6 +117,7 @@ pub enum SetupStep {
     Welcome,
     DependencyDoctor,
     VaultPath,
+    AccessMode,
     Auth,
     PortsAndSettings,
     Summary,

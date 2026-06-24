@@ -5,6 +5,7 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use oxide_auth::primitives::issuer::Issuer;
 use serde_json::json;
+use subtle::ConstantTimeEq;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::validate_request::validate_host;
@@ -57,6 +58,10 @@ fn parse_bearer_token(headers: &HeaderMap) -> Result<&str, ProxyError> {
     }
 
     Ok(token)
+}
+
+fn constant_time_eq(expected: &str, provided: &str) -> bool {
+    bool::from(expected.as_bytes().ct_eq(provided.as_bytes()))
 }
 
 async fn validate_access_token<P: McpProxyPort + 'static>(
@@ -177,6 +182,97 @@ fn proxy_error_response(err: ProxyError, headers: &HeaderMap) -> Response {
     }
 }
 
+fn local_proxy_error_response(err: ProxyError) -> Response {
+    match err {
+        ProxyError::Unauthorized(desc) => (
+            StatusCode::UNAUTHORIZED,
+            Json(json!({
+                "error": "invalid_token",
+                "error_description": desc,
+            })),
+        )
+            .into_response(),
+        ProxyError::MisdirectedRequest(desc) => (
+            StatusCode::MISDIRECTED_REQUEST,
+            Json(json!({
+                "error": "misdirected_request",
+                "error_description": desc,
+            })),
+        )
+            .into_response(),
+        ProxyError::BadGateway(desc) => (
+            StatusCode::BAD_GATEWAY,
+            Json(json!({
+                "error": "bad_gateway",
+                "error_description": desc,
+            })),
+        )
+            .into_response(),
+    }
+}
+
+fn header_pairs(headers: &HeaderMap) -> Vec<(String, String)> {
+    headers
+        .iter()
+        .map(|(name, value)| {
+            (
+                name.as_str().to_string(),
+                value.to_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect()
+}
+
+fn upstream_response_to_axum_response<P: McpProxyPort + 'static>(
+    result: Result<brain3_core::ports::mcp_proxy::McpProxyResponse, ProxyError>,
+    headers: &HeaderMap,
+    oauth_error_hints: bool,
+) -> Response {
+    match result {
+        Ok(upstream_response) => {
+            let status = StatusCode::from_u16(upstream_response.status)
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+
+            let body_preview = if status.is_client_error() || status.is_server_error() {
+                String::from_utf8_lossy(
+                    &upstream_response.body[..upstream_response.body.len().min(512)],
+                )
+                .to_string()
+            } else {
+                String::new()
+            };
+
+            if status.is_success() {
+                tracing::info!(
+                    status = status.as_u16(),
+                    body_bytes = upstream_response.body.len(),
+                    "MCP upstream responded OK"
+                );
+            } else {
+                tracing::warn!(
+                    status = status.as_u16(),
+                    body_bytes = upstream_response.body.len(),
+                    body_preview = %body_preview,
+                    "MCP upstream responded with error"
+                );
+            }
+
+            let filtered_headers =
+                ProxyMcpUseCase::<P>::filter_response_headers(upstream_response.headers);
+
+            let mut response_builder = Response::builder().status(status);
+            for (name, value) in &filtered_headers {
+                response_builder = response_builder.header(name.as_str(), value.as_str());
+            }
+            response_builder
+                .body(axum::body::Body::from(upstream_response.body))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+        Err(error) if oauth_error_hints => proxy_error_response(error, headers),
+        Err(error) => local_proxy_error_response(error),
+    }
+}
+
 pub async fn protected_resource_metadata<P: McpProxyPort + 'static>(
     State(state): State<AppState<P>>,
     headers: HeaderMap,
@@ -226,70 +322,87 @@ pub async fn mcp_reverse_proxy<P: McpProxyPort + 'static>(
         return proxy_error_response(error, &headers);
     }
 
-    let header_pairs: Vec<(String, String)> = headers
-        .iter()
-        .map(|(name, value)| {
-            (
-                name.as_str().to_string(),
-                value.to_str().unwrap_or("").to_string(),
-            )
-        })
-        .collect();
+    let header_pairs = header_pairs(&headers);
 
     let path = uri.path();
     let query = uri.query();
 
-    match state
-        .proxy_mcp
-        .handle(
-            &host,
-            method.as_str(),
-            path,
-            query,
-            header_pairs,
-            body.to_vec(),
-        )
-        .await
-    {
-        Ok(upstream_response) => {
-            let status = StatusCode::from_u16(upstream_response.status)
-                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    upstream_response_to_axum_response::<P>(
+        state
+            .proxy_mcp
+            .handle(
+                &host,
+                method.as_str(),
+                path,
+                query,
+                header_pairs,
+                body.to_vec(),
+            )
+            .await,
+        &headers,
+        true,
+    )
+}
 
-            let body_preview = if status.is_client_error() || status.is_server_error() {
-                String::from_utf8_lossy(
-                    &upstream_response.body[..upstream_response.body.len().min(512)],
-                )
-                .to_string()
-            } else {
-                String::new()
-            };
+pub async fn local_mcp_proxy<P: McpProxyPort + 'static>(
+    State(state): State<AppState<P>>,
+    method: Method,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    let host = effective_host(&headers);
+    let raw_auth = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok());
+    let auth_header = raw_auth.unwrap_or("");
 
-            if status.is_success() {
-                tracing::info!(
-                    status = status.as_u16(),
-                    body_bytes = upstream_response.body.len(),
-                    "MCP upstream responded OK"
-                );
-            } else {
-                tracing::warn!(
-                    status = status.as_u16(),
-                    body_bytes = upstream_response.body.len(),
-                    body_preview = %body_preview,
-                    "MCP upstream responded with error"
-                );
-            }
+    tracing::info!(
+        method = %method,
+        path = %uri,
+        host = %host,
+        has_auth_header = raw_auth.is_some(),
+        auth_scheme = auth_header.split_once(' ').map(|(s, _)| s).unwrap_or("<none>"),
+        token_hint = %elide_secret(auth_header.split_once(' ').map(|(_, t)| t).unwrap_or("")),
+        "Local MCP request received"
+    );
 
-            let filtered_headers =
-                ProxyMcpUseCase::<P>::filter_response_headers(upstream_response.headers);
+    let token = match parse_bearer_token(&headers) {
+        Ok(token) => token,
+        Err(error) => return local_proxy_error_response(error),
+    };
 
-            let mut response_builder = Response::builder().status(status);
-            for (name, value) in &filtered_headers {
-                response_builder = response_builder.header(name.as_str(), value.as_str());
-            }
-            response_builder
-                .body(axum::body::Body::from(upstream_response.body))
-                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-        }
-        Err(e) => proxy_error_response(e, &headers),
+    let Some(local_mcp) = state.config.local_mcp.as_ref() else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+
+    if !constant_time_eq(&local_mcp.bearer_token, token) {
+        tracing::warn!(
+            received_token_hint = %elide_secret(token),
+            "Local MCP proxy rejected: static bearer token mismatch"
+        );
+        return local_proxy_error_response(ProxyError::Unauthorized(
+            "Missing or invalid bearer token".into(),
+        ));
     }
+
+    let header_pairs = header_pairs(&headers);
+    let path = uri.path();
+    let query = uri.query();
+
+    upstream_response_to_axum_response::<P>(
+        state
+            .proxy_mcp
+            .handle_unvalidated(
+                &host,
+                method.as_str(),
+                path,
+                query,
+                header_pairs,
+                body.to_vec(),
+            )
+            .await,
+        &headers,
+        false,
+    )
 }

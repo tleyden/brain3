@@ -17,7 +17,8 @@ VAULT_MCP_LOG_LEVEL = os.environ.get("B3_VAULT_MCP_LOG_LEVEL", "INFO").strip().u
 _extra = os.environ.get("B3_VAULT_MCP_ALLOWED_HOSTS", "")
 VAULT_MCP_EXTRA_ALLOWED_HOSTS: list[str] = [host.strip() for host in _extra.split(",") if host.strip()]
 VAULT_MCP_ALLOW_SELF_IP_HOSTS = _env_bool("B3_VAULT_MCP_ALLOW_SELF_IP_HOSTS", False)
-UPSTREAM_SHARED_SECRET_FILE = os.environ.get("B3_UPSTREAM_SHARED_SECRET_FILE", "/run/brain3/upstream_secret")
+UPSTREAM_SHARED_SECRET = os.environ.get("B3_UPSTREAM_SHARED_SECRET", "").strip()
+UPSTREAM_SHARED_SECRET_FILE = os.environ.get("B3_UPSTREAM_SHARED_SECRET_FILE", "").strip()
 UPSTREAM_SHARED_SECRET_HEADER = "x-brain3-upstream-secret"
 
 MAX_CONTENT_SIZE = 1_000_000
