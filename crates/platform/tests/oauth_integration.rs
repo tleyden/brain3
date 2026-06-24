@@ -122,7 +122,7 @@ impl Default for TestHarness {
                 expected_host: None,
                 enforce: true,
             },
-            mcp_upstream_url: "http://127.0.0.1:8420".into(),
+            mcp_upstream_url: "http://127.0.0.1:2765".into(),
             mcp_upstream_secret: "shared-secret".into(),
             local_mcp: None,
         }
@@ -165,7 +165,7 @@ impl TestHarness {
             token_db_path: "/tmp/brain3-test-brain3.db".into(),
             oauth: self.oauth,
             mcp_reverse_proxy: MCPReverseProxyConfig {
-                mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                mcp_upstream_url: "http://127.0.0.1:2765".into(),
                 upstream_secret: mcp_upstream_secret,
             },
             hostname_validation: self.hostname_validation,
@@ -224,7 +224,7 @@ impl TestHarness {
             token_db_path: "/tmp/brain3-test-brain3.db".into(),
             oauth: self.oauth,
             mcp_reverse_proxy: MCPReverseProxyConfig {
-                mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                mcp_upstream_url: "http://127.0.0.1:2765".into(),
                 upstream_secret: self.mcp_upstream_secret,
             },
             hostname_validation: self.hostname_validation,
@@ -639,7 +639,7 @@ async fn mcp_accepts_valid_bearer_token() {
 
     let requests = captured.lock().unwrap();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].url, "http://127.0.0.1:8420/mcp");
+    assert_eq!(requests[0].url, "http://127.0.0.1:2765/mcp");
     assert!(requests[0]
         .headers
         .iter()
@@ -650,7 +650,7 @@ async fn mcp_accepts_valid_bearer_token() {
 async fn local_mcp_rejects_missing_or_invalid_static_bearer_without_oauth_hint() {
     let built = TestHarness {
         local_mcp: Some(LocalMcpConfig {
-            port: 8422,
+            port: 2764,
             bearer_token: "local-secret".into(),
         }),
         ..TestHarness::default()
@@ -673,7 +673,7 @@ async fn local_mcp_accepts_configured_static_bearer_token() {
     let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
     let built = TestHarness {
         local_mcp: Some(LocalMcpConfig {
-            port: 8422,
+            port: 2764,
             bearer_token: "local-secret".into(),
         }),
         ..TestHarness::default()
@@ -685,7 +685,7 @@ async fn local_mcp_accepts_configured_static_bearer_token() {
     response.assert_status_ok();
     let requests = captured.lock().unwrap();
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].url, "http://127.0.0.1:8420/mcp");
+    assert_eq!(requests[0].url, "http://127.0.0.1:2765/mcp");
 }
 
 #[tokio::test]

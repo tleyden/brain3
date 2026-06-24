@@ -521,7 +521,7 @@ mod tests {
         config.port_mappings = vec![PortMapping {
             host_address: "127.0.0.1".into(),
             host_port: unused_port,
-            container_port: 8420,
+            container_port: 2765,
         }];
 
         let error = use_case

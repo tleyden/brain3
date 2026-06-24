@@ -17,7 +17,7 @@ fi
 MODE="image"
 IMAGE_NAME="${IMAGE_NAME:-brain3-mcp-vault-tools:latest}"
 CONTAINER_NAME="${CONTAINER_NAME:-brain3-mcp-vault-tools}"
-HOST_PORT="${HOST_PORT:-8420}"
+HOST_PORT="${HOST_PORT:-2765}"
 HOST_VAULT_PATH="${HOST_VAULT_PATH:-${B3_VAULT_PATH:-}}"
 SOURCE_MOUNT_PATH="/workspace/brain3-mcp-vault-tools"
 CONTAINER_UPSTREAM_SECRET_DIR="/run/brain3"
@@ -25,7 +25,7 @@ CONTAINER_UPSTREAM_SECRET_PATH="${CONTAINER_UPSTREAM_SECRET_DIR}/upstream_secret
 CONTAINER_RUNTIME=""
 HOST_BIND_ADDRESS="127.0.0.1"
 CONTAINER_LISTEN_HOST="0.0.0.0"
-CONTAINER_PORT="8420"
+CONTAINER_PORT="${B3_VAULT_MCP_PORT:-2765}"
 DETACH=true
 REMOVE=true
 
@@ -39,7 +39,7 @@ Options:
                         Run the mounted host source tree instead of the code baked into the image
   --image               Run the code baked into the image (default)
   --vault-path PATH     Host vault directory to mount into /vault
-  --port PORT           Host loopback port to publish as 127.0.0.1:PORT -> container port 8420
+  --port PORT           Host loopback port to publish as 127.0.0.1:PORT -> container port 2765 by default
   --name NAME           Container name (default: brain3-mcp-vault-tools)
   --image-name NAME     Image reference to run (default: brain3-mcp-vault-tools:latest)
   --foreground          Run attached instead of detached
@@ -47,7 +47,7 @@ Options:
   -h, --help            Show this help
 
 Networking:
-  The server listens on 0.0.0.0:8420 inside the container so published traffic can reach it.
+  The server listens on 0.0.0.0:2765 inside the container by default so published traffic can reach it.
   The host publishes that port on 127.0.0.1 only, so it is not exposed on other host interfaces.
   B3_VAULT_MCP_ALLOWED_HOSTS adds allowed HTTP Host headers for DNS rebinding protection; it does not
   publish the port on additional host interfaces.
@@ -264,6 +264,7 @@ run_args=(
     --user "$(id -u):$(id -g)"
     --publish "${HOST_BIND_ADDRESS}:${HOST_PORT}:${CONTAINER_PORT}"
     --env "B3_VAULT_MCP_HOST=${CONTAINER_LISTEN_HOST}"
+    --env "B3_VAULT_MCP_PORT=${CONTAINER_PORT}"
     --env "B3_VAULT_PATH=/vault"
     --env "B3_UPSTREAM_SHARED_SECRET_FILE=${CONTAINER_UPSTREAM_SECRET_PATH}"
     --mount "type=bind,source=${HOST_VAULT_PATH},target=/vault"

@@ -49,13 +49,13 @@ class ServerStartupTests(unittest.TestCase):
             os.environ,
             {
                 "B3_VAULT_PATH": str(TEST_VAULT),
-                "B3_VAULT_MCP_PORT": "8420",
+                "B3_VAULT_MCP_PORT": "2765",
             },
             clear=False,
         ):
             server = import_server_module()
 
-        self.assertEqual(server.mcp.settings.port, 8420)
+        self.assertEqual(server.mcp.settings.port, 2765)
 
     def test_upstream_shared_secret_can_be_provided_directly_via_env_var(self):
         with patch.dict(
@@ -75,7 +75,7 @@ class ServerStartupTests(unittest.TestCase):
             os.environ,
             {
                 "B3_VAULT_PATH": str(TEST_VAULT),
-                "B3_VAULT_MCP_PORT": "8420",
+                "B3_VAULT_MCP_PORT": "2765",
             },
             clear=False,
         ):
@@ -84,7 +84,7 @@ class ServerStartupTests(unittest.TestCase):
         with (
             patch.object(server, "_start_process_resources"),
             patch.object(server, "_stop_process_resources"),
-            patch.object(server, "_package_version", return_value="0.2.2"),
+            patch.object(server, "_package_version", return_value="0.2.3"),
             patch.object(server.logger, "info") as info_mock,
             patch.object(server.mcp, "run") as run_mock,
         ):
@@ -92,7 +92,7 @@ class ServerStartupTests(unittest.TestCase):
 
         run_mock.assert_called_once_with(transport="streamable-http")
         info_mock.assert_any_call(
-            "Starting authless MCP server version=%s on port %s", "0.2.2", ANY
+            "Starting authless MCP server version=%s on port %s", "0.2.3", ANY
         )
 
 
