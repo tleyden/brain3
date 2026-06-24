@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::domain::errors::SetupError;
-use crate::domain::model::ContainerRuntime;
+use crate::domain::model::{AccessMode, ContainerRuntime, GatewayConfig, TunnelConfig};
 use crate::domain::setup::{
     AccessModeDraft, ConnectionCard, FinalizeSetupRequest, SetupDefaults, SetupDraftConfig,
     SetupPreparation, SetupSummary, TunnelModeDraft, DEFAULT_ACCESS_TOKEN_LIFETIME_SECS,
@@ -61,6 +61,20 @@ impl FirstRunSetupUseCase {
         Ok(SetupPreparation {
             paths,
             draft,
+            dependencies,
+        })
+    }
+
+    pub async fn prepare_from_existing_config(
+        &self,
+        config: &GatewayConfig,
+    ) -> Result<SetupPreparation, SetupError> {
+        let paths = self.port.resolve_paths()?;
+        let dependencies = self.port.collect_dependency_status().await?;
+
+        Ok(SetupPreparation {
+            paths,
+            draft: self.draft_from_existing_config(config),
             dependencies,
         })
     }
@@ -148,6 +162,57 @@ impl FirstRunSetupUseCase {
             log_file,
         }
     }
+
+    fn draft_from_existing_config(&self, config: &GatewayConfig) -> SetupDraftConfig {
+        let container = config.container.as_ref();
+        let local_mcp = config.local_mcp.as_ref();
+
+        SetupDraftConfig {
+            gateway_port: config.port,
+            client_id: config.oauth.client_id.clone(),
+            client_secret: config.oauth.client_secret.clone(),
+            access_token_lifetime_secs: config.oauth.access_token_lifetime_secs,
+            refresh_token_lifetime_secs: config.oauth.refresh_token_lifetime_secs,
+            username: config.oauth.username.clone(),
+            password: config.oauth.password.clone(),
+            access_mode: access_mode_draft_from_config(config.access_mode),
+            tunnel_mode: tunnel_mode_draft_from_config(config.tunnel.as_ref()),
+            container_runtime: container
+                .map(|container| container.runtime)
+                .unwrap_or_else(|| default_container_runtime(self.port.operating_system())),
+            vault_path: container
+                .map(|container| container.vault_path.clone())
+                .unwrap_or_default(),
+            container_image_repo: container
+                .map(|container| image_repo_from_reference(&container.image))
+                .unwrap_or_else(|| self.defaults.default_container_image_repo.clone()),
+            container_host_port: container
+                .map(|container| container.host_port)
+                .unwrap_or(DEFAULT_CONTAINER_HOST_PORT),
+            container_mcp_port: container
+                .map(|container| container.container_port)
+                .unwrap_or(DEFAULT_CONTAINER_MCP_PORT),
+            container_name: container
+                .map(|container| container.container_name.clone())
+                .unwrap_or_else(|| DEFAULT_CONTAINER_NAME.to_string()),
+            container_network_isolated: container
+                .and_then(|container| container.isolation_strategy)
+                .is_some(),
+            container_network_name: container
+                .map(|container| container.network_name.clone())
+                .unwrap_or_else(|| DEFAULT_CONTAINER_NETWORK_NAME.to_string()),
+            local_mcp_enabled: local_mcp.is_some(),
+            local_mcp_port: local_mcp
+                .map(|local_mcp| local_mcp.port)
+                .unwrap_or(DEFAULT_LOCAL_MCP_PORT),
+            local_mcp_bearer_token: local_mcp
+                .map(|local_mcp| local_mcp.bearer_token.clone())
+                .unwrap_or_default(),
+            pkce_required: config.oauth.pkce_required,
+            enforce_hostname_check: config.hostname_validation.enforce,
+            direct_public_origin_hostname: None,
+        }
+    }
 }
 
 fn default_container_runtime(
@@ -193,6 +258,43 @@ fn apply_access_mode_policy(draft: &mut SetupDraftConfig) {
                 draft.tunnel_mode = TunnelModeDraft::CloudflareQuick;
             }
         }
+    }
+}
+
+fn access_mode_draft_from_config(access_mode: AccessMode) -> AccessModeDraft {
+    match access_mode {
+        AccessMode::Local => AccessModeDraft::LocalOnly,
+        AccessMode::Remote => AccessModeDraft::RemoteOnly,
+        AccessMode::Both => AccessModeDraft::Both,
+    }
+}
+
+fn tunnel_mode_draft_from_config(tunnel: Option<&TunnelConfig>) -> TunnelModeDraft {
+    match tunnel {
+        Some(TunnelConfig::CloudflareQuick { .. }) => TunnelModeDraft::CloudflareQuick,
+        Some(TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            domain,
+            ..
+        }) => TunnelModeDraft::CloudflareNamed {
+            tunnel_name: tunnel_name.clone(),
+            domain: domain.clone(),
+        },
+        None => TunnelModeDraft::Disabled,
+    }
+}
+
+fn image_repo_from_reference(image: &str) -> String {
+    let trimmed = image.trim();
+    let without_digest = trimmed.split('@').next().unwrap_or(trimmed);
+
+    match without_digest.rsplit_once(':') {
+        Some((repo, tag_or_port))
+            if !tag_or_port.contains('/') && repo.rsplit('/').next().is_some() =>
+        {
+            repo.to_string()
+        }
+        _ => without_digest.to_string(),
     }
 }
 
@@ -449,6 +551,78 @@ mod tests {
             preparation.draft.container_network_name,
             DEFAULT_CONTAINER_NETWORK_NAME
         );
+    }
+
+    #[tokio::test]
+    async fn prepare_from_existing_config_uses_saved_container_identity_and_password() {
+        let port = Arc::new(MockSetupSystemPort::new(vec![]));
+        let use_case = FirstRunSetupUseCase::new(port, sample_defaults());
+
+        let preparation = use_case
+            .prepare_from_existing_config(&GatewayConfig {
+                port: 9421,
+                host: "127.0.0.1".into(),
+                token_db_path: PathBuf::from("/tmp/brain3-home/brain3.db"),
+                oauth: crate::domain::model::OAuthConfig {
+                    client_id: "saved-client".into(),
+                    client_secret: "saved-secret".into(),
+                    access_token_lifetime_secs: 1234,
+                    refresh_token_lifetime_secs: 5678,
+                    pkce_required: false,
+                    username: "saved-user".into(),
+                    password: "saved-password".into(),
+                },
+                mcp_reverse_proxy: crate::domain::model::MCPReverseProxyConfig {
+                    mcp_upstream_url: "http://127.0.0.1:2765".into(),
+                    upstream_secret: "upstream-secret".into(),
+                },
+                hostname_validation: crate::domain::model::HostnameValidationConfig {
+                    expected_host: None,
+                    enforce: false,
+                },
+                access_mode: crate::domain::model::AccessMode::Both,
+                local_mcp: Some(crate::domain::model::LocalMcpConfig {
+                    port: 9555,
+                    bearer_token: "local-bearer".into(),
+                }),
+                container: Some(crate::domain::model::ContainerStartupConfig {
+                    runtime: ContainerRuntime::Docker,
+                    image: "ghcr.io/example/custom-mcp:v9.9.9".into(),
+                    container_name: "saved-container".into(),
+                    network_name: "saved-network".into(),
+                    vault_path: PathBuf::from("/srv/vault"),
+                    upstream_secret: "upstream-secret".into(),
+                    host_port: 9556,
+                    container_port: 9557,
+                    isolation_strategy: Some(
+                        crate::domain::model::ContainerNetworkIsolationStrategy::DiscoverContainerIp,
+                    ),
+                    dev_mount_source: None,
+                    mcp_log_level: None,
+                }),
+                tunnel: Some(crate::domain::model::TunnelConfig::CloudflareQuick {
+                    local_port: 9421,
+                }),
+            })
+            .await
+            .expect("prepare_from_existing_config should succeed");
+
+        assert_eq!(preparation.draft.client_id, "saved-client");
+        assert_eq!(preparation.draft.client_secret, "saved-secret");
+        assert_eq!(preparation.draft.username, "saved-user");
+        assert_eq!(preparation.draft.password, "saved-password");
+        assert_eq!(preparation.draft.container_name, "saved-container");
+        assert_eq!(preparation.draft.container_network_name, "saved-network");
+        assert_eq!(
+            preparation.draft.container_image_repo,
+            "ghcr.io/example/custom-mcp"
+        );
+        assert_eq!(preparation.draft.container_host_port, 9556);
+        assert_eq!(preparation.draft.container_mcp_port, 9557);
+        assert_eq!(preparation.draft.local_mcp_port, 9555);
+        assert_eq!(preparation.draft.local_mcp_bearer_token, "local-bearer");
+        assert!(!preparation.draft.pkce_required);
+        assert!(!preparation.draft.enforce_hostname_check);
     }
 
     #[tokio::test]

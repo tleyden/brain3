@@ -504,7 +504,7 @@ fn ensure_cli_ready(dependencies: &DependencyStatus) -> Result<()> {
     );
 }
 
-fn load_config(
+pub(crate) fn load_config(
     env_file: PathBuf,
     runtime_overrides: &RuntimeOverrides,
 ) -> Result<Arc<brain3_core::domain::model::GatewayConfig>> {

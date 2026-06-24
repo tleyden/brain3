@@ -23,7 +23,7 @@ use brain3_platform::setup::PlatformSetupSystem;
 
 use crate::server;
 use crate::server::ConfiguredGatewaySession;
-use crate::RuntimeOverrides;
+use crate::{load_config, RuntimeOverrides};
 
 use super::screens;
 use super::state::{
@@ -49,10 +49,6 @@ pub async fn run_gateway_tui(
         None => PlatformSetupSystem::new(),
     });
     let use_case = FirstRunSetupUseCase::new(Arc::clone(&setup_system), setup_defaults);
-    let preparation = use_case
-        .prepare()
-        .await
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
 
     // Start TUI immediately so the screen is live during all startup work.
     enable_raw_mode()?;
@@ -62,24 +58,22 @@ pub async fn run_gateway_tui(
     let mut terminal = Terminal::new(backend)?;
 
     let mut state = match launch {
-        GatewayTuiLaunch::FirstRun => {
-            FirstRunTuiState::new(host.to_string(), log_file.clone(), preparation)
-        }
+        GatewayTuiLaunch::FirstRun => FirstRunTuiState::new(
+            host.to_string(),
+            log_file.clone(),
+            use_case
+                .prepare()
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?,
+        ),
         GatewayTuiLaunch::Configured { launch_plan } => {
-            let (tx, rx) = oneshot::channel();
-            let host_clone = host.to_string();
-            let runtime_overrides_for_startup = runtime_overrides.clone();
-            tokio::spawn(async move {
-                let _ = tx.send(
-                    server::spawn_configured_gateway_session(
-                        &host_clone,
-                        launch_plan,
-                        runtime_overrides_for_startup,
-                    )
-                    .await,
-                );
-            });
-            FirstRunTuiState::new_starting(host.to_string(), log_file.clone(), preparation, rx)
+            let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
+            let mut preparation = use_case
+                .prepare_from_existing_config(config.as_ref())
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            preparation.paths.env_file = launch_plan.env_file.clone();
+            FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation)
         }
     };
 
@@ -655,7 +649,9 @@ fn apply_startup_result(
             tracing::error!(failure, "runtime reported primary failure");
             state.error_message = Some(failure.to_string());
             state.info_message = None;
-            // step stays on RuntimeStatus (already set by finalize_and_start or new_starting)
+            if state.summary.is_some() {
+                state.step = SetupStep::Summary;
+            }
         } else {
             state.info_message = Some("Brain3 is running.".into());
             // Wizard path shows the connection card first so the user can copy credentials.
@@ -687,4 +683,163 @@ async fn cleanup(state: &mut FirstRunTuiState) -> Result<()> {
         runtime.shutdown_managed_runtime().await;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
+    use brain3_core::domain::model::{
+        AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
+        OAuthConfig,
+    };
+    use brain3_core::domain::setup::{
+        AccessModeDraft, DependencyAvailability, DependencyStatus, SetupDefaults, SetupDraftConfig,
+        SetupOperatingSystem, SetupPaths, SetupPreparation, SetupStep, TunnelModeDraft,
+    };
+    use brain3_platform::runtime::{RuntimeBootstrap, StartupStatus};
+    use brain3_platform::setup::PlatformSetupSystem;
+
+    use crate::server::ConfiguredGatewaySession;
+
+    use super::*;
+
+    #[test]
+    fn failed_startup_returns_user_to_summary_for_retry() {
+        let use_case = FirstRunSetupUseCase::new(
+            Arc::new(PlatformSetupSystem::with_environment(
+                SetupOperatingSystem::Linux,
+                None,
+            )),
+            SetupDefaults {
+                default_container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+            },
+        );
+        let mut state = FirstRunTuiState::new_configured(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3.log"),
+            sample_preparation(),
+        );
+        let paths = state.preparation.paths.clone();
+        state.summary = Some(brain3_core::domain::setup::SetupSummary {
+            paths: paths.clone(),
+            draft: state.draft.clone(),
+            dependencies: state.preparation.dependencies.clone(),
+        });
+        state.step = SetupStep::RuntimeStatus;
+
+        apply_startup_result(
+            &mut state,
+            Ok(ConfiguredGatewaySession {
+                runtime: RuntimeBootstrap::new(
+                    Arc::new(GatewayConfig {
+                        port: 8421,
+                        host: "127.0.0.1".into(),
+                        token_db_path: PathBuf::from("/tmp/brain3-home/brain3.db"),
+                        oauth: OAuthConfig {
+                            client_id: "brain3-oauth2-client".into(),
+                            client_secret: "secret".into(),
+                            access_token_lifetime_secs: 3600,
+                            refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                            pkce_required: true,
+                            username: "admin".into(),
+                            password: "password".into(),
+                        },
+                        mcp_reverse_proxy: MCPReverseProxyConfig {
+                            mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                            upstream_secret: "secret".into(),
+                        },
+                        hostname_validation: HostnameValidationConfig {
+                            expected_host: None,
+                            enforce: true,
+                        },
+                        access_mode: AccessMode::Both,
+                        local_mcp: None,
+                        container: Some(brain3_core::domain::model::ContainerStartupConfig {
+                            runtime: ContainerRuntime::Docker,
+                            image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.2.3".into(),
+                            container_name: "brain3-mcp-vault-tools".into(),
+                            network_name: "brain3-mcp-net".into(),
+                            vault_path: PathBuf::from("/tmp/vault"),
+                            upstream_secret: "secret".into(),
+                            host_port: 8420,
+                            container_port: 8420,
+                            isolation_strategy: None,
+                            dev_mount_source: None,
+                            mcp_log_level: None,
+                        }),
+                        tunnel: None,
+                    }),
+                    "secret".into(),
+                    brain3_core::domain::setup::RuntimeLaunchPlan {
+                        paths: paths.clone(),
+                        env_file: paths.env_file.clone(),
+                        log_file: PathBuf::from("/tmp/brain3.log"),
+                    },
+                    None,
+                    StartupStatus::Failed {
+                        summary: "container name 'brain3-mcp-vault-tools' already exists; choose a different container name".into(),
+                    },
+                    StartupStatus::NotConfigured,
+                    false,
+                ),
+                server: None,
+                display_url: None,
+            }),
+            &use_case,
+        );
+
+        assert_eq!(state.step, SetupStep::Summary);
+        assert!(state
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("different container name"));
+    }
+
+    fn sample_preparation() -> SetupPreparation {
+        SetupPreparation {
+            paths: SetupPaths::new(
+                PathBuf::from("/tmp/brain3-home"),
+                PathBuf::from("/tmp/brain3-home/.env"),
+                PathBuf::from("/tmp/brain3-home/cloudflared"),
+            ),
+            draft: SetupDraftConfig {
+                gateway_port: 8421,
+                client_id: "brain3-oauth2-client".into(),
+                client_secret: "secret".into(),
+                access_token_lifetime_secs: 3600,
+                refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                username: "admin".into(),
+                password: "password".into(),
+                access_mode: AccessModeDraft::Both,
+                tunnel_mode: TunnelModeDraft::CloudflareQuick,
+                container_runtime: ContainerRuntime::MacOSContainer,
+                vault_path: PathBuf::from("/tmp/vault"),
+                container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+                container_host_port: 8420,
+                container_mcp_port: 8420,
+                container_name: "brain3-mcp-vault-tools".into(),
+                container_network_isolated: true,
+                container_network_name: "brain3-mcp-net".into(),
+                local_mcp_enabled: true,
+                local_mcp_port: 8422,
+                local_mcp_bearer_token: "local-token".into(),
+                pkce_required: true,
+                enforce_hostname_check: true,
+                direct_public_origin_hostname: None,
+            },
+            dependencies: DependencyStatus {
+                operating_system: SetupOperatingSystem::MacOS,
+                package_manager: None,
+                cloudflared: DependencyAvailability::Installed,
+                preferred_container_runtime: DependencyAvailability::Installed,
+                docker_installed: true,
+                macos_container_installed: Some(true),
+                homebrew_installed: Some(true),
+            },
+        }
+    }
 }

@@ -22,6 +22,8 @@ pub enum ContainerError {
     RuntimeNotFound(String),
     #[error("image not found: {0}")]
     ImageNotFound(String),
+    #[error("container conflict: {0}")]
+    Conflict(String),
     #[error("command failed (exit {code}): {stderr}")]
     CommandFailed { code: i32, stderr: String },
     #[error("command could not be spawned: {0}")]
@@ -30,6 +32,7 @@ pub enum ContainerError {
     StartupFailed {
         summary: String,
         logs: Option<String>,
+        started_container: bool,
     },
     #[error("container error: {0}")]
     Other(String),
@@ -49,6 +52,15 @@ impl ContainerError {
                 logs: Some(logs), ..
             } => Some(logs.as_str()),
             _ => None,
+        }
+    }
+
+    pub fn started_container(&self) -> bool {
+        match self {
+            Self::StartupFailed {
+                started_container, ..
+            } => *started_container,
+            _ => false,
         }
     }
 }

@@ -1684,6 +1684,7 @@ mod tests {
                 summary: "Vault path does not exist: /Obsidian/MyVault".into(),
             },
             StartupStatus::NotConfigured,
+            false,
         ));
         state.error_message = Some("Vault path does not exist: /Obsidian/MyVault".into());
         state

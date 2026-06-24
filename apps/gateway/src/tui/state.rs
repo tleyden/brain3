@@ -184,6 +184,22 @@ impl FirstRunTuiState {
         state
     }
 
+    pub fn new_configured(host: String, log_file: PathBuf, preparation: SetupPreparation) -> Self {
+        let access_mode_focus = match preparation.draft.access_mode {
+            AccessModeDraft::LocalOnly => AccessModeField::LocalOnly,
+            AccessModeDraft::RemoteOnly => AccessModeField::RemoteOnly,
+            AccessModeDraft::Both => AccessModeField::Both,
+        };
+
+        let mut state = Self::new(host, log_file, preparation);
+        state.step = SetupStep::Summary;
+        state.generate_password = false;
+        state.password_input = state.draft.password.clone();
+        state.access_mode_focus = access_mode_focus;
+        state.reset_ports_focus();
+        state
+    }
+
     pub fn clear_messages(&mut self) {
         self.error_message = None;
         self.info_message = None;
@@ -980,6 +996,32 @@ mod tests {
     }
 
     #[test]
+    fn configured_state_starts_in_summary_with_saved_password_and_without_startup() {
+        let mut preparation = sample_preparation();
+        preparation.draft.username = "saved-user".into();
+        preparation.draft.password = "saved-password".into();
+        preparation.draft.client_id = "saved-client".into();
+        preparation.draft.container_name = "saved-container".into();
+        preparation.draft.container_network_name = "saved-network".into();
+
+        let state = FirstRunTuiState::new_configured(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3.log"),
+            preparation,
+        );
+
+        assert_eq!(state.step, SetupStep::Summary);
+        assert!(!state.generate_password);
+        assert_eq!(state.username_input, "saved-user");
+        assert_eq!(state.password_input, "saved-password");
+        assert_eq!(state.client_id_input, "saved-client");
+        assert_eq!(state.container_name_input, "saved-container");
+        assert_eq!(state.container_network_name_input, "saved-network");
+        assert!(state.startup_rx.is_none());
+        assert!(state.runtime.is_none());
+    }
+
+    #[test]
     fn local_only_previous_step_returns_access_mode_for_auth_and_ports() {
         let mut state = sample_state();
         state.draft.access_mode = AccessModeDraft::LocalOnly;
@@ -995,47 +1037,51 @@ mod tests {
         FirstRunTuiState::new(
             "127.0.0.1".into(),
             PathBuf::from("/tmp/brain3.log"),
-            SetupPreparation {
-                paths: SetupPaths::new(
-                    PathBuf::from("/tmp/brain3-home"),
-                    PathBuf::from("/tmp/brain3-home/.env"),
-                    PathBuf::from("/tmp/brain3-home/cloudflared"),
-                ),
-                draft: SetupDraftConfig {
-                    gateway_port: 8421,
-                    client_id: "brain3-oauth2-client".into(),
-                    client_secret: "secret".into(),
-                    access_token_lifetime_secs: 3600,
-                    refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
-                    username: "admin".into(),
-                    password: String::new(),
-                    access_mode: AccessModeDraft::Both,
-                    tunnel_mode: TunnelModeDraft::CloudflareQuick,
-                    container_runtime: ContainerRuntime::MacOSContainer,
-                    vault_path: PathBuf::from("/tmp/vault"),
-                    container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
-                    container_host_port: 8420,
-                    container_mcp_port: 8420,
-                    container_name: "brain3-mcp-vault-tools".into(),
-                    container_network_isolated: true,
-                    container_network_name: "brain3-mcp-net".into(),
-                    local_mcp_enabled: true,
-                    local_mcp_port: 8422,
-                    local_mcp_bearer_token: "local-token".into(),
-                    pkce_required: true,
-                    enforce_hostname_check: true,
-                    direct_public_origin_hostname: None,
-                },
-                dependencies: DependencyStatus {
-                    operating_system: SetupOperatingSystem::MacOS,
-                    package_manager: Some(PackageManager::Homebrew),
-                    cloudflared: DependencyAvailability::Installed,
-                    preferred_container_runtime: DependencyAvailability::Installed,
-                    docker_installed: true,
-                    macos_container_installed: Some(true),
-                    homebrew_installed: Some(true),
-                },
-            },
+            sample_preparation(),
         )
+    }
+
+    fn sample_preparation() -> SetupPreparation {
+        SetupPreparation {
+            paths: SetupPaths::new(
+                PathBuf::from("/tmp/brain3-home"),
+                PathBuf::from("/tmp/brain3-home/.env"),
+                PathBuf::from("/tmp/brain3-home/cloudflared"),
+            ),
+            draft: SetupDraftConfig {
+                gateway_port: 8421,
+                client_id: "brain3-oauth2-client".into(),
+                client_secret: "secret".into(),
+                access_token_lifetime_secs: 3600,
+                refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                username: "admin".into(),
+                password: String::new(),
+                access_mode: AccessModeDraft::Both,
+                tunnel_mode: TunnelModeDraft::CloudflareQuick,
+                container_runtime: ContainerRuntime::MacOSContainer,
+                vault_path: PathBuf::from("/tmp/vault"),
+                container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+                container_host_port: 8420,
+                container_mcp_port: 8420,
+                container_name: "brain3-mcp-vault-tools".into(),
+                container_network_isolated: true,
+                container_network_name: "brain3-mcp-net".into(),
+                local_mcp_enabled: true,
+                local_mcp_port: 8422,
+                local_mcp_bearer_token: "local-token".into(),
+                pkce_required: true,
+                enforce_hostname_check: true,
+                direct_public_origin_hostname: None,
+            },
+            dependencies: DependencyStatus {
+                operating_system: SetupOperatingSystem::MacOS,
+                package_manager: Some(PackageManager::Homebrew),
+                cloudflared: DependencyAvailability::Installed,
+                preferred_container_runtime: DependencyAvailability::Installed,
+                docker_installed: true,
+                macos_container_installed: Some(true),
+                homebrew_installed: Some(true),
+            },
+        }
     }
 }

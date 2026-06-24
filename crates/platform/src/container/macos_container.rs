@@ -1,28 +1,39 @@
 use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{ContainerConfig, ContainerNetworkIsolationStrategy};
-use brain3_core::ports::container::{ContainerId, ContainerPort};
+use brain3_core::ports::container::{ContainerId, ContainerPort, NetworkPreparation};
 
 use super::process::{command_succeeds, run_command};
 
 pub struct MacOsContainerAdapter;
 
-async fn network_exists(name: &str) -> Result<bool, ContainerError> {
+enum InternalNetworkState {
+    Missing,
+    Compatible,
+    Incompatible,
+}
+
+async fn inspect_internal_network_state(name: &str) -> Result<InternalNetworkState, ContainerError> {
     match run_command("container", &["network", "inspect", name]).await {
-        Ok(out) => Ok(out.trim() != "[]" && !out.trim().is_empty()),
-        Err(ContainerError::CommandFailed { .. }) => Ok(false),
+        Ok(out) => {
+            let normalized: String = out
+                .chars()
+                .filter(|ch| !ch.is_whitespace())
+                .collect::<String>()
+                .to_ascii_lowercase();
+            if normalized.contains("\"internal\":true")
+                || normalized.contains("\"isinternal\":true")
+            {
+                Ok(InternalNetworkState::Compatible)
+            } else {
+                Ok(InternalNetworkState::Incompatible)
+            }
+        }
+        Err(ContainerError::CommandFailed { .. }) => Ok(InternalNetworkState::Missing),
         Err(e) => Err(e),
     }
 }
 
-async fn recreate_internal_network(name: &str) -> Result<(), ContainerError> {
-    if network_exists(name).await? {
-        tracing::info!(
-            network = name,
-            "removing existing MCP network before recreation"
-        );
-        run_command("container", &["network", "rm", name]).await?;
-    }
-
+async fn create_internal_network(name: &str) -> Result<(), ContainerError> {
     tracing::info!(network = name, "creating fresh internal MCP network");
     run_command("container", &["network", "create", "--internal", name]).await?;
     Ok(())
@@ -58,17 +69,20 @@ impl ContainerPort for MacOsContainerAdapter {
         run_command("container", &["logs", "-n", &lines, &id.0]).await
     }
 
-    async fn prepare_network_isolation(&self, network_name: &str) -> Result<bool, ContainerError> {
-        match recreate_internal_network(network_name).await {
-            Ok(()) => Ok(true),
-            Err(e) => {
-                tracing::error!(
-                    error = %e,
-                    network = network_name,
-                    "network isolation setup failed"
-                );
-                Err(e)
+    async fn ensure_internal_network(
+        &self,
+        network_name: &str,
+    ) -> Result<NetworkPreparation, ContainerError> {
+        match inspect_internal_network_state(network_name).await? {
+            InternalNetworkState::Missing => {
+                create_internal_network(network_name).await?;
+                Ok(NetworkPreparation::Created)
             }
+            InternalNetworkState::Compatible => Ok(NetworkPreparation::Reused),
+            InternalNetworkState::Incompatible => Err(ContainerError::Conflict(format!(
+                "container network name '{}' already exists and is not a compatible internal Brain3 network; choose a different container network name",
+                network_name
+            ))),
         }
     }
 

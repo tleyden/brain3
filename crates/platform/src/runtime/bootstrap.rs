@@ -37,6 +37,7 @@ pub struct RuntimeBootstrap {
     pub public_url: Option<String>,
     pub container_status: StartupStatus,
     pub tunnel_status: StartupStatus,
+    managed_container_started: bool,
     tunnel: Option<Box<dyn TunnelPort>>,
 }
 
@@ -48,6 +49,7 @@ impl RuntimeBootstrap {
         public_url: Option<String>,
         container_status: StartupStatus,
         tunnel_status: StartupStatus,
+        managed_container_started: bool,
     ) -> Self {
         Self {
             config,
@@ -56,6 +58,7 @@ impl RuntimeBootstrap {
             public_url,
             container_status,
             tunnel_status,
+            managed_container_started,
             tunnel: None,
         }
     }
@@ -74,6 +77,13 @@ impl RuntimeBootstrap {
         let Some(startup) = self.config.container.as_ref() else {
             return;
         };
+        if !self.managed_container_started {
+            tracing::debug!(
+                container = %startup.container_name,
+                "skipping managed MCP container shutdown because this session did not start it"
+            );
+            return;
+        }
 
         if let Err(error) = stop_mcp_container(startup).await {
             tracing::warn!(
@@ -100,6 +110,10 @@ impl RuntimeBootstrap {
             .failure_summary()
             .or_else(|| self.tunnel_status.failure_summary())
     }
+
+    pub fn manages_container_lifecycle(&self) -> bool {
+        self.managed_container_started && self.config.container.is_some()
+    }
 }
 
 pub fn named_tunnel_setup_config(config: &GatewayConfig) -> Option<&TunnelConfig> {
@@ -108,6 +122,95 @@ pub fn named_tunnel_setup_config(config: &GatewayConfig) -> Option<&TunnelConfig
             Some(tc)
         }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use brain3_core::domain::model::{
+        AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
+        OAuthConfig,
+    };
+    use brain3_core::domain::setup::{RuntimeLaunchPlan, SetupPaths};
+
+    use super::*;
+
+    #[test]
+    fn lifecycle_management_only_applies_when_session_started_container() {
+        let config = Arc::new(GatewayConfig {
+            port: 8421,
+            host: "127.0.0.1".into(),
+            token_db_path: PathBuf::from("/tmp/brain3.db"),
+            oauth: OAuthConfig {
+                client_id: "client".into(),
+                client_secret: "secret".into(),
+                access_token_lifetime_secs: 3600,
+                refresh_token_lifetime_secs: 7200,
+                pkce_required: true,
+                username: "user".into(),
+                password: "password".into(),
+            },
+            mcp_reverse_proxy: MCPReverseProxyConfig {
+                mcp_upstream_url: "http://127.0.0.1:2765".into(),
+                upstream_secret: "upstream".into(),
+            },
+            hostname_validation: HostnameValidationConfig {
+                expected_host: None,
+                enforce: true,
+            },
+            access_mode: AccessMode::Both,
+            local_mcp: None,
+            container: Some(brain3_core::domain::model::ContainerStartupConfig {
+                runtime: ContainerRuntime::Docker,
+                image: "ghcr.io/example/mcp:v1".into(),
+                container_name: "existing-container".into(),
+                network_name: "existing-network".into(),
+                vault_path: PathBuf::from("/tmp/vault"),
+                upstream_secret: "upstream".into(),
+                host_port: 2765,
+                container_port: 2765,
+                isolation_strategy: None,
+                dev_mount_source: None,
+                mcp_log_level: None,
+            }),
+            tunnel: None,
+        });
+        let launch_plan = RuntimeLaunchPlan {
+            paths: SetupPaths::new(
+                PathBuf::from("/tmp/brain3-home"),
+                PathBuf::from("/tmp/brain3-home/.env"),
+                PathBuf::from("/tmp/brain3-home/cloudflared"),
+            ),
+            env_file: PathBuf::from("/tmp/brain3-home/.env"),
+            log_file: PathBuf::from("/tmp/brain3.log"),
+        };
+
+        let not_owned = RuntimeBootstrap::new(
+            Arc::clone(&config),
+            "upstream".into(),
+            launch_plan.clone(),
+            None,
+            StartupStatus::Failed {
+                summary: "conflict".into(),
+            },
+            StartupStatus::NotConfigured,
+            false,
+        );
+        let owned = RuntimeBootstrap::new(
+            config,
+            "upstream".into(),
+            launch_plan,
+            None,
+            StartupStatus::Ready,
+            StartupStatus::NotConfigured,
+            true,
+        );
+
+        assert!(!not_owned.manages_container_lifecycle());
+        assert!(owned.manages_container_lifecycle());
     }
 }
 
@@ -122,7 +225,7 @@ pub async fn bootstrap_configured_runtime(
     let upstream_secret = config.mcp_reverse_proxy.upstream_secret.clone();
 
     let mut config = config;
-    let container_status = if let Some(startup) = &config.container {
+    let (container_status, managed_container_started) = if let Some(startup) = &config.container {
         match ensure_mcp_container(startup).await {
             Ok(Some(container_ip))
                 if startup.isolation_strategy
@@ -137,13 +240,16 @@ pub async fn bootstrap_configured_runtime(
                 let mut updated = (*config).clone();
                 updated.mcp_reverse_proxy.mcp_upstream_url = upstream_url;
                 config = Arc::new(updated);
-                StartupStatus::Ready
+                (StartupStatus::Ready, true)
             }
-            Ok(_) => StartupStatus::Ready,
-            Err(error) => container_failure_status(startup.container_name.as_str(), &error),
+            Ok(_) => (StartupStatus::Ready, true),
+            Err(error) => (
+                container_failure_status(startup.container_name.as_str(), &error),
+                error.started_container(),
+            ),
         }
     } else {
-        StartupStatus::NotConfigured
+        (StartupStatus::NotConfigured, false)
     };
 
     // If the container TCP check passed, do a full end-to-end MCP functional probe (auth + RPC).
@@ -210,6 +316,7 @@ pub async fn bootstrap_configured_runtime(
         public_url,
         container_status,
         tunnel_status,
+        managed_container_started,
         tunnel: tunnel_guard,
     })
 }
