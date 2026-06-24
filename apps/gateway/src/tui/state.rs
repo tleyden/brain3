@@ -316,50 +316,24 @@ impl FirstRunTuiState {
     }
 
     pub fn next_summary_focus(&mut self) {
-        self.summary_focus = match self.summary_focus {
-            SummaryField::VaultPath => SummaryField::Username,
-            SummaryField::Username => SummaryField::ClientId,
-            SummaryField::ClientId => SummaryField::PasswordMode,
-            SummaryField::PasswordMode => {
-                if self.generate_password {
-                    SummaryField::GatewayPort
-                } else {
-                    SummaryField::PasswordValue
-                }
-            }
-            SummaryField::PasswordValue => SummaryField::GatewayPort,
-            SummaryField::GatewayPort => SummaryField::ContainerHostPort,
-            SummaryField::ContainerHostPort => SummaryField::ContainerMcpPort,
-            SummaryField::ContainerMcpPort => SummaryField::AccessTokenLifetimeSecs,
-            SummaryField::AccessTokenLifetimeSecs => SummaryField::RefreshTokenLifetimeSecs,
-            SummaryField::RefreshTokenLifetimeSecs => SummaryField::PkceRequired,
-            SummaryField::PkceRequired => SummaryField::HostnameCheck,
-            SummaryField::HostnameCheck => SummaryField::ContainerNetworkIsolation,
-            SummaryField::ContainerNetworkIsolation => SummaryField::VaultPath,
-        };
+        let order = summary_focus_order(&self.draft.access_mode, self.generate_password);
+        let current_index = order
+            .iter()
+            .position(|field| *field == self.summary_focus)
+            .unwrap_or(0);
+        self.summary_focus = order[(current_index + 1) % order.len()];
     }
 
     pub fn previous_summary_focus(&mut self) {
-        self.summary_focus = match self.summary_focus {
-            SummaryField::VaultPath => SummaryField::ContainerNetworkIsolation,
-            SummaryField::Username => SummaryField::VaultPath,
-            SummaryField::ClientId => SummaryField::Username,
-            SummaryField::PasswordMode => SummaryField::ClientId,
-            SummaryField::PasswordValue => SummaryField::PasswordMode,
-            SummaryField::GatewayPort => {
-                if self.generate_password {
-                    SummaryField::PasswordMode
-                } else {
-                    SummaryField::PasswordValue
-                }
-            }
-            SummaryField::ContainerHostPort => SummaryField::GatewayPort,
-            SummaryField::ContainerMcpPort => SummaryField::ContainerHostPort,
-            SummaryField::AccessTokenLifetimeSecs => SummaryField::ContainerMcpPort,
-            SummaryField::RefreshTokenLifetimeSecs => SummaryField::AccessTokenLifetimeSecs,
-            SummaryField::PkceRequired => SummaryField::RefreshTokenLifetimeSecs,
-            SummaryField::HostnameCheck => SummaryField::PkceRequired,
-            SummaryField::ContainerNetworkIsolation => SummaryField::HostnameCheck,
+        let order = summary_focus_order(&self.draft.access_mode, self.generate_password);
+        let current_index = order
+            .iter()
+            .position(|field| *field == self.summary_focus)
+            .unwrap_or(0);
+        self.summary_focus = if current_index == 0 {
+            *order.last().expect("summary order should not be empty")
+        } else {
+            order[current_index - 1]
         };
     }
 
@@ -665,5 +639,197 @@ fn ports_focus_order(access_mode: &AccessModeDraft) -> &'static [PortsField] {
     match access_mode {
         AccessModeDraft::LocalOnly => LOCAL_ONLY_ORDER,
         AccessModeDraft::RemoteOnly | AccessModeDraft::Both => REMOTE_ORDER,
+    }
+}
+
+fn summary_focus_order(
+    access_mode: &AccessModeDraft,
+    generate_password: bool,
+) -> &'static [SummaryField] {
+    const LOCAL_ONLY_ORDER: &[SummaryField] = &[
+        SummaryField::VaultPath,
+        SummaryField::GatewayPort,
+        SummaryField::ContainerHostPort,
+        SummaryField::ContainerMcpPort,
+        SummaryField::ContainerNetworkIsolation,
+    ];
+    const REMOTE_AUTO_PASSWORD_ORDER: &[SummaryField] = &[
+        SummaryField::VaultPath,
+        SummaryField::Username,
+        SummaryField::ClientId,
+        SummaryField::PasswordMode,
+        SummaryField::GatewayPort,
+        SummaryField::ContainerHostPort,
+        SummaryField::ContainerMcpPort,
+        SummaryField::AccessTokenLifetimeSecs,
+        SummaryField::RefreshTokenLifetimeSecs,
+        SummaryField::PkceRequired,
+        SummaryField::HostnameCheck,
+        SummaryField::ContainerNetworkIsolation,
+    ];
+    const REMOTE_CUSTOM_PASSWORD_ORDER: &[SummaryField] = &[
+        SummaryField::VaultPath,
+        SummaryField::Username,
+        SummaryField::ClientId,
+        SummaryField::PasswordMode,
+        SummaryField::PasswordValue,
+        SummaryField::GatewayPort,
+        SummaryField::ContainerHostPort,
+        SummaryField::ContainerMcpPort,
+        SummaryField::AccessTokenLifetimeSecs,
+        SummaryField::RefreshTokenLifetimeSecs,
+        SummaryField::PkceRequired,
+        SummaryField::HostnameCheck,
+        SummaryField::ContainerNetworkIsolation,
+    ];
+
+    match access_mode {
+        AccessModeDraft::LocalOnly => LOCAL_ONLY_ORDER,
+        AccessModeDraft::RemoteOnly | AccessModeDraft::Both => {
+            if generate_password {
+                REMOTE_AUTO_PASSWORD_ORDER
+            } else {
+                REMOTE_CUSTOM_PASSWORD_ORDER
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use brain3_core::domain::model::ContainerRuntime;
+    use brain3_core::domain::setup::{
+        DependencyAvailability, DependencyStatus, PackageManager, SetupDraftConfig,
+        SetupOperatingSystem, SetupPaths, SetupPreparation, TunnelModeDraft,
+    };
+
+    use super::*;
+
+    #[test]
+    fn local_only_summary_focus_skips_auth_and_remote_fields() {
+        let mut state = sample_state();
+        state.draft.access_mode = AccessModeDraft::LocalOnly;
+
+        let mut actual = vec![state.summary_focus];
+        for _ in 0..4 {
+            state.next_summary_focus();
+            actual.push(state.summary_focus);
+        }
+
+        assert_eq!(
+            actual,
+            vec![
+                SummaryField::VaultPath,
+                SummaryField::GatewayPort,
+                SummaryField::ContainerHostPort,
+                SummaryField::ContainerMcpPort,
+                SummaryField::ContainerNetworkIsolation,
+            ]
+        );
+
+        state.next_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::VaultPath);
+    }
+
+    #[test]
+    fn local_only_previous_summary_focus_wraps_over_visible_fields_only() {
+        let mut state = sample_state();
+        state.draft.access_mode = AccessModeDraft::LocalOnly;
+
+        state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::ContainerNetworkIsolation);
+
+        state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::ContainerMcpPort);
+
+        state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::ContainerHostPort);
+
+        state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::GatewayPort);
+
+        state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::VaultPath);
+    }
+
+    #[test]
+    fn remote_summary_focus_keeps_custom_password_field_in_order() {
+        let mut state = sample_state();
+        state.generate_password = false;
+
+        let mut actual = vec![state.summary_focus];
+        for _ in 0..12 {
+            state.next_summary_focus();
+            actual.push(state.summary_focus);
+        }
+
+        assert_eq!(
+            actual,
+            vec![
+                SummaryField::VaultPath,
+                SummaryField::Username,
+                SummaryField::ClientId,
+                SummaryField::PasswordMode,
+                SummaryField::PasswordValue,
+                SummaryField::GatewayPort,
+                SummaryField::ContainerHostPort,
+                SummaryField::ContainerMcpPort,
+                SummaryField::AccessTokenLifetimeSecs,
+                SummaryField::RefreshTokenLifetimeSecs,
+                SummaryField::PkceRequired,
+                SummaryField::HostnameCheck,
+                SummaryField::ContainerNetworkIsolation,
+            ]
+        );
+
+        state.next_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::VaultPath);
+    }
+
+    fn sample_state() -> FirstRunTuiState {
+        FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3.log"),
+            SetupPreparation {
+                paths: SetupPaths::new(
+                    PathBuf::from("/tmp/brain3-home"),
+                    PathBuf::from("/tmp/brain3-home/.env"),
+                    PathBuf::from("/tmp/brain3-home/cloudflared"),
+                ),
+                draft: SetupDraftConfig {
+                    gateway_port: 8421,
+                    client_id: "brain3-oauth2-client".into(),
+                    client_secret: "secret".into(),
+                    access_token_lifetime_secs: 3600,
+                    refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                    username: "admin".into(),
+                    password: String::new(),
+                    access_mode: AccessModeDraft::Both,
+                    tunnel_mode: TunnelModeDraft::CloudflareQuick,
+                    container_runtime: ContainerRuntime::MacOSContainer,
+                    vault_path: PathBuf::from("/tmp/vault"),
+                    container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+                    container_host_port: 8420,
+                    container_mcp_port: 8420,
+                    container_network_isolated: true,
+                    local_mcp_enabled: true,
+                    local_mcp_bearer_token: "local-token".into(),
+                    pkce_required: true,
+                    enforce_hostname_check: true,
+                    direct_public_origin_hostname: None,
+                },
+                dependencies: DependencyStatus {
+                    operating_system: SetupOperatingSystem::MacOS,
+                    package_manager: Some(PackageManager::Homebrew),
+                    cloudflared: DependencyAvailability::Installed,
+                    preferred_container_runtime: DependencyAvailability::Installed,
+                    docker_installed: true,
+                    macos_container_installed: Some(true),
+                    homebrew_installed: Some(true),
+                },
+            },
+        )
     }
 }

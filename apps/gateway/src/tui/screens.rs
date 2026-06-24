@@ -545,33 +545,38 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             &state.vault_path_input,
             f == SummaryField::VaultPath,
         ),
-        field_line(
-            "Username",
-            &state.username_input,
-            f == SummaryField::Username,
-        ),
-        field_line(
-            "Client ID",
-            &state.client_id_input,
-            f == SummaryField::ClientId,
-        ),
-        field_badge_line(
-            "Password mode",
-            if state.generate_password {
-                badge_span("Auto-generated", Color::Green)
-            } else {
-                badge_span("Custom password", Color::Cyan)
-            },
-            f == SummaryField::PasswordMode,
-        ),
     ];
 
-    if !state.generate_password {
-        lines.push(field_line(
-            "Password",
-            &state.password_input,
-            f == SummaryField::PasswordValue,
-        ));
+    if state.draft.access_mode != AccessModeDraft::LocalOnly {
+        lines.extend([
+            field_line(
+                "Username",
+                &state.username_input,
+                f == SummaryField::Username,
+            ),
+            field_line(
+                "Client ID",
+                &state.client_id_input,
+                f == SummaryField::ClientId,
+            ),
+            field_badge_line(
+                "Password mode",
+                if state.generate_password {
+                    badge_span("Auto-generated", Color::Green)
+                } else {
+                    badge_span("Custom password", Color::Cyan)
+                },
+                f == SummaryField::PasswordMode,
+            ),
+        ]);
+
+        if !state.generate_password {
+            lines.push(field_line(
+                "Password",
+                &state.password_input,
+                f == SummaryField::PasswordValue,
+            ));
+        }
     }
 
     lines.extend([
@@ -590,35 +595,43 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             &state.container_mcp_port_input,
             f == SummaryField::ContainerMcpPort,
         ),
-        field_line(
-            "Access token lifetime (secs)",
-            &state.access_token_lifetime_secs_input,
-            f == SummaryField::AccessTokenLifetimeSecs,
-        ),
-        field_line(
-            "Refresh token lifetime (secs)",
-            &state.refresh_token_lifetime_secs_input,
-            f == SummaryField::RefreshTokenLifetimeSecs,
-        ),
+    ]);
+
+    if state.draft.access_mode != AccessModeDraft::LocalOnly {
+        lines.extend([
+            field_line(
+                "Access token lifetime (secs)",
+                &state.access_token_lifetime_secs_input,
+                f == SummaryField::AccessTokenLifetimeSecs,
+            ),
+            field_line(
+                "Refresh token lifetime (secs)",
+                &state.refresh_token_lifetime_secs_input,
+                f == SummaryField::RefreshTokenLifetimeSecs,
+            ),
+            field_badge_line(
+                "PKCE required",
+                if state.draft.pkce_required {
+                    badge_span("Enabled", Color::Green)
+                } else {
+                    badge_span("Disabled", Color::Yellow)
+                },
+                f == SummaryField::PkceRequired,
+            ),
+            field_badge_line(
+                "Hostname check",
+                if state.draft.enforce_hostname_check {
+                    badge_span("Enabled", Color::Green)
+                } else {
+                    badge_span("Disabled", Color::Yellow)
+                },
+                f == SummaryField::HostnameCheck,
+            ),
+        ]);
+    }
+
+    lines.extend([
         key_value_line("Access mode", format_access_mode(&state.draft.access_mode)),
-        field_badge_line(
-            "PKCE required",
-            if state.draft.pkce_required {
-                badge_span("Enabled", Color::Green)
-            } else {
-                badge_span("Disabled", Color::Yellow)
-            },
-            f == SummaryField::PkceRequired,
-        ),
-        field_badge_line(
-            "Hostname check",
-            if state.draft.enforce_hostname_check {
-                badge_span("Enabled", Color::Green)
-            } else {
-                badge_span("Disabled", Color::Yellow)
-            },
-            f == SummaryField::HostnameCheck,
-        ),
         field_badge_line(
             "Internal-only container networking",
             if state.draft.container_network_isolated {
@@ -636,7 +649,16 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Container image repo",
             state.draft.container_image_repo.clone(),
         ),
-        key_value_line("Tunnel", format_tunnel_mode(&state.draft.tunnel_mode)),
+    ]);
+
+    if state.draft.access_mode != AccessModeDraft::LocalOnly {
+        lines.push(key_value_line(
+            "Tunnel",
+            format_tunnel_mode(&state.draft.tunnel_mode),
+        ));
+    }
+
+    lines.extend([
         key_value_line(
             "Env file",
             state.preparation.paths.env_file.display().to_string(),
@@ -1326,6 +1348,39 @@ mod tests {
         assert!(text.contains("SQLite DB: /tmp/brain3-home/brain3.db"));
         assert!(text.contains("Vault path does not exist"));
         assert!(text.contains("Gateway:  Not started"));
+    }
+
+    #[test]
+    fn local_only_summary_hides_auth_and_remote_only_fields() {
+        let mut state = sample_state();
+        state.draft.access_mode = AccessModeDraft::LocalOnly;
+        state.generate_password = false;
+        let text = summary_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Vault path"));
+        assert!(text.contains("Gateway port"));
+        assert!(text.contains("Container host port"));
+        assert!(text.contains("Container MCP port"));
+        assert!(text.contains("Access mode"));
+        assert!(text.contains("Internal-only container networking"));
+        assert!(text.contains("Container runtime"));
+        assert!(text.contains("Container image repo"));
+        assert!(text.contains("Env file"));
+        assert!(text.contains("Logs"));
+
+        assert!(!text.contains("Username"));
+        assert!(!text.contains("Client ID"));
+        assert!(!text.contains("Password mode"));
+        assert!(!text.contains("Password"));
+        assert!(!text.contains("Access token lifetime (secs)"));
+        assert!(!text.contains("Refresh token lifetime (secs)"));
+        assert!(!text.contains("PKCE required"));
+        assert!(!text.contains("Hostname check"));
+        assert!(!text.contains("Tunnel"));
     }
 
     fn sample_state() -> FirstRunTuiState {
