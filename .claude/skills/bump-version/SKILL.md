@@ -73,6 +73,15 @@ gh release view "$VERSION"
 
 Report the listed assets to the user.
 
+Then verify the Docker image published to GHCR by pulling it:
+
+```bash
+VERSION=vX.Y.Z
+docker pull ghcr.io/tleyden/brain3-mcp-vault-tools:$VERSION
+```
+
+Confirm the pull succeeds and report the digest to the user.
+
 ---
 
 ## Gotchas
