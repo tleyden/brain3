@@ -4,6 +4,42 @@ Resolved security findings, listed by the version in which they were closed. See
 
 ---
 
+## v0.1.9 → v0.2.1
+
+### ✅ RESOLVED — Brain3-owned `constant_time_eq` wrapper deleted (M-4)
+
+The custom `constant_time_eq` helper in `crates/core/src/domain/oauth.rs` was removed when that file was deleted in the oxide-auth rebase (#105). Secret comparisons now call `subtle::ConstantTimeEq::ct_eq()` directly in `registrar.rs` and `oauth_handlers.rs`. M-4 is closed.
+
+### ✅ RESOLVED — In-memory auth-code store deleted (L-1)
+
+`InMemoryAuthCodeStore` and its `cleanup_expired()` method were removed. Authorization codes are now issued by oxide-auth's `AuthMap`, so the old Brain3-owned cleanup finding no longer applies. L-1 is closed.
+
+### ✅ RESOLVED — `GET /oauth/authorize` no longer warrants a standalone rate-limit finding (L-4)
+
+`validate_authorize_params()` now rejects requests that lack the configured `client_id`, `response_type=code`, a non-empty `redirect_uri`, or the required PKCE S256 parameters. The GET handler serves only the login form; credential processing remains POST-only and already rate-limited. L-4 is closed.
+
+### 🔧 UPDATED — Brain3-owned OAuth surface reduced (M-13)
+
+The oxide-auth rebase (#105) delegated auth-code issuance, PKCE verification, code exchange, and bearer token recovery to oxide-auth. Brain3 still owns the remaining policy layer (`check_credentials`, `GatewayRegistrar`, `SqliteTokenStore`, metadata construction, and error normalization), so M-13 stays open but now covers a smaller trusted surface.
+
+### 🔒 NEW CONTROL — Binary release signing (#106)
+
+Release assets now include `SHA256SUMS` and `SHA256SUMS.sig`, and `install.sh` verifies the signed manifest before checking the downloaded tarball hash and extracting the binary.
+
+### 🔒 NEW CONTROL — Refresh token flow through oxide-auth issuer (#111)
+
+`execute_refresh_token_flow()` now routes refresh-token exchange through the shared issuer while preserving refresh-token rotation on use.
+
+### 🔒 NEW CONTROL — Supply-chain hardening (#81, #82, #94)
+
+OpenSSF Scorecard was added, workflows now default to least-privilege permissions with targeted write scopes only where needed, and Dependabot is enabled for Cargo and uv dependency updates.
+
+### 🔧 PARTIAL — Vulnerability disclosure (L-10)
+
+`README.MD` now includes a "Reporting Security Issues" section pointing to GitHub private advisory reporting. L-10 remains open until a root-level `SECURITY.md` is added.
+
+---
+
 ## v0.1.7 → v0.1.8
 
 ### ✅ RESOLVED — Generated Passwords Lacked Symbol Character Class (L-8)
