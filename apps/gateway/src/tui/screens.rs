@@ -3,7 +3,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
-use brain3_core::domain::model::{AccessMode, ContainerRuntime};
+use brain3_core::domain::model::ContainerRuntime;
 use brain3_core::domain::setup::{
     AccessModeDraft, DependencyAvailability, PackageManager, SetupStep, TunnelModeDraft,
 };
@@ -1383,8 +1383,8 @@ mod tests {
 
     use brain3_core::application::first_run_setup::CURRENT_RELEASE;
     use brain3_core::domain::model::{
-        ContainerRuntime, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
-        OAuthConfig,
+        AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig,
+        MCPReverseProxyConfig, OAuthConfig,
     };
     use brain3_core::domain::setup::{
         DependencyAvailability, DependencyStatus, PackageManager, RuntimeLaunchPlan,
