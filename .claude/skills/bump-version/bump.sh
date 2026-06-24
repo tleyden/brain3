@@ -68,11 +68,10 @@ echo ""
 read -rp "Tag and push v${NEW} now? [y/N] " CONFIRM
 if [[ "${CONFIRM,,}" == "y" ]]; then
   git tag -a "v${NEW}" -m "Release v${NEW}"
-  git push
-  git push --tags
-  echo "Tagged v${NEW} and pushed."
+  git push origin "v${NEW}"
+  echo "Tagged and pushed v${NEW}. Monitor the release workflow with: gh run watch"
 else
   echo "Skipped tagging. To tag later:"
   echo "  git tag -a \"v${NEW}\" -m \"Release v${NEW}\""
-  echo "  git push && git push --tags"
+  echo "  git push origin \"v${NEW}\""
 fi
