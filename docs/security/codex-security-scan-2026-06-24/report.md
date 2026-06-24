@@ -1,14 +1,5 @@
 # Security Review: brain3
 
-| Field | Value |
-|---|---|
-| **Auditor** | Codex Security Scan |
-| **Date** | 2026-06-24 |
-| **Scope** | Full codebase — OAuth2 gateway, Cloudflare tunnel, local network / container exposure, default credentials, host process trust boundaries |
-| **Codebase version** | 0.2.1 |
-
-
-
 ## Scope
 
 Repository-wide security scan of the checked-out Brain3 git revision with prior audit context from `SECURITY_AUDIT.MD` and the 2026-06-24 security-audit update plan. High-risk review focused on OAuth policy, public ingress via Cloudflare tunnels, container boundary exposure, local credential handling, and MCP logging.
@@ -995,82 +986,6 @@ Preventive controls:
 | OAuth authorization-code lifetime | Replay window / architectural code lifetime | Needs follow-up | The underlying `oxide-auth` authorizer still mints 10-minute authorization codes. This remains open, but stronger directly Brain3-owned policy issues took priority in this pass. Evidence: artifacts/03_coverage/repository_coverage_ledger.md |
 | Cloudflare credential-file permissions | Local credential exposure | Needs follow-up | Named-tunnel credential lookup uses `~/.cloudflared/<id>.json` without an explicit permission check in the reviewed revision. Evidence: artifacts/03_coverage/repository_coverage_ledger.md |
 | Local secret storage and token retention | Plaintext local secrets | Needs follow-up | `.env`, the upstream shared secret, and the SQLite token database remain local plaintext storage surfaces with partial mitigations but without a stronger system secret store. Evidence: artifacts/03_coverage/repository_coverage_ledger.md |
-
-## Previously Tracked Open Findings
-
-These findings were open in prior audits and are not fully covered by the Codex scan findings above. They are carried forward to prevent silent loss.
-
-| ID | Severity | Area | Summary | Status |
-| --- | --- | --- | --- | --- |
-| M-5 | 🟡 Medium | Tunnel | Quick tunnel disables all hostname enforcement | Open |
-| M-6 | 🟡 Medium | Tunnel | Cloudflare credentials file permissions not verified | Needs follow-up (see Reviewed Surfaces) |
-| M-9 | 🟡 Medium | Credentials | Default username is predictable (`"admin"`) | Open |
-| M-10 | 🟡 Medium | Credentials | 7-character secret prefix logged in tracing output | Needs follow-up (see Reviewed Surfaces) |
-| M-12 | 🟡 Medium | Architecture | Gateway process is unsandboxed — full host access if compromised | Open |
-| L-2 | 🟢 Low | OAuth2 | No Content-Security-Policy or security headers on login page | Open |
-| L-10 | 🟢 Low | Ops | No vulnerability disclosure policy / root-level `SECURITY.md` | Open |
-
-### M-5 — Quick Tunnel Disables All Hostname Enforcement
-
-**File:** `crates/platform/src/config/env_file.rs`
-
-When `B3_CF_QUICK_TUNNEL=true` (or when no named tunnel is configured), the expected host resolves to `None`, so `validate_host()` is a no-op. Any request with any `Host` header is accepted. This compounds the host-header injection issue (Codex finding #1) because there is no configured hostname to compare against.
-
-**Recommendation:** Document this trade-off prominently. When using a quick tunnel, consider parsing the `cloudflared` stdout URL and using it for at minimum warning-level logging.
-
-### M-6 — Cloudflare Credentials File Permissions Not Verified
-
-**File:** `crates/platform/src/tunnel/cloudflare_setup.rs`
-
-The named tunnel credentials file (`~/.cloudflared/<id>.json`) grants full tunnel control but is used without verifying Unix permissions are `0600` or stricter. A world-readable credentials file on a shared system is a silent security failure.
-
-**Recommendation:** On startup, check the credentials file mode with `std::os::unix::fs::MetadataExt::mode()` and warn or refuse to start if permissions are looser than `0600`.
-
-### M-9 — Default Username is `"admin"` — Predictable
-
-**File:** `crates/core/src/domain/setup.rs`
-
-`DEFAULT_USERNAME` is `"admin"`, which removes one layer of defense-in-depth. The setup wizard prompts users to change it, but the constant still defaults to `"admin"`.
-
-**Recommendation:** Change `DEFAULT_USERNAME` to `"brain3"` or a random value such as `"user-<4-chars>"`.
-
-### M-10 — 7-Character Secret Prefix Logged in Tracing Output
-
-**File:** `crates/platform/src/config/upstream_secret.rs`
-
-The first 7 characters of the upstream shared secret are written to tracing output via `secret_hint`. The `elide_secret()` helper is used correctly elsewhere but was not applied here.
-
-**Recommendation:** Replace `&secret[..secret.len().min(7)]` with `elide_secret(&secret)` on both log call sites.
-
-### M-12 — Gateway Process Is Unsandboxed
-
-**Files:** N/A — absence of a control
-
-The Rust gateway runs as a normal OS process with no filesystem jail, no network egress restriction, and no capability dropping. If compromised, the attacker inherits full filesystem and network access of the user account running Brain3. This is a known accepted trade-off; the host process currently needs broad access (vault, `cloudflared`, container runtime API).
-
-**Recommendation (deferred):** Investigate Landlock (Linux 5.13+) or a macOS sandbox profile to restrict the gateway to only the paths it actually needs.
-
-### L-2 — No Content-Security-Policy or Security Headers on Login Page
-
-**Files:** `crates/platform/src/http/templates.rs`, `crates/platform/src/http/router.rs`
-
-The login page is served without `Content-Security-Policy`, `X-Frame-Options`, `Referrer-Policy`, or `X-Content-Type-Options`. The login form embeds hidden fields containing `redirect_uri` and `code_challenge`, making XSS on this page especially damaging.
-
-**Recommendation:** Add a `tower_http::set_header::SetResponseHeaderLayer` for HTML responses with at minimum:
-```
-Content-Security-Policy: default-src 'self'; style-src 'self'; img-src 'self' data:
-X-Frame-Options: DENY
-X-Content-Type-Options: nosniff
-Referrer-Policy: no-referrer
-```
-
-### L-10 — No Vulnerability Disclosure Policy
-
-There is no root-level `SECURITY.md`, no contact for security reports, and no discoverable threat-model document at a path GitHub or researchers would expect.
-
-**Recommendation:** Add a `SECURITY.md` at the repo root with a contact email or private GitHub issue template, a link to this audit's threat model, and the supported scope.
-
----
 
 ## Open Questions And Follow Up
 
