@@ -7,6 +7,8 @@ pub const DEFAULT_CLIENT_ID: &str = "brain3-oauth2-client";
 pub const DEFAULT_USERNAME: &str = "admin";
 pub const DEFAULT_CONTAINER_HOST_PORT: u16 = 2765;
 pub const DEFAULT_CONTAINER_MCP_PORT: u16 = 2765;
+pub const DEFAULT_CONTAINER_NAME: &str = "brain3-mcp-vault-tools";
+pub const DEFAULT_CONTAINER_NETWORK_NAME: &str = "brain3-mcp-net";
 pub const DEFAULT_LOCAL_MCP_PORT: u16 = 2764;
 pub const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 pub const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
@@ -66,7 +68,9 @@ pub struct SetupDraftConfig {
     pub container_image_repo: String,
     pub container_host_port: u16,
     pub container_mcp_port: u16,
+    pub container_name: String,
     pub container_network_isolated: bool,
+    pub container_network_name: String,
     pub local_mcp_enabled: bool,
     pub local_mcp_port: u16,
     pub local_mcp_bearer_token: String,
@@ -160,4 +164,48 @@ pub struct RuntimeLaunchPlan {
     pub paths: SetupPaths,
     pub env_file: PathBuf,
     pub log_file: PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanContainerPolicy {
+    SkipDuringSetup,
+    FailClosed,
+    GarbageCollectExplicitly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeStartupPolicy {
+    pub orphan_containers: OrphanContainerPolicy,
+}
+
+impl RuntimeStartupPolicy {
+    pub fn configured(gc_containers: bool) -> Self {
+        Self {
+            orphan_containers: if gc_containers {
+                OrphanContainerPolicy::GarbageCollectExplicitly
+            } else {
+                OrphanContainerPolicy::FailClosed
+            },
+        }
+    }
+
+    pub fn setup_or_reconfigure() -> Self {
+        Self {
+            orphan_containers: OrphanContainerPolicy::SkipDuringSetup,
+        }
+    }
+
+    pub fn checks_for_orphans(self) -> bool {
+        !matches!(
+            self.orphan_containers,
+            OrphanContainerPolicy::SkipDuringSetup
+        )
+    }
+
+    pub fn gc_containers_enabled(self) -> bool {
+        matches!(
+            self.orphan_containers,
+            OrphanContainerPolicy::GarbageCollectExplicitly
+        )
+    }
 }

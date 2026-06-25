@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::domain::model::ManagedContainerInfo;
+
 #[derive(Debug, Error)]
 pub enum ProxyError {
     #[error("unauthorized: {0}")]
@@ -22,6 +24,8 @@ pub enum ContainerError {
     RuntimeNotFound(String),
     #[error("image not found: {0}")]
     ImageNotFound(String),
+    #[error("container conflict: {0}")]
+    Conflict(String),
     #[error("command failed (exit {code}): {stderr}")]
     CommandFailed { code: i32, stderr: String },
     #[error("command could not be spawned: {0}")]
@@ -30,6 +34,13 @@ pub enum ContainerError {
     StartupFailed {
         summary: String,
         logs: Option<String>,
+        started_container: bool,
+    },
+    #[error("{summary}")]
+    OrphanedManagedContainers {
+        summary: String,
+        installation_id: String,
+        containers: Vec<ManagedContainerInfo>,
     },
     #[error("container error: {0}")]
     Other(String),
@@ -39,6 +50,7 @@ impl ContainerError {
     pub fn summary(&self) -> String {
         match self {
             Self::StartupFailed { summary, .. } => summary.clone(),
+            Self::OrphanedManagedContainers { summary, .. } => summary.clone(),
             other => other.to_string(),
         }
     }
@@ -49,6 +61,46 @@ impl ContainerError {
                 logs: Some(logs), ..
             } => Some(logs.as_str()),
             _ => None,
+        }
+    }
+
+    pub fn started_container(&self) -> bool {
+        match self {
+            Self::StartupFailed {
+                started_container, ..
+            } => *started_container,
+            _ => false,
+        }
+    }
+
+    pub fn orphaned_managed_containers(&self) -> Option<&[ManagedContainerInfo]> {
+        match self {
+            Self::OrphanedManagedContainers { containers, .. } => Some(containers.as_slice()),
+            _ => None,
+        }
+    }
+
+    pub fn requires_explicit_gc(&self) -> bool {
+        matches!(self, Self::OrphanedManagedContainers { .. })
+    }
+
+    pub fn orphaned_managed_containers_for_installation(
+        installation_id: String,
+        containers: Vec<ManagedContainerInfo>,
+    ) -> Self {
+        let details = containers
+            .iter()
+            .map(|container| format!("{} ({})", container.name, container.state))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let summary = format!(
+            "Brain3 found managed MCP containers from this installation already present: {details}"
+        );
+
+        Self::OrphanedManagedContainers {
+            summary,
+            installation_id,
+            containers,
         }
     }
 }

@@ -79,9 +79,14 @@ fn build_overrides(
         "B3_CONTAINER_MCP_PORT",
         draft.container_mcp_port.to_string(),
     );
+    values.insert("B3_CONTAINER_NAME", draft.container_name.clone());
     values.insert(
         "B3_CONTAINER_INTERNAL_NETWORK_ISOLATION",
         draft.container_network_isolated.to_string(),
+    );
+    values.insert(
+        "B3_CONTAINER_NETWORK_NAME",
+        draft.container_network_name.clone(),
     );
     values.insert(
         "B3_LOCAL_MCP_PORT",

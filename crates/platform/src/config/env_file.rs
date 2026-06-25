@@ -939,4 +939,34 @@ mod tests {
             );
         });
     }
+
+    #[test]
+    fn load_reads_explicit_container_name_and_network_name() {
+        with_clean_config_env(|| {
+            let vault_dir = env::temp_dir().join("brain3-config-test-vault-container-names");
+            fs::create_dir_all(&vault_dir).unwrap();
+            let token_db = env::temp_dir().join("brain3-config-test-container-names.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_CF_QUICK_TUNNEL=false\n\
+                 B3_CONTAINER_RUNTIME=macos-container\n\
+                 B3_VAULT_PATH={}\n\
+                 B3_CONTAINER_IMAGE_REPO=ghcr.io/tleyden/brain3-mcp-vault-tools\n\
+                 B3_CONTAINER_NAME=saved-container-name\n\
+                 B3_CONTAINER_NETWORK_NAME=saved-network-name\n",
+                token_db.display(),
+                vault_dir.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+            let container = config.container.expect("container config should be present");
+
+            assert_eq!(container.container_name, "saved-container-name");
+            assert_eq!(container.network_name, "saved-network-name");
+        });
+    }
 }

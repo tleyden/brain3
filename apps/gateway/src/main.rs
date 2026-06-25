@@ -13,9 +13,11 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
 
+use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{GatewayConfig, TunnelConfig};
 use brain3_core::domain::setup::{
-    DependencyAvailability, DependencyStatus, RuntimeLaunchPlan, SetupDefaults,
+    DependencyAvailability, DependencyStatus, RuntimeLaunchPlan, RuntimeStartupPolicy,
+    SetupDefaults,
 };
 use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::setup_system::SetupSystemPort;
@@ -86,6 +88,12 @@ struct Args {
     )]
     container_tag: Option<String>,
 
+    #[arg(
+        long,
+        help = "Explicitly stop and remove Brain3-managed orphan MCP containers for this installation before configured startup"
+    )]
+    gc_containers: bool,
+
     #[arg(long, value_enum, default_value = "info")]
     log_level: LogLevel,
 }
@@ -117,6 +125,12 @@ enum EffectiveContainerImageSource {
 struct EffectiveContainerImage {
     image: String,
     source: EffectiveContainerImageSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfiguredStartupOptions {
+    startup_policy: RuntimeStartupPolicy,
+    orphan_gc_rerun_command: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -199,6 +213,13 @@ fn runtime_launch_plan(resolved_env: &ResolvedEnvFile, log_file: PathBuf) -> Run
         paths: resolved_env.app_home.as_setup_paths(),
         env_file: resolved_env.env_file.clone(),
         log_file,
+    }
+}
+
+fn configured_startup_options(args: &Args, mode: LaunchMode) -> ConfiguredStartupOptions {
+    ConfiguredStartupOptions {
+        startup_policy: RuntimeStartupPolicy::configured(args.gc_containers),
+        orphan_gc_rerun_command: gc_containers_rerun_command(args, mode),
     }
 }
 
@@ -330,7 +351,7 @@ fn is_interactive_terminal() -> bool {
     stdin().is_terminal() && stdout().is_terminal() && stderr().is_terminal()
 }
 
-fn brain3_command(args: &Args, mode: LaunchMode) -> String {
+fn brain3_command_parts(args: &Args, mode: LaunchMode) -> Vec<String> {
     let mut parts = vec!["brain3".to_string()];
 
     match mode {
@@ -359,7 +380,51 @@ fn brain3_command(args: &Args, mode: LaunchMode) -> String {
         parts.push(shell_quote(container_tag));
     }
 
+    if args.gc_containers {
+        parts.push("--gc-containers".into());
+    }
+
+    parts
+}
+
+fn brain3_command(args: &Args, mode: LaunchMode) -> String {
+    brain3_command_parts(args, mode).join(" ")
+}
+
+fn gc_containers_rerun_command(args: &Args, mode: LaunchMode) -> String {
+    let mut parts = brain3_command_parts(args, mode);
+    if !args.gc_containers {
+        parts.push("--gc-containers".into());
+    }
     parts.join(" ")
+}
+
+fn container_error_from_anyhow(error: &anyhow::Error) -> Option<&ContainerError> {
+    error
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<ContainerError>())
+}
+
+pub(crate) fn format_startup_error_message(
+    error: &anyhow::Error,
+    gc_rerun_command: Option<&str>,
+) -> String {
+    if matches!(
+        container_error_from_anyhow(error),
+        Some(ContainerError::OrphanedManagedContainers { .. })
+    ) {
+        let mut message = error.to_string();
+        if let Some(command) = gc_rerun_command {
+            message.push_str(
+                "\n\nBrain3 refused to auto-delete managed orphan MCP containers without explicit approval.",
+            );
+            message.push_str("\nRerun with:\n  ");
+            message.push_str(command);
+        }
+        return message;
+    }
+
+    error.to_string()
 }
 
 fn shell_quote(value: &str) -> String {
@@ -504,7 +569,7 @@ fn ensure_cli_ready(dependencies: &DependencyStatus) -> Result<()> {
     );
 }
 
-fn load_config(
+pub(crate) fn load_config(
     env_file: PathBuf,
     runtime_overrides: &RuntimeOverrides,
 ) -> Result<Arc<brain3_core::domain::model::GatewayConfig>> {
@@ -533,6 +598,7 @@ async fn run_cli_mode(
     config: Arc<GatewayConfig>,
     launch_plan: RuntimeLaunchPlan,
     logging: &logging::GatewayLogging,
+    startup_options: &ConfiguredStartupOptions,
 ) -> Result<()> {
     let setup_system = PlatformSetupSystem::new();
     let dependencies = setup_system
@@ -543,7 +609,24 @@ async fn run_cli_mode(
 
     logging.enable_terminal_mirror();
 
-    let mut runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
+    let mut runtime = match bootstrap_configured_runtime(
+        Arc::clone(&config),
+        launch_plan,
+        startup_options.startup_policy,
+    )
+    .await
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            anyhow::bail!(
+                "{}",
+                format_startup_error_message(
+                    &error,
+                    Some(&startup_options.orphan_gc_rerun_command)
+                )
+            );
+        }
+    };
 
     if let Some(public_url) = &runtime.public_url {
         tracing::info!(url = %public_url, "runtime public URL ready");
@@ -624,10 +707,14 @@ async fn main() -> Result<()> {
             if !interactive_terminal {
                 return noninteractive_configured_launch_guidance(&args, &resolved_env);
             }
+            let startup_options = configured_startup_options(&args, LaunchMode::Tui);
             tui::run_gateway_tui(
                 &args.host,
                 logging.log_file.clone(),
-                GatewayTuiLaunch::Configured { launch_plan },
+                GatewayTuiLaunch::Configured {
+                    launch_plan,
+                    startup_options,
+                },
                 setup_defaults(),
                 runtime_overrides.clone(),
                 args.brain3_home.clone(),
@@ -639,7 +726,8 @@ async fn main() -> Result<()> {
             if named_tunnel_setup_config(&config).is_some() {
                 return named_tunnel_setup_requires_tui(&args, &resolved_env);
             }
-            run_cli_mode(&args.host, config, launch_plan, &logging).await
+            let startup_options = configured_startup_options(&args, LaunchMode::Cli);
+            run_cli_mode(&args.host, config, launch_plan, &logging, &startup_options).await
         }
         LaunchDispatch::Setup { env_file } => run_setup_mode(env_file, &runtime_overrides).await,
     }
@@ -653,6 +741,9 @@ mod tests {
     use std::sync::{LazyLock, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use anyhow::anyhow;
+    use brain3_core::domain::errors::ContainerError;
+    use brain3_core::domain::model::ManagedContainerInfo;
     use brain3_core::domain::setup::{
         DependencyAvailability, DependencyStatus, InstallAction, PackageManager,
         SetupOperatingSystem,
@@ -740,6 +831,18 @@ mod tests {
             .expect("container tag args should parse");
 
         assert_eq!(args.container_tag.as_deref(), Some("pr-123"));
+    }
+
+    #[test]
+    fn args_accept_gc_containers_flag() {
+        let args = Args::try_parse_from(["brain3", "--cli", "--gc-containers"])
+            .expect("gc containers args should parse");
+
+        assert!(args.gc_containers);
+        assert_eq!(
+            configured_startup_options(&args, LaunchMode::Cli).startup_policy,
+            RuntimeStartupPolicy::configured(true)
+        );
     }
 
     #[test]
@@ -871,6 +974,27 @@ mod tests {
             err.to_string().contains("rerun without --cli"),
             "unexpected error: {err:#}"
         );
+    }
+
+    #[test]
+    fn configured_startup_orphan_failure_includes_gc_rerun_guidance() {
+        let error = anyhow!(
+            ContainerError::orphaned_managed_containers_for_installation(
+                "scope-1".into(),
+                vec![ManagedContainerInfo {
+                    name: "brain3-old".into(),
+                    running: true,
+                    state: "running".into(),
+                    labels: vec![],
+                }],
+            )
+        );
+
+        let message = format_startup_error_message(&error, Some("brain3 --cli --gc-containers"));
+
+        assert!(message.contains("brain3-old"));
+        assert!(message.contains("brain3 --cli --gc-containers"));
+        assert!(message.contains("refused to auto-delete"));
     }
 
     fn dependency_status(

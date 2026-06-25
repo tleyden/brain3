@@ -1,18 +1,52 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use brain3_core::application::ensure_container::EnsureContainerUseCase;
 use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{
-    BindMount, ContainerConfig, ContainerRuntime, ContainerStartupConfig, PortMapping,
+    BindMount, ContainerConfig, ContainerLabel, ContainerRuntime, ContainerStartupConfig,
+    ManagedContainerInfo, ManagedContainerScope, PortMapping, BRAIN3_INSTALLATION_ID_LABEL_KEY,
+    BRAIN3_MANAGED_LABEL_KEY, BRAIN3_MANAGED_LABEL_VALUE, BRAIN3_MCP_ROLE_LABEL_VALUE,
+    BRAIN3_ROLE_LABEL_KEY,
 };
+use brain3_core::domain::setup::RuntimeStartupPolicy;
 use brain3_core::ports::container::{ContainerId, ContainerPort};
 
 use super::{DockerContainerAdapter, MacOsContainerAdapter};
 
 const DEV_MOUNT_TARGET: &str = "/workspace/brain3-mcp-vault-tools";
 
+pub fn installation_scope_id(app_home: &Path, env_file: &Path) -> String {
+    let app_home = normalize_scope_path(app_home);
+    let env_file = normalize_scope_path(env_file);
+    let scope = format!("app_home={app_home}\nenv_file={env_file}");
+
+    format!("b3-{:016x}", fnv1a64(scope.as_bytes()))
+}
+
+fn normalize_scope_path(path: &Path) -> String {
+    path.canonicalize()
+        .unwrap_or_else(|_| path.to_path_buf())
+        .display()
+        .to_string()
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+    const PRIME: u64 = 0x100000001b3;
+
+    let mut hash = OFFSET_BASIS;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
+}
+
 pub async fn ensure_mcp_container(
     startup: &ContainerStartupConfig,
+    startup_policy: RuntimeStartupPolicy,
+    installation_id: &str,
 ) -> Result<Option<String>, ContainerError> {
     let dev_mode = startup.dev_mount_source.is_some();
     tracing::info!(
@@ -20,6 +54,7 @@ pub async fn ensure_mcp_container(
         image = %startup.image,
         vault = %startup.vault_path.display(),
         host_port = startup.host_port,
+        installation_id,
         upstream_secret_configured = !startup.upstream_secret.is_empty(),
         dev_mode,
         "ensuring MCP container is running"
@@ -28,14 +63,69 @@ pub async fn ensure_mcp_container(
         container = %startup.container_name,
         network_isolated = startup.isolation_strategy.is_some(),
         isolation_strategy = ?startup.isolation_strategy,
+        startup_policy = ?startup_policy,
         "resolved MCP container network isolation mode"
     );
 
-    let port: Arc<dyn ContainerPort> = match startup.runtime {
+    let port = container_port_for_runtime(startup.runtime);
+    maybe_handle_managed_container_orphans(port.as_ref(), startup, startup_policy, installation_id)
+        .await?;
+
+    let config = build_container_config(startup, installation_id);
+    let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
+    Ok(container_ip)
+}
+
+pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
+    let port = container_port_for_runtime(startup.runtime);
+    let id = ContainerId(startup.container_name.clone());
+
+    if !port.exists(&id).await? {
+        tracing::debug!(container = %startup.container_name, "managed MCP container already absent during shutdown");
+        return Ok(());
+    }
+
+    if !port.is_running(&id).await? {
+        tracing::debug!(container = %startup.container_name, "managed MCP container already stopped during shutdown");
+        return Ok(());
+    }
+
+    tracing::info!(container = %startup.container_name, runtime = ?startup.runtime, "stopping managed MCP container during shutdown");
+    port.stop(&id).await
+}
+
+fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
+    match runtime {
         ContainerRuntime::Docker => Arc::new(DockerContainerAdapter),
         ContainerRuntime::MacOSContainer => Arc::new(MacOsContainerAdapter),
-    };
+    }
+}
 
+fn managed_container_scope(installation_id: &str) -> ManagedContainerScope {
+    ManagedContainerScope::mcp(installation_id.to_string())
+}
+
+fn managed_container_labels(installation_id: &str) -> Vec<ContainerLabel> {
+    vec![
+        ContainerLabel {
+            key: BRAIN3_MANAGED_LABEL_KEY.into(),
+            value: BRAIN3_MANAGED_LABEL_VALUE.into(),
+        },
+        ContainerLabel {
+            key: BRAIN3_ROLE_LABEL_KEY.into(),
+            value: BRAIN3_MCP_ROLE_LABEL_VALUE.into(),
+        },
+        ContainerLabel {
+            key: BRAIN3_INSTALLATION_ID_LABEL_KEY.into(),
+            value: installation_id.to_string(),
+        },
+    ]
+}
+
+fn build_container_config(
+    startup: &ContainerStartupConfig,
+    installation_id: &str,
+) -> ContainerConfig {
     let uid_gid = format!("{}:{}", unsafe { libc::getuid() }, unsafe {
         libc::getgid()
     });
@@ -93,6 +183,7 @@ pub async fn ensure_mcp_container(
         .map(|(_, value)| value.as_str());
     tracing::info!(
         container = %startup.container_name,
+        installation_id,
         network_isolated = startup.isolation_strategy.is_some(),
         isolation_strategy = ?startup.isolation_strategy,
         host_probe_target = %format!("127.0.0.1:{}", startup.host_port),
@@ -102,7 +193,7 @@ pub async fn ensure_mcp_container(
         "prepared MCP container runtime networking configuration"
     );
 
-    let config = ContainerConfig {
+    ContainerConfig {
         image: startup.image.clone(),
         name: startup.container_name.clone(),
         isolation_strategy: startup.isolation_strategy,
@@ -113,35 +204,327 @@ pub async fn ensure_mcp_container(
             container_port: startup.container_port,
         }],
         env_vars,
+        labels: managed_container_labels(installation_id),
         bind_mounts,
         user: Some(uid_gid),
         detach: true,
         remove_on_exit: matches!(startup.runtime, ContainerRuntime::Docker),
         workdir,
         command,
-    };
-
-    let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
-    Ok(container_ip)
+    }
 }
 
-pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
-    let port: Arc<dyn ContainerPort> = match startup.runtime {
-        ContainerRuntime::Docker => Arc::new(DockerContainerAdapter),
-        ContainerRuntime::MacOSContainer => Arc::new(MacOsContainerAdapter),
-    };
-    let id = ContainerId(startup.container_name.clone());
-
-    if !port.exists(&id).await? {
-        tracing::debug!(container = %startup.container_name, "managed MCP container already absent during shutdown");
+async fn maybe_handle_managed_container_orphans(
+    port: &dyn ContainerPort,
+    startup: &ContainerStartupConfig,
+    startup_policy: RuntimeStartupPolicy,
+    installation_id: &str,
+) -> Result<(), ContainerError> {
+    if !startup_policy.checks_for_orphans() {
+        tracing::debug!(
+            container = %startup.container_name,
+            installation_id,
+            "skipping managed-container orphan preflight during setup or reconfiguration"
+        );
         return Ok(());
     }
 
-    if !port.is_running(&id).await? {
-        tracing::debug!(container = %startup.container_name, "managed MCP container already stopped during shutdown");
+    let scope = managed_container_scope(installation_id);
+    let containers = port.list_managed_containers(&scope).await?;
+    if containers.is_empty() {
+        tracing::debug!(
+            installation_id,
+            "no managed orphan containers found for this installation scope"
+        );
         return Ok(());
     }
 
-    tracing::info!(container = %startup.container_name, runtime = ?startup.runtime, "stopping managed MCP container during shutdown");
-    port.stop(&id).await
+    if !startup_policy.gc_containers_enabled() {
+        tracing::warn!(
+            installation_id,
+            containers = ?containers,
+            "managed orphan containers detected; refusing cleanup without explicit startup approval"
+        );
+        return Err(
+            ContainerError::orphaned_managed_containers_for_installation(
+                installation_id.to_string(),
+                containers,
+            ),
+        );
+    }
+
+    garbage_collect_managed_containers(port, installation_id, containers).await
+}
+
+async fn garbage_collect_managed_containers(
+    port: &dyn ContainerPort,
+    installation_id: &str,
+    containers: Vec<ManagedContainerInfo>,
+) -> Result<(), ContainerError> {
+    for container in containers {
+        let id = ContainerId(container.name.clone());
+        if container.running {
+            tracing::warn!(
+                installation_id,
+                container = %container.name,
+                state = %container.state,
+                "stopping managed orphan MCP container before removal"
+            );
+            port.stop(&id).await.map_err(|error| {
+                ContainerError::Other(format!(
+                    "failed to stop managed orphan container '{}': {}",
+                    container.name,
+                    error.summary()
+                ))
+            })?;
+        } else {
+            tracing::info!(
+                installation_id,
+                container = %container.name,
+                state = %container.state,
+                "removing stopped managed orphan MCP container"
+            );
+        }
+
+        port.remove(&id).await.map_err(|error| {
+            ContainerError::Other(format!(
+                "failed to remove managed orphan container '{}': {}",
+                container.name,
+                error.summary()
+            ))
+        })?;
+        tracing::info!(
+            installation_id,
+            container = %container.name,
+            "removed managed orphan MCP container"
+        );
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use brain3_core::domain::model::{ContainerNetworkIsolationStrategy, ManagedContainerInfo};
+    use brain3_core::ports::container::NetworkPreparation;
+
+    use super::*;
+
+    #[derive(Debug, Clone, Default)]
+    struct MockState {
+        managed_containers: Vec<ManagedContainerInfo>,
+        stop_calls: Vec<String>,
+        remove_calls: Vec<String>,
+    }
+
+    struct MockContainerPort {
+        state: Mutex<MockState>,
+    }
+
+    impl MockContainerPort {
+        fn new(state: MockState) -> Self {
+            Self {
+                state: Mutex::new(state),
+            }
+        }
+
+        fn snapshot(&self) -> MockState {
+            self.state
+                .lock()
+                .expect("lock should not be poisoned")
+                .clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl ContainerPort for MockContainerPort {
+        async fn image_exists(&self, _image: &str) -> Result<bool, ContainerError> {
+            Ok(true)
+        }
+
+        async fn pull_image(&self, _image: &str) -> Result<(), ContainerError> {
+            Ok(())
+        }
+
+        async fn exists(&self, _id: &ContainerId) -> Result<bool, ContainerError> {
+            Ok(false)
+        }
+
+        async fn is_running(&self, _id: &ContainerId) -> Result<bool, ContainerError> {
+            Ok(false)
+        }
+
+        async fn logs_tail(
+            &self,
+            _id: &ContainerId,
+            _lines: usize,
+        ) -> Result<String, ContainerError> {
+            Ok(String::new())
+        }
+
+        async fn ensure_internal_network(
+            &self,
+            _network_name: &str,
+        ) -> Result<NetworkPreparation, ContainerError> {
+            Ok(NetworkPreparation::Created)
+        }
+
+        async fn get_container_ip(
+            &self,
+            _id: &ContainerId,
+        ) -> Result<Option<String>, ContainerError> {
+            Ok(None)
+        }
+
+        async fn list_managed_containers(
+            &self,
+            _scope: &ManagedContainerScope,
+        ) -> Result<Vec<ManagedContainerInfo>, ContainerError> {
+            Ok(self
+                .state
+                .lock()
+                .expect("lock should not be poisoned")
+                .managed_containers
+                .clone())
+        }
+
+        async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
+            Ok(ContainerId(config.name.clone()))
+        }
+
+        async fn stop(&self, id: &ContainerId) -> Result<(), ContainerError> {
+            self.state
+                .lock()
+                .expect("lock should not be poisoned")
+                .stop_calls
+                .push(id.0.clone());
+            Ok(())
+        }
+
+        async fn remove(&self, id: &ContainerId) -> Result<(), ContainerError> {
+            self.state
+                .lock()
+                .expect("lock should not be poisoned")
+                .remove_calls
+                .push(id.0.clone());
+            Ok(())
+        }
+    }
+
+    fn sample_startup() -> ContainerStartupConfig {
+        ContainerStartupConfig {
+            runtime: ContainerRuntime::Docker,
+            image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.2.3".into(),
+            container_name: "brain3-mcp-vault-tools".into(),
+            network_name: "brain3-mcp-net".into(),
+            vault_path: "/tmp/vault".into(),
+            upstream_secret: "secret".into(),
+            host_port: 2765,
+            container_port: 2765,
+            isolation_strategy: Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp),
+            dev_mount_source: None,
+            mcp_log_level: None,
+        }
+    }
+
+    #[test]
+    fn installation_scope_id_changes_with_env_scope() {
+        let first = installation_scope_id(
+            Path::new("/tmp/brain3-home-a"),
+            Path::new("/tmp/brain3-home-a/.env"),
+        );
+        let second = installation_scope_id(
+            Path::new("/tmp/brain3-home-a"),
+            Path::new("/tmp/brain3-home-b/.env"),
+        );
+
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn build_container_config_adds_brain3_labels() {
+        let config = build_container_config(&sample_startup(), "scope-1");
+        assert_eq!(
+            config.labels,
+            vec![
+                ContainerLabel {
+                    key: BRAIN3_MANAGED_LABEL_KEY.into(),
+                    value: BRAIN3_MANAGED_LABEL_VALUE.into(),
+                },
+                ContainerLabel {
+                    key: BRAIN3_ROLE_LABEL_KEY.into(),
+                    value: BRAIN3_MCP_ROLE_LABEL_VALUE.into(),
+                },
+                ContainerLabel {
+                    key: BRAIN3_INSTALLATION_ID_LABEL_KEY.into(),
+                    value: "scope-1".into(),
+                },
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn orphan_preflight_requires_explicit_gc() {
+        let port = MockContainerPort::new(MockState {
+            managed_containers: vec![ManagedContainerInfo {
+                name: "brain3-old".into(),
+                running: true,
+                state: "running".into(),
+                labels: managed_container_labels("scope-1"),
+            }],
+            ..Default::default()
+        });
+
+        let error = maybe_handle_managed_container_orphans(
+            &port,
+            &sample_startup(),
+            RuntimeStartupPolicy::configured(false),
+            "scope-1",
+        )
+        .await
+        .expect_err("orphan preflight should fail closed without explicit gc");
+
+        assert!(error.requires_explicit_gc());
+        assert_eq!(port.snapshot().stop_calls, Vec::<String>::new());
+        assert_eq!(port.snapshot().remove_calls, Vec::<String>::new());
+    }
+
+    #[tokio::test]
+    async fn gc_containers_stops_running_and_removes_all_scoped_orphans() {
+        let port = MockContainerPort::new(MockState {
+            managed_containers: vec![
+                ManagedContainerInfo {
+                    name: "brain3-running".into(),
+                    running: true,
+                    state: "running".into(),
+                    labels: managed_container_labels("scope-1"),
+                },
+                ManagedContainerInfo {
+                    name: "brain3-exited".into(),
+                    running: false,
+                    state: "exited".into(),
+                    labels: managed_container_labels("scope-1"),
+                },
+            ],
+            ..Default::default()
+        });
+
+        maybe_handle_managed_container_orphans(
+            &port,
+            &sample_startup(),
+            RuntimeStartupPolicy::configured(true),
+            "scope-1",
+        )
+        .await
+        .expect("gc should remove scoped managed orphans");
+
+        let state = port.snapshot();
+        assert_eq!(state.stop_calls, vec!["brain3-running".to_string()]);
+        assert_eq!(
+            state.remove_calls,
+            vec!["brain3-running".to_string(), "brain3-exited".to_string()]
+        );
+    }
 }

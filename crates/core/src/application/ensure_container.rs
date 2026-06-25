@@ -5,7 +5,10 @@ use std::time::{Duration, Instant};
 
 use crate::domain::errors::ContainerError;
 use crate::domain::model::{ContainerConfig, ContainerNetworkIsolationStrategy, PortMapping};
-use crate::ports::container::{ContainerId, ContainerPort};
+use crate::ports::container::{ContainerId, ContainerPort, NetworkPreparation};
+
+#[cfg(test)]
+use crate::domain::model::{ManagedContainerInfo, ManagedContainerScope};
 
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -72,26 +75,26 @@ impl EnsureContainerUseCase {
         let id = ContainerId(config.name.clone());
 
         if self.port.exists(&id).await? {
-            if self.port.is_running(&id).await? {
-                tracing::info!(container = %config.name, "stopping running container to pick up fresh shared secret");
-                self.port.stop(&id).await?;
-            }
-            tracing::info!(container = %config.name, "removing container before fresh start");
-            self.port.remove(&id).await?;
+            return Err(ContainerError::Conflict(format!(
+                "container name '{}' already exists; choose a different container name",
+                config.name
+            )));
         }
 
         tracing::info!(container = %config.name, image = %config.image, "starting container");
         let runtime_config = config.clone();
         if config.isolation_strategy.is_some() {
-            let isolation_ok = self
+            let preparation = self
                 .port
-                .prepare_network_isolation(&config.network_name)
+                .ensure_internal_network(&config.network_name)
                 .await?;
-            if !isolation_ok {
-                return Err(ContainerError::Other(format!(
-                    "network isolation setup failed for '{}' — aborting to preserve security posture",
-                    config.network_name
-                )));
+            match preparation {
+                NetworkPreparation::Created => {
+                    tracing::info!(network = %config.network_name, "created internal MCP network");
+                }
+                NetworkPreparation::Reused => {
+                    tracing::info!(network = %config.network_name, "reusing existing compatible internal MCP network");
+                }
             }
         }
 
@@ -100,7 +103,34 @@ impl EnsureContainerUseCase {
         let container_ip = if runtime_config.isolation_strategy
             == Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
         {
-            self.port.get_container_ip(&id).await?
+            match self.port.get_container_ip(&id).await {
+                Ok(Some(container_ip)) => Some(container_ip),
+                Ok(None) => {
+                    return Err(self
+                        .startup_failed(
+                            &id,
+                            format!(
+                                "container '{}' started but did not report a container IP",
+                                config.name
+                            ),
+                            true,
+                        )
+                        .await)
+                }
+                Err(error) => {
+                    return Err(self
+                        .startup_failed(
+                            &id,
+                            format!(
+                                "container '{}' started but failed during IP discovery: {}",
+                                config.name,
+                                error.summary()
+                            ),
+                            true,
+                        )
+                        .await)
+                }
+            }
         } else {
             None
         };
@@ -146,6 +176,7 @@ impl EnsureContainerUseCase {
                             "container '{}' exited during startup verification",
                             config.name
                         ),
+                        true,
                     )
                     .await);
             }
@@ -171,6 +202,7 @@ impl EnsureContainerUseCase {
                             "container '{}' did not become reachable on {} before timeout",
                             config.name, probe_desc
                         ),
+                        true,
                     )
                     .await);
             }
@@ -179,7 +211,12 @@ impl EnsureContainerUseCase {
         }
     }
 
-    async fn startup_failed(&self, id: &ContainerId, summary: String) -> ContainerError {
+    async fn startup_failed(
+        &self,
+        id: &ContainerId,
+        summary: String,
+        started_container: bool,
+    ) -> ContainerError {
         let logs = match self
             .port
             .logs_tail(id, self.probe_settings.log_tail_lines)
@@ -205,7 +242,11 @@ impl EnsureContainerUseCase {
             tracing::error!(container = %id.0, summary, "container startup verification failed");
         }
 
-        ContainerError::StartupFailed { summary, logs }
+        ContainerError::StartupFailed {
+            summary,
+            logs,
+            started_container,
+        }
     }
 }
 
@@ -239,9 +280,10 @@ mod tests {
         container_exists: bool,
         container_running: bool,
         running_checks: Vec<bool>,
+        container_ip: Option<String>,
         logs_tail_output: Option<String>,
-        prepare_network_isolation_result: bool,
-        prepare_network_isolation_count: usize,
+        ensure_internal_network_result: MockNetworkResult,
+        ensure_internal_network_count: usize,
         last_run_isolation_strategy: Option<Option<ContainerNetworkIsolationStrategy>>,
         pull_count: usize,
         stop_count: usize,
@@ -249,6 +291,19 @@ mod tests {
         run_count: usize,
         logs_tail_count: usize,
         actions: Vec<&'static str>,
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum MockNetworkResult {
+        Created,
+        Reused,
+        Conflict,
+    }
+
+    impl Default for MockNetworkResult {
+        fn default() -> Self {
+            Self::Created
+        }
     }
 
     struct MockContainerPort {
@@ -309,14 +364,21 @@ mod tests {
             Ok(state.logs_tail_output.clone().unwrap_or_default())
         }
 
-        async fn prepare_network_isolation(
+        async fn ensure_internal_network(
             &self,
-            _network_name: &str,
-        ) -> Result<bool, ContainerError> {
+            network_name: &str,
+        ) -> Result<NetworkPreparation, ContainerError> {
             let mut state = self.state.lock().unwrap();
-            state.actions.push("prepare_network_isolation");
-            state.prepare_network_isolation_count += 1;
-            Ok(state.prepare_network_isolation_result)
+            state.actions.push("ensure_internal_network");
+            state.ensure_internal_network_count += 1;
+            match state.ensure_internal_network_result {
+                MockNetworkResult::Created => Ok(NetworkPreparation::Created),
+                MockNetworkResult::Reused => Ok(NetworkPreparation::Reused),
+                MockNetworkResult::Conflict => Err(ContainerError::Conflict(format!(
+                    "container network name '{}' already exists and is not a compatible internal Brain3 network; choose a different container network name",
+                    network_name
+                ))),
+            }
         }
 
         async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
@@ -349,7 +411,16 @@ mod tests {
             &self,
             _id: &ContainerId,
         ) -> Result<Option<String>, ContainerError> {
-            Ok(None)
+            let mut state = self.state.lock().unwrap();
+            state.actions.push("get_container_ip");
+            Ok(state.container_ip.clone())
+        }
+
+        async fn list_managed_containers(
+            &self,
+            _scope: &ManagedContainerScope,
+        ) -> Result<Vec<ManagedContainerInfo>, ContainerError> {
+            Ok(Vec::new())
         }
     }
 
@@ -361,6 +432,7 @@ mod tests {
             network_name: "brain3-mcp-net".into(),
             port_mappings: vec![],
             env_vars: vec![],
+            labels: vec![],
             bind_mounts: vec![],
             user: None,
             detach: true,
@@ -410,7 +482,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn restarts_existing_running_container_without_repulling_existing_image() {
+    async fn returns_conflict_when_container_name_already_exists() {
         let port = Arc::new(MockContainerPort::new(MockState {
             image_exists: true,
             container_exists: true,
@@ -420,58 +492,93 @@ mod tests {
         let use_case = short_probe_use_case(port.clone());
         let config = sample_config();
 
+        let err = use_case
+            .ensure(&config)
+            .await
+            .expect_err("existing container name should be rejected");
+
+        assert!(
+            matches!(err, ContainerError::Conflict(ref message) if message.contains("different container name")),
+            "expected container conflict, got {err:?}"
+        );
+
+        let state = port.snapshot();
+        assert_eq!(state.pull_count, 0);
+        assert_eq!(state.run_count, 0);
+        assert_eq!(state.stop_count, 0);
+        assert_eq!(state.remove_count, 0);
+        assert_eq!(state.actions, vec!["image_exists", "exists"]);
+    }
+
+    #[tokio::test]
+    async fn reuses_compatible_existing_internal_network_without_recreating_it() {
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            container_ip: Some("127.0.0.1".into()),
+            ensure_internal_network_result: MockNetworkResult::Reused,
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let mut config = sample_config();
+        config.isolation_strategy = Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp);
+
         let (id, _) = use_case.ensure(&config).await.unwrap();
 
         assert_eq!(id.0, config.name);
 
         let state = port.snapshot();
-        assert_eq!(state.pull_count, 0);
+        assert_eq!(state.ensure_internal_network_count, 1);
         assert_eq!(state.run_count, 1);
-        assert_eq!(state.stop_count, 1);
-        assert_eq!(state.remove_count, 1);
         assert_eq!(
             state.actions,
             vec![
                 "image_exists",
                 "exists",
-                "is_running",
-                "stop",
-                "remove",
+                "ensure_internal_network",
                 "run",
+                "get_container_ip",
                 "is_running"
             ]
         );
     }
 
     #[tokio::test]
-    async fn removes_existing_stopped_container_before_fresh_start() {
+    async fn returns_startup_failed_when_discover_container_ip_returns_none() {
         let port = Arc::new(MockContainerPort::new(MockState {
             image_exists: true,
-            container_exists: true,
-            container_running: false,
             ..Default::default()
         }));
         let use_case = short_probe_use_case(port.clone());
-        let config = sample_config();
+        let mut config = sample_config();
+        config.isolation_strategy = Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp);
 
-        let (id, _) = use_case.ensure(&config).await.unwrap();
+        let error = use_case
+            .ensure(&config)
+            .await
+            .expect_err("missing container IP should fail isolated startup");
 
-        assert_eq!(id.0, config.name);
+        match error {
+            ContainerError::StartupFailed {
+                summary,
+                started_container: true,
+                ..
+            } => {
+                assert!(summary.contains("did not report a container IP"));
+            }
+            other => panic!("expected startup failure, got {other:?}"),
+        }
 
         let state = port.snapshot();
-        assert_eq!(state.pull_count, 0);
-        assert_eq!(state.run_count, 1);
-        assert_eq!(state.stop_count, 0);
-        assert_eq!(state.remove_count, 1);
+        assert_eq!(state.logs_tail_count, 1);
         assert_eq!(
             state.actions,
             vec![
                 "image_exists",
                 "exists",
-                "is_running",
-                "remove",
+                "ensure_internal_network",
                 "run",
-                "is_running"
+                "get_container_ip",
+                "logs_tail"
             ]
         );
     }
@@ -533,6 +640,7 @@ mod tests {
             ContainerError::StartupFailed {
                 summary,
                 logs: Some(logs),
+                started_container: true,
             } => {
                 assert!(summary.contains("did not become reachable"));
                 assert!(logs.contains("Vault path does not exist"));
@@ -546,10 +654,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn aborts_startup_when_network_isolation_setup_fails() {
+    async fn returns_conflict_when_internal_network_is_incompatible() {
         let port = Arc::new(MockContainerPort::new(MockState {
             image_exists: true,
-            prepare_network_isolation_result: false,
+            ensure_internal_network_result: MockNetworkResult::Conflict,
             ..Default::default()
         }));
         let use_case = short_probe_use_case(port.clone());
@@ -558,15 +666,16 @@ mod tests {
 
         let err = use_case.ensure(&config).await.unwrap_err();
         assert!(
-            matches!(err, ContainerError::Other(_)),
-            "expected ContainerError::Other, got {err:?}"
+            matches!(err, ContainerError::Conflict(_)),
+            "expected ContainerError::Conflict, got {err:?}"
         );
 
         let state = port.snapshot();
-        assert_eq!(state.prepare_network_isolation_count, 1);
+        assert_eq!(state.ensure_internal_network_count, 1);
+        assert_eq!(state.run_count, 0);
         assert_eq!(
             state.actions,
-            vec!["image_exists", "exists", "prepare_network_isolation"]
+            vec!["image_exists", "exists", "ensure_internal_network"]
         );
     }
 }

@@ -72,6 +72,41 @@ pub enum ContainerNetworkIsolationStrategy {
     PublishToLoopback,
 }
 
+pub const BRAIN3_MANAGED_LABEL_KEY: &str = "io.brain3.managed";
+pub const BRAIN3_ROLE_LABEL_KEY: &str = "io.brain3.role";
+pub const BRAIN3_INSTALLATION_ID_LABEL_KEY: &str = "io.brain3.installation_id";
+pub const BRAIN3_MANAGED_LABEL_VALUE: &str = "true";
+pub const BRAIN3_MCP_ROLE_LABEL_VALUE: &str = "mcp";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContainerLabel {
+    pub key: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedContainerScope {
+    pub installation_id: String,
+    pub role: String,
+}
+
+impl ManagedContainerScope {
+    pub fn mcp(installation_id: String) -> Self {
+        Self {
+            installation_id,
+            role: BRAIN3_MCP_ROLE_LABEL_VALUE.to_string(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManagedContainerInfo {
+    pub name: String,
+    pub running: bool,
+    pub state: String,
+    pub labels: Vec<ContainerLabel>,
+}
+
 /// Config passed to ContainerPort::run — runtime-agnostic.
 #[derive(Debug, Clone)]
 pub struct ContainerConfig {
@@ -83,6 +118,7 @@ pub struct ContainerConfig {
     pub network_name: String,
     pub port_mappings: Vec<PortMapping>,
     pub env_vars: Vec<(String, String)>,
+    pub labels: Vec<ContainerLabel>,
     pub bind_mounts: Vec<BindMount>,
     /// "uid:gid" string; None means run as container default user.
     pub user: Option<String>,

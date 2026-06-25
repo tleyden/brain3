@@ -14,8 +14,8 @@ use tokio::sync::oneshot;
 
 use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
 use brain3_core::domain::setup::{
-    AccessModeDraft, ConnectionCard, FinalizeSetupRequest, RuntimeLaunchPlan, SetupDefaults,
-    SetupStep,
+    AccessModeDraft, ConnectionCard, FinalizeSetupRequest, RuntimeLaunchPlan, RuntimeStartupPolicy,
+    SetupDefaults, SetupStep,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::runtime::probe_mcp_vault_list;
@@ -23,7 +23,9 @@ use brain3_platform::setup::PlatformSetupSystem;
 
 use crate::server;
 use crate::server::ConfiguredGatewaySession;
-use crate::RuntimeOverrides;
+use crate::{
+    format_startup_error_message, load_config, ConfiguredStartupOptions, RuntimeOverrides,
+};
 
 use super::screens;
 use super::state::{
@@ -33,7 +35,10 @@ use super::state::{
 
 pub enum GatewayTuiLaunch {
     FirstRun,
-    Configured { launch_plan: RuntimeLaunchPlan },
+    Configured {
+        launch_plan: RuntimeLaunchPlan,
+        startup_options: ConfiguredStartupOptions,
+    },
 }
 
 pub async fn run_gateway_tui(
@@ -49,10 +54,6 @@ pub async fn run_gateway_tui(
         None => PlatformSetupSystem::new(),
     });
     let use_case = FirstRunSetupUseCase::new(Arc::clone(&setup_system), setup_defaults);
-    let preparation = use_case
-        .prepare()
-        .await
-        .map_err(|error| anyhow::anyhow!("{error}"))?;
 
     // Start TUI immediately so the screen is live during all startup work.
     enable_raw_mode()?;
@@ -61,25 +62,34 @@ pub async fn run_gateway_tui(
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut state = match launch {
-        GatewayTuiLaunch::FirstRun => {
-            FirstRunTuiState::new(host.to_string(), log_file.clone(), preparation)
-        }
-        GatewayTuiLaunch::Configured { launch_plan } => {
-            let (tx, rx) = oneshot::channel();
-            let host_clone = host.to_string();
-            let runtime_overrides_for_startup = runtime_overrides.clone();
-            tokio::spawn(async move {
-                let _ = tx.send(
-                    server::spawn_configured_gateway_session(
-                        &host_clone,
-                        launch_plan,
-                        runtime_overrides_for_startup,
-                    )
-                    .await,
-                );
-            });
-            FirstRunTuiState::new_starting(host.to_string(), log_file.clone(), preparation, rx)
+    let (mut state, startup_policy, orphan_gc_rerun_command) = match launch {
+        GatewayTuiLaunch::FirstRun => (
+            FirstRunTuiState::new(
+                host.to_string(),
+                log_file.clone(),
+                use_case
+                    .prepare()
+                    .await
+                    .map_err(|error| anyhow::anyhow!("{error}"))?,
+            ),
+            RuntimeStartupPolicy::setup_or_reconfigure(),
+            None,
+        ),
+        GatewayTuiLaunch::Configured {
+            launch_plan,
+            startup_options,
+        } => {
+            let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
+            let mut preparation = use_case
+                .prepare_from_existing_config(config.as_ref())
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            preparation.paths.env_file = launch_plan.env_file.clone();
+            (
+                FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation),
+                startup_options.startup_policy,
+                Some(startup_options.orphan_gc_rerun_command),
+            )
         }
     };
 
@@ -89,6 +99,8 @@ pub async fn run_gateway_tui(
         &use_case,
         setup_system,
         &runtime_overrides,
+        startup_policy,
+        orphan_gc_rerun_command.as_deref(),
     )
     .await;
 
@@ -106,6 +118,8 @@ async fn event_loop(
     use_case: &FirstRunSetupUseCase,
     setup_system: Arc<dyn SetupSystemPort>,
     runtime_overrides: &RuntimeOverrides,
+    startup_policy: RuntimeStartupPolicy,
+    orphan_gc_rerun_command: Option<&str>,
 ) -> Result<()> {
     loop {
         handle_runtime_tick(state);
@@ -113,7 +127,7 @@ async fn event_loop(
         if let Some(rx) = &mut state.startup_rx {
             if let Ok(result) = rx.try_recv() {
                 state.startup_rx = None;
-                apply_startup_result(state, result, use_case);
+                apply_startup_result(state, result, use_case, orphan_gc_rerun_command);
             }
         }
 
@@ -321,7 +335,7 @@ async fn event_loop(
                     let access_mode = state.draft.access_mode.clone();
                     state.previous_ports_focus(&access_mode);
                 }
-                KeyCode::Char('t') => {
+                KeyCode::Char('t') if !state.ports_focus_is_text_field() => {
                     state.toggle_ports_boolean();
                 }
                 KeyCode::Backspace if state.ports_focus_is_text_field() => {
@@ -338,26 +352,39 @@ async fn event_loop(
                         PortsField::ContainerMcpPort => {
                             state.container_mcp_port_input.pop();
                         }
+                        PortsField::ContainerName => {
+                            state.container_name_input.pop();
+                        }
                         PortsField::AccessTokenLifetimeSecs => {
                             state.access_token_lifetime_secs_input.pop();
                         }
                         PortsField::RefreshTokenLifetimeSecs => {
                             state.refresh_token_lifetime_secs_input.pop();
                         }
+                        PortsField::ContainerNetworkName => {
+                            state.container_network_name_input.pop();
+                        }
                         _ => {}
                     }
                 }
-                KeyCode::Char(ch) if state.ports_focus_is_text_field() && ch.is_ascii_digit() => {
+                KeyCode::Char(ch)
+                    if state.ports_focus_is_text_field()
+                        && (!state.ports_focus_is_digits_only() || ch.is_ascii_digit()) =>
+                {
                     match state.ports_focus {
                         PortsField::GatewayPort => state.gateway_port_input.push(ch),
                         PortsField::LocalMcpPort => state.local_mcp_port_input.push(ch),
                         PortsField::ContainerHostPort => state.container_host_port_input.push(ch),
                         PortsField::ContainerMcpPort => state.container_mcp_port_input.push(ch),
+                        PortsField::ContainerName => state.container_name_input.push(ch),
                         PortsField::AccessTokenLifetimeSecs => {
                             state.access_token_lifetime_secs_input.push(ch)
                         }
                         PortsField::RefreshTokenLifetimeSecs => {
                             state.refresh_token_lifetime_secs_input.push(ch)
+                        }
+                        PortsField::ContainerNetworkName => {
+                            state.container_network_name_input.push(ch)
                         }
                         _ => {}
                     }
@@ -370,7 +397,8 @@ async fn event_loop(
                     state.step = SetupStep::PortsAndSettings;
                 }
                 KeyCode::Enter => {
-                    finalize_and_start(state, use_case, runtime_overrides.clone()).await;
+                    finalize_and_start(state, use_case, runtime_overrides.clone(), startup_policy)
+                        .await;
                 }
                 KeyCode::Tab | KeyCode::Down => {
                     state.next_summary_focus();
@@ -535,6 +563,7 @@ async fn finalize_and_start(
     state: &mut FirstRunTuiState,
     use_case: &FirstRunSetupUseCase,
     runtime_overrides: RuntimeOverrides,
+    startup_policy: RuntimeStartupPolicy,
 ) {
     state.clear_messages();
 
@@ -563,8 +592,10 @@ async fn finalize_and_start(
     let host = state.host.clone();
     let (tx, rx) = oneshot::channel();
     tokio::spawn(async move {
-        let _ =
-            tx.send(start_configured_runtime_session(&host, launch_plan, runtime_overrides).await);
+        let _ = tx.send(
+            start_configured_runtime_session(&host, launch_plan, runtime_overrides, startup_policy)
+                .await,
+        );
     });
 
     state.summary = Some(summary);
@@ -577,11 +608,15 @@ fn apply_startup_result(
     state: &mut FirstRunTuiState,
     result: anyhow::Result<ConfiguredGatewaySession>,
     use_case: &FirstRunSetupUseCase,
+    orphan_gc_rerun_command: Option<&str>,
 ) {
     let session = match result {
         Err(error) => {
             tracing::error!(error = %error, "startup task failed");
-            state.error_message = Some(error.to_string());
+            state.error_message = Some(format_startup_error_message(
+                &error,
+                orphan_gc_rerun_command,
+            ));
             state.info_message = None;
             return;
         }
@@ -642,7 +677,9 @@ fn apply_startup_result(
             tracing::error!(failure, "runtime reported primary failure");
             state.error_message = Some(failure.to_string());
             state.info_message = None;
-            // step stays on RuntimeStatus (already set by finalize_and_start or new_starting)
+            if state.summary.is_some() {
+                state.step = SetupStep::Summary;
+            }
         } else {
             state.info_message = Some("Brain3 is running.".into());
             // Wizard path shows the connection card first so the user can copy credentials.
@@ -662,8 +699,10 @@ async fn start_configured_runtime_session(
     host: &str,
     launch_plan: RuntimeLaunchPlan,
     runtime_overrides: RuntimeOverrides,
+    startup_policy: RuntimeStartupPolicy,
 ) -> Result<ConfiguredGatewaySession> {
-    server::spawn_configured_gateway_session(host, launch_plan, runtime_overrides).await
+    server::spawn_configured_gateway_session(host, launch_plan, runtime_overrides, startup_policy)
+        .await
 }
 
 async fn cleanup(state: &mut FirstRunTuiState) -> Result<()> {
@@ -674,4 +713,206 @@ async fn cleanup(state: &mut FirstRunTuiState) -> Result<()> {
         runtime.shutdown_managed_runtime().await;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use anyhow::anyhow;
+    use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
+    use brain3_core::domain::errors::ContainerError;
+    use brain3_core::domain::model::{
+        AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig,
+        MCPReverseProxyConfig, ManagedContainerInfo, OAuthConfig,
+    };
+    use brain3_core::domain::setup::{
+        AccessModeDraft, DependencyAvailability, DependencyStatus, SetupDefaults, SetupDraftConfig,
+        SetupOperatingSystem, SetupPaths, SetupPreparation, SetupStep, TunnelModeDraft,
+    };
+    use brain3_platform::runtime::{RuntimeBootstrap, StartupStatus};
+    use brain3_platform::setup::PlatformSetupSystem;
+
+    use crate::server::ConfiguredGatewaySession;
+
+    use super::*;
+
+    #[test]
+    fn failed_startup_returns_user_to_summary_for_retry() {
+        let use_case = FirstRunSetupUseCase::new(
+            Arc::new(PlatformSetupSystem::with_environment(
+                SetupOperatingSystem::Linux,
+                None,
+            )),
+            SetupDefaults {
+                default_container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+            },
+        );
+        let mut state = FirstRunTuiState::new_configured(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3.log"),
+            sample_preparation(),
+        );
+        let paths = state.preparation.paths.clone();
+        state.summary = Some(brain3_core::domain::setup::SetupSummary {
+            paths: paths.clone(),
+            draft: state.draft.clone(),
+            dependencies: state.preparation.dependencies.clone(),
+        });
+        state.step = SetupStep::RuntimeStatus;
+
+        apply_startup_result(
+            &mut state,
+            Ok(ConfiguredGatewaySession {
+                runtime: RuntimeBootstrap::new(
+                    Arc::new(GatewayConfig {
+                        port: 8421,
+                        host: "127.0.0.1".into(),
+                        token_db_path: PathBuf::from("/tmp/brain3-home/brain3.db"),
+                        oauth: OAuthConfig {
+                            client_id: "brain3-oauth2-client".into(),
+                            client_secret: "secret".into(),
+                            access_token_lifetime_secs: 3600,
+                            refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                            pkce_required: true,
+                            username: "admin".into(),
+                            password: "password".into(),
+                        },
+                        mcp_reverse_proxy: MCPReverseProxyConfig {
+                            mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                            upstream_secret: "secret".into(),
+                        },
+                        hostname_validation: HostnameValidationConfig {
+                            expected_host: None,
+                            enforce: true,
+                        },
+                        access_mode: AccessMode::Both,
+                        local_mcp: None,
+                        container: Some(brain3_core::domain::model::ContainerStartupConfig {
+                            runtime: ContainerRuntime::Docker,
+                            image: "ghcr.io/tleyden/brain3-mcp-vault-tools:v0.2.3".into(),
+                            container_name: "brain3-mcp-vault-tools".into(),
+                            network_name: "brain3-mcp-net".into(),
+                            vault_path: PathBuf::from("/tmp/vault"),
+                            upstream_secret: "secret".into(),
+                            host_port: 8420,
+                            container_port: 8420,
+                            isolation_strategy: None,
+                            dev_mount_source: None,
+                            mcp_log_level: None,
+                        }),
+                        tunnel: None,
+                    }),
+                    "secret".into(),
+                    brain3_core::domain::setup::RuntimeLaunchPlan {
+                        paths: paths.clone(),
+                        env_file: paths.env_file.clone(),
+                        log_file: PathBuf::from("/tmp/brain3.log"),
+                    },
+                    None,
+                    StartupStatus::Failed {
+                        summary: "container name 'brain3-mcp-vault-tools' already exists; choose a different container name".into(),
+                    },
+                    StartupStatus::NotConfigured,
+                    false,
+                ),
+                server: None,
+                display_url: None,
+            }),
+            &use_case,
+            None,
+        );
+
+        assert_eq!(state.step, SetupStep::Summary);
+        assert!(state
+            .error_message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("different container name"));
+    }
+
+    #[test]
+    fn configured_startup_orphan_failure_includes_gc_rerun_guidance() {
+        let use_case = FirstRunSetupUseCase::new(
+            Arc::new(PlatformSetupSystem::with_environment(
+                SetupOperatingSystem::Linux,
+                None,
+            )),
+            SetupDefaults {
+                default_container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+            },
+        );
+        let mut state = FirstRunTuiState::new_configured(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3.log"),
+            sample_preparation(),
+        );
+
+        apply_startup_result(
+            &mut state,
+            Err(anyhow!(
+                ContainerError::orphaned_managed_containers_for_installation(
+                    "scope-1".into(),
+                    vec![ManagedContainerInfo {
+                        name: "brain3-old".into(),
+                        running: true,
+                        state: "running".into(),
+                        labels: vec![],
+                    }],
+                )
+            )),
+            &use_case,
+            Some("brain3 --tui --gc-containers"),
+        );
+
+        let error = state.error_message.as_deref().unwrap_or_default();
+        assert!(error.contains("brain3-old"));
+        assert!(error.contains("--gc-containers"));
+        assert!(error.contains("refused to auto-delete"));
+    }
+
+    fn sample_preparation() -> SetupPreparation {
+        SetupPreparation {
+            paths: SetupPaths::new(
+                PathBuf::from("/tmp/brain3-home"),
+                PathBuf::from("/tmp/brain3-home/.env"),
+                PathBuf::from("/tmp/brain3-home/cloudflared"),
+            ),
+            draft: SetupDraftConfig {
+                gateway_port: 8421,
+                client_id: "brain3-oauth2-client".into(),
+                client_secret: "secret".into(),
+                access_token_lifetime_secs: 3600,
+                refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                username: "admin".into(),
+                password: "password".into(),
+                access_mode: AccessModeDraft::Both,
+                tunnel_mode: TunnelModeDraft::CloudflareQuick,
+                container_runtime: ContainerRuntime::MacOSContainer,
+                vault_path: PathBuf::from("/tmp/vault"),
+                container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+                container_host_port: 8420,
+                container_mcp_port: 8420,
+                container_name: "brain3-mcp-vault-tools".into(),
+                container_network_isolated: true,
+                container_network_name: "brain3-mcp-net".into(),
+                local_mcp_enabled: true,
+                local_mcp_port: 8422,
+                local_mcp_bearer_token: "local-token".into(),
+                pkce_required: true,
+                enforce_hostname_check: true,
+                direct_public_origin_hostname: None,
+            },
+            dependencies: DependencyStatus {
+                operating_system: SetupOperatingSystem::MacOS,
+                package_manager: None,
+                cloudflared: DependencyAvailability::Installed,
+                preferred_container_runtime: DependencyAvailability::Installed,
+                docker_installed: true,
+                macos_container_installed: Some(true),
+                homebrew_installed: Some(true),
+            },
+        }
+    }
 }

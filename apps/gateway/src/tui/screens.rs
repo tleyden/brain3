@@ -70,7 +70,7 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Vault",
         "Access",
         "Auth",
-        "Ports",
+        "Network Security",
         "Start",
         "Running",
     ];
@@ -119,7 +119,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::VaultPath => "Vault Path",
         SetupStep::AccessMode => "Local/Remote Access",
         SetupStep::Auth => "Auth Setup",
-        SetupStep::PortsAndSettings => "Ports & Settings",
+        SetupStep::PortsAndSettings => "Network Security",
         SetupStep::Summary => "Summary",
         SetupStep::ConnectionCard => "MCP Config Settings",
         SetupStep::RuntimeStatus => "Runtime Status",
@@ -143,7 +143,7 @@ fn progress_caption(step: SetupStep) -> &'static str {
         SetupStep::AccessMode => "Choose how AI clients will connect to Brain3.",
         SetupStep::Auth => "Review the generated login defaults and customize them if needed.",
         SetupStep::PortsAndSettings => {
-            "Override ports and security settings if the defaults conflict."
+            "Review network ports, container identity, and security defaults."
         }
         SetupStep::Summary => "Confirm what Brain3 will write before startup begins.",
         SetupStep::ConnectionCard | SetupStep::RuntimeStatus => {
@@ -448,8 +448,10 @@ fn access_mode_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
 fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     let mut lines = vec![
-        muted_line("Override ports if the defaults conflict with other services on this machine."),
-        muted_line("Toggle security settings only if your client requires it."),
+        muted_line("Network Security controls cover ports, container identity, and isolation."),
+        muted_line(
+            "Change security defaults only when your client or host environment requires it.",
+        ),
         muted_line("Disable internal-only networking only as a compatibility fallback."),
         blank_line(),
     ];
@@ -491,6 +493,11 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Container MCP port",
         &state.container_mcp_port_input,
         state.ports_focus == PortsField::ContainerMcpPort,
+    ));
+    lines.push(field_line(
+        "Container name",
+        &state.container_name_input,
+        state.ports_focus == PortsField::ContainerName,
     ));
 
     if state.draft.access_mode != AccessModeDraft::LocalOnly {
@@ -557,6 +564,13 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     lines.push(muted_line(
         "Disabled uses the runtime's normal bridge/default network for VPS compatibility.",
     ));
+    if state.draft.container_network_isolated {
+        lines.push(field_line(
+            "Container network name",
+            &state.container_network_name_input,
+            state.ports_focus == PortsField::ContainerNetworkName,
+        ));
+    }
 
     lines
 }
@@ -644,6 +658,11 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             &state.container_mcp_port_input,
             f == SummaryField::ContainerMcpPort,
         ),
+        field_line(
+            "Container name",
+            &state.container_name_input,
+            f == SummaryField::ContainerName,
+        ),
     ]);
 
     if state.draft.access_mode != AccessModeDraft::LocalOnly {
@@ -690,6 +709,17 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             },
             f == SummaryField::ContainerNetworkIsolation,
         ),
+    ]);
+
+    if state.draft.container_network_isolated {
+        lines.push(field_line(
+            "Container network name",
+            &state.container_network_name_input,
+            f == SummaryField::ContainerNetworkName,
+        ));
+    }
+
+    lines.extend([
         key_value_line(
             "Container runtime",
             format_container_runtime(state.draft.container_runtime),
@@ -903,10 +933,20 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
 fn status_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     if let Some(error) = &state.error_message {
-        return vec![Line::from(vec![
-            Span::styled("Error: ", error_style()),
-            Span::styled(error.clone(), error_style()),
-        ])];
+        return error
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                if index == 0 {
+                    Line::from(vec![
+                        Span::styled("Error: ", error_style()),
+                        Span::styled(line.to_string(), error_style()),
+                    ])
+                } else {
+                    Line::from(Span::styled(line.to_string(), error_style()))
+                }
+            })
+            .collect();
     }
 
     if let Some(info) = &state.info_message {
@@ -966,7 +1006,7 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ]),
         SetupStep::PortsAndSettings => continue_action_lines(vec![
             ("[Tab/Up/Down]", "Move"),
-            ("[Type]", "Edit port"),
+            ("[Type]", "Edit field"),
             ("[t]", "Toggle setting"),
             ("[Esc]", "Back"),
             ("[q]", "Quit"),
@@ -1432,6 +1472,24 @@ mod tests {
     }
 
     #[test]
+    fn status_panel_preserves_multiline_gc_guidance() {
+        let mut state = sample_state();
+        state.error_message = Some(
+            "Brain3 found managed MCP containers.\nRerun with:\n  brain3 --tui --gc-containers"
+                .into(),
+        );
+
+        let text = status_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Rerun with:"));
+        assert!(text.contains("--gc-containers"));
+    }
+
+    #[test]
     fn local_only_summary_hides_auth_and_remote_only_fields() {
         let mut state = sample_state();
         state.draft.access_mode = AccessModeDraft::LocalOnly;
@@ -1446,6 +1504,8 @@ mod tests {
         assert!(text.contains("Local MCP port"));
         assert!(text.contains("Container host port"));
         assert!(text.contains("Container MCP port"));
+        assert!(text.contains("Container name"));
+        assert!(text.contains("Container network name"));
         assert!(text.contains("Access mode"));
         assert!(text.contains("Internal-only container networking"));
         assert!(text.contains("Container runtime"));
@@ -1478,6 +1538,8 @@ mod tests {
 
         assert!(text.contains("Local MCP port"));
         assert!(!text.contains("Gateway port"));
+        assert!(text.contains("Container name"));
+        assert!(text.contains("Container network name"));
         assert!(!text.contains("Access token lifetime (secs)"));
         assert!(!text.contains("Refresh token lifetime (secs)"));
         assert!(!text.contains("PKCE required"));
@@ -1496,6 +1558,50 @@ mod tests {
 
         assert!(text.contains("Gateway port"));
         assert!(text.contains("Local MCP port"));
+        assert!(text.contains("Container name"));
+        assert!(text.contains("Container network name"));
+    }
+
+    #[test]
+    fn ports_screen_uses_network_security_wording() {
+        let state = sample_state();
+        let header = screen_title(SetupStep::PortsAndSettings);
+        let progress = progress_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let details = ports_and_settings_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(header, "Network Security");
+        assert!(progress.contains("Network Security"));
+        assert!(details.contains("Network Security") || details.contains("network security"));
+    }
+
+    #[test]
+    fn ports_and_summary_hide_container_network_name_when_isolation_is_disabled() {
+        let mut state = sample_state();
+        state.draft.container_network_isolated = false;
+
+        let ports_text = ports_and_settings_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let summary_text = summary_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(ports_text.contains("Container name"));
+        assert!(!ports_text.contains("Container network name"));
+        assert!(summary_text.contains("Container name"));
+        assert!(!summary_text.contains("Container network name"));
     }
 
     fn sample_state() -> FirstRunTuiState {
@@ -1523,7 +1629,9 @@ mod tests {
                     container_image_repo: release::MCP_IMAGE_REPO.to_string(),
                     container_host_port: 8420,
                     container_mcp_port: 8420,
+                    container_name: "brain3-mcp-vault-tools".into(),
                     container_network_isolated: true,
+                    container_network_name: "brain3-mcp-net".into(),
                     local_mcp_enabled: true,
                     local_mcp_port: 8422,
                     local_mcp_bearer_token: "local-token".into(),
@@ -1606,6 +1714,7 @@ mod tests {
                 summary: "Vault path does not exist: /Obsidian/MyVault".into(),
             },
             StartupStatus::NotConfigured,
+            false,
         ));
         state.error_message = Some("Vault path does not exist: /Obsidian/MyVault".into());
         state

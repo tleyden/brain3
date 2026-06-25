@@ -11,7 +11,7 @@ use tokio::task::JoinHandle;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::model::{AccessMode, GatewayConfig};
-use brain3_core::domain::setup::RuntimeLaunchPlan;
+use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::config::ConfigPort;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
@@ -312,6 +312,7 @@ pub async fn spawn_configured_gateway_session(
     host: &str,
     launch_plan: RuntimeLaunchPlan,
     runtime_overrides: RuntimeOverrides,
+    startup_policy: RuntimeStartupPolicy,
 ) -> Result<ConfiguredGatewaySession> {
     let mut config = EnvFileConfigAdapter::with_token_db_home_override(
         Some(launch_plan.env_file.clone()),
@@ -321,7 +322,8 @@ pub async fn spawn_configured_gateway_session(
     .context("failed to load configuration")?;
     apply_runtime_overrides(&mut config, &runtime_overrides)?;
     let config = Arc::new(config);
-    let runtime = bootstrap_configured_runtime(Arc::clone(&config), launch_plan).await?;
+    let runtime =
+        bootstrap_configured_runtime(Arc::clone(&config), launch_plan, startup_policy).await?;
 
     let (server, display_url) = if runtime.can_start_gateway() {
         let server = spawn_gateway_server(
