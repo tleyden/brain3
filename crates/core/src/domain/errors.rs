@@ -123,6 +123,15 @@ pub enum TunnelError {
     TunnelNotFound(String),
     #[error("tunnel not reachable at startup: {0}")]
     NotReachable(String),
+    #[error(
+        "cloudflare tunnel config port mismatch: config routes to port {config_port}, \
+         but gateway is on port {gateway_port} — update the 'service' URL in {config_file}"
+    )]
+    PortMismatch {
+        config_port: u16,
+        gateway_port: u16,
+        config_file: String,
+    },
     #[error("tunnel error: {0}")]
     Other(String),
 }
