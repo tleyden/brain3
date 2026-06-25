@@ -2,50 +2,49 @@
 
 ## Relevant Code Issues
 
-### 1. Only poll after GC actually called stop (CodeRabbit Major)
+### 1. Already-stopped Docker containers should also poll, never call docker rm (CodeRabbit Major — revised)
 
 **File:** `crates/platform/src/container/startup.rs` ~line 314
 
-**Problem:** The `ContainerRuntime::Docker` branch in `garbage_collect_managed_containers`
-always calls `wait_for_container_gone` — even for containers that were already
-stopped when GC ran. For a stopped Docker orphan, this GC pass never called
-`docker stop`, so `--rm` was never triggered by us. There is nothing to poll for.
-We sit waiting 5s before falling back to explicit `docker rm`, adding unnecessary
-latency per stopped orphan.
+**Problem:** Docker containers are always started with `--rm`. If a container is
+stopped but still visible to `list_managed_containers`, it means `--rm` is already
+in progress — the same situation as calling `docker stop` ourselves. We should poll
+`exists()` in both cases. The current code does poll for running containers but falls
+back to explicit `docker rm` on timeout, which contradicts the `--rm` invariant.
+We should never call `docker rm` for Docker runtime.
 
-**Fix:** Track whether this GC pass actually called `stop()`. Only poll if it did.
-If the container was already stopped, skip polling and call `docker rm` immediately.
+**Fix:** For Docker runtime, always poll `wait_for_container_gone` regardless of
+whether the container was running or already stopped. Remove the timeout fallback
+to explicit `docker rm` in the Docker path entirely. If the container is still
+present after 5s something is genuinely wrong with the Docker daemon — return an
+error rather than racing with an ongoing `--rm`.
 
 ```rust
-let stopped_by_gc = if container.running {
-    // ... existing stop logic, returns true on success ...
-    true
-} else {
-    false
-};
-
 match runtime {
-    ContainerRuntime::Docker if stopped_by_gc => {
-        // --rm was triggered by our stop; poll for it to finish
-        let gone = wait_for_container_gone(...).await?;
-        if gone { continue; }
-        // fallback to explicit rm
-    }
     ContainerRuntime::Docker => {
-        // Container was already stopped; --rm should have fired at exit time
-        // but clearly didn't (otherwise it wouldn't be listed). Remove immediately.
+        // --rm always handles removal (either triggered by our stop above,
+        // or already in progress for a stopped orphan). Poll until gone.
+        let gone = wait_for_container_gone(...).await?;
+        if !gone {
+            return Err(ContainerError::Other(format!(
+                "timed out waiting for Docker to remove container '{}' via --rm; \
+                 Docker daemon may be unhealthy",
+                container.name
+            )));
+        }
+        // success — continue to next container
+        continue;
     }
     ContainerRuntime::MacOSContainer => {
-        // always explicit rm
+        // no --rm; fall through to explicit remove() below
     }
 }
-// explicit docker rm / macos rm below
 ```
 
-**Tests to add/update:**
-- Rename `gc_docker_stops_running_and_waits_for_auto_removal` to make "running → polled" explicit
-- Add `gc_docker_already_stopped_removes_immediately` — stopped container, Docker runtime,
-  assert `exists()` never called, `remove()` called immediately
+This also removes the now-dead `gc_docker_falls_back_to_explicit_rm_when_poll_times_out`
+test (the fallback no longer exists) and replaces it with
+`gc_docker_already_stopped_also_polls_not_rm` — stopped container, Docker runtime,
+`exists()` returns false immediately, `remove()` never called.
 
 ### 2. Dead code in timeout fallback test (Greptile P2)
 
