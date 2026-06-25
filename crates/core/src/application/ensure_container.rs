@@ -104,7 +104,19 @@ impl EnsureContainerUseCase {
             == Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
         {
             match self.port.get_container_ip(&id).await {
-                Ok(container_ip) => container_ip,
+                Ok(Some(container_ip)) => Some(container_ip),
+                Ok(None) => {
+                    return Err(self
+                        .startup_failed(
+                            &id,
+                            format!(
+                                "container '{}' started but did not report a container IP",
+                                config.name
+                            ),
+                            true,
+                        )
+                        .await)
+                }
                 Err(error) => {
                     return Err(self
                         .startup_failed(
@@ -268,6 +280,7 @@ mod tests {
         container_exists: bool,
         container_running: bool,
         running_checks: Vec<bool>,
+        container_ip: Option<String>,
         logs_tail_output: Option<String>,
         ensure_internal_network_result: MockNetworkResult,
         ensure_internal_network_count: usize,
@@ -398,7 +411,9 @@ mod tests {
             &self,
             _id: &ContainerId,
         ) -> Result<Option<String>, ContainerError> {
-            Ok(None)
+            let mut state = self.state.lock().unwrap();
+            state.actions.push("get_container_ip");
+            Ok(state.container_ip.clone())
         }
 
         async fn list_managed_containers(
@@ -499,6 +514,7 @@ mod tests {
     async fn reuses_compatible_existing_internal_network_without_recreating_it() {
         let port = Arc::new(MockContainerPort::new(MockState {
             image_exists: true,
+            container_ip: Some("127.0.0.1".into()),
             ensure_internal_network_result: MockNetworkResult::Reused,
             ..Default::default()
         }));
@@ -520,7 +536,49 @@ mod tests {
                 "exists",
                 "ensure_internal_network",
                 "run",
+                "get_container_ip",
                 "is_running"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn returns_startup_failed_when_discover_container_ip_returns_none() {
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let mut config = sample_config();
+        config.isolation_strategy = Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp);
+
+        let error = use_case
+            .ensure(&config)
+            .await
+            .expect_err("missing container IP should fail isolated startup");
+
+        match error {
+            ContainerError::StartupFailed {
+                summary,
+                started_container: true,
+                ..
+            } => {
+                assert!(summary.contains("did not report a container IP"));
+            }
+            other => panic!("expected startup failure, got {other:?}"),
+        }
+
+        let state = port.snapshot();
+        assert_eq!(state.logs_tail_count, 1);
+        assert_eq!(
+            state.actions,
+            vec![
+                "image_exists",
+                "exists",
+                "ensure_internal_network",
+                "run",
+                "get_container_ip",
+                "logs_tail"
             ]
         );
     }
