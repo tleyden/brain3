@@ -335,7 +335,7 @@ async fn event_loop(
                     let access_mode = state.draft.access_mode.clone();
                     state.previous_ports_focus(&access_mode);
                 }
-                KeyCode::Char('t') => {
+                KeyCode::Char('t') if !state.ports_focus_is_text_field() => {
                     state.toggle_ports_boolean();
                 }
                 KeyCode::Backspace if state.ports_focus_is_text_field() => {
