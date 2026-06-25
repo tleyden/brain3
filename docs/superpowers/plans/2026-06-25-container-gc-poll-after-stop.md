@@ -1,64 +1,57 @@
-# Plan: Poll exists() after docker stop before calling docker rm in GC
+# Plan: Remove redundant docker rm from GC; poll exists() for Docker runtime
 
-## Corrected Root Cause
+## Root Cause
 
-`docker stop` returns as soon as the container process exits. The `--rm` flag then
-triggers Docker to begin removing the container **asynchronously** — `docker stop`
-does NOT wait for that removal to complete before returning to the caller.
+Docker containers are always started with `--rm`:
 
-GC immediately calls `docker rm` after `docker stop` returns. On Docker (where
-`--rm` is set), Docker is already mid-removal, so `docker rm` gets:
+```rust
+// crates/platform/src/container/startup.rs:211
+remove_on_exit: matches!(startup.runtime, ContainerRuntime::Docker),
+```
+
+`docker stop` returns as soon as the container process exits. `--rm` then auto-removes
+the container asynchronously. GC immediately calls `docker rm` after `docker stop`,
+which races against `--rm` and gets:
 
 ```
 Error response from daemon: removal of container brain3-mcp-vault-tools 
 is already in progress
 ```
 
-This happens **every time** GC stops a running Docker container — not just on rapid
-restarts. The many-hours gap between sessions confirms the container was still
-running (brain3 was killed before `stop_mcp_container` fired), so this is the
-normal GC path, not an edge case.
+The explicit `docker rm` in GC is redundant for Docker — `--rm` already handles it —
+and the combination causes the race.
 
-## Current Code Flow
+macOS native containers do NOT use `--rm` (`remove_on_exit: false`), so they still
+need an explicit remove call.
 
-```
-garbage_collect_managed_containers:
-  docker stop brain3-mcp-vault-tools   ← returns when container exits
-                                        ← --rm removal starts async here
-  docker rm brain3-mcp-vault-tools     ← races against --rm, fails
-```
+## Fix
 
-## Fix: Poll exists() Between stop and rm
+**Docker runtime:** after `docker stop`, poll `port.exists()` until false. `--rm`
+will remove the container; we just wait for it. Never call `port.remove()`.
 
-After `docker stop` succeeds, poll `port.exists()` for up to 5 seconds (200 ms
-intervals). Two outcomes:
+**macOS runtime:** no `--rm`, so call `port.remove()` explicitly as before.
 
-- **`exists()` returns false** (Docker's `--rm` finished removal): skip `docker rm`,
-  continue to next container. This is the normal Docker path.
-- **`exists()` still true after timeout** (runtime has no `--rm`, e.g. macOS
-  containers): fall through and call `docker rm` as normal. This is the macOS path.
-
-This avoids the race without needing to know whether the container was started with
-`--rm`, and without skipping the explicit `docker rm` on runtimes that need it.
+This requires threading `ContainerRuntime` into `garbage_collect_managed_containers`
+so it knows which path to take.
 
 ## Code Change
 
 **File:** `crates/platform/src/container/startup.rs`
 
-Add `wait_for_container_gone` helper:
+1. Add `runtime: ContainerRuntime` parameter to `garbage_collect_managed_containers`
+   and pass it from `maybe_handle_managed_container_orphans` (which has
+   `startup.runtime`).
+
+2. Add `wait_for_container_gone` helper (polls `port.exists()` until false):
 
 ```rust
-/// After `docker stop`, polls `port.exists()` to let the Docker daemon finish
-/// its own `--rm` removal before we attempt an explicit `docker rm`.
-/// Returns `true` if the container disappeared on its own (skip `docker rm`),
-/// `false` if it is still present after the timeout (proceed with `docker rm`).
 async fn wait_for_container_gone(
     port: &dyn ContainerPort,
     id: &ContainerId,
     installation_id: &str,
     poll_interval: Duration,
     timeout: Duration,
-) -> Result<bool, ContainerError> {
+) -> Result<(), ContainerError> {
     let deadline = tokio::time::Instant::now() + timeout;
     let mut attempt = 0u32;
     loop {
@@ -67,17 +60,15 @@ async fn wait_for_container_gone(
                 installation_id,
                 container = %id.0,
                 attempts = attempt,
-                "container removed by Docker --rm after stop"
+                "container removed by Docker --rm"
             );
-            return Ok(true);
+            return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
-            tracing::debug!(
-                installation_id,
-                container = %id.0,
-                "container still present after polling — will call docker rm explicitly"
-            );
-            return Ok(false);
+            return Err(ContainerError::Other(format!(
+                "timed out waiting for container '{}' to be removed by Docker --rm",
+                id.0
+            )));
         }
         attempt += 1;
         tokio::time::sleep(poll_interval).await;
@@ -85,46 +76,48 @@ async fn wait_for_container_gone(
 }
 ```
 
-In `garbage_collect_managed_containers`, call it after a successful stop:
+3. In `garbage_collect_managed_containers`, replace the stop+remove block with
+   runtime-aware logic:
 
 ```rust
 if container.running {
-    // ... existing stop logic ...
     match port.stop(&id).await {
-        Ok(()) => {
-            // Give Docker's --rm a chance to finish before we call docker rm.
-            let already_gone = wait_for_container_gone(
-                port,
-                &id,
-                installation_id,
-                Duration::from_millis(200),
-                Duration::from_secs(5),
-            )
-            .await?;
-            if already_gone {
-                tracing::info!(installation_id, container = %container.name,
-                    "removed managed orphan MCP container");
-                continue; // skip explicit docker rm
-            }
-        }
+        Ok(()) => {}
         Err(ContainerError::CommandFailed { ref stderr, .. })
             if stderr.contains("No such container") =>
         {
-            // ... existing handling ...
-            continue;
+            continue; // already gone
         }
-        Err(error) => { /* ... existing error return ... */ }
+        Err(error) => return Err(...),
     }
 }
-```
 
-The `port.remove()` call below remains unchanged — it now only runs when
-`wait_for_container_gone` timed out (i.e., the container didn't self-remove,
-which is expected on macOS native containers).
+match runtime {
+    ContainerRuntime::Docker => {
+        // --rm handles removal; just wait for it to finish
+        wait_for_container_gone(
+            port, &id, installation_id,
+            Duration::from_millis(200),
+            Duration::from_secs(5),
+        ).await?;
+    }
+    ContainerRuntime::MacOSContainer => {
+        // no --rm, explicit removal needed
+        match port.remove(&id).await {
+            Ok(()) => {}
+            Err(ContainerError::CommandFailed { ref stderr, .. })
+                if stderr.contains("No such container") => { continue; }
+            Err(error) => return Err(...),
+        }
+    }
+}
+tracing::info!(installation_id, container = %container.name,
+    "removed managed orphan MCP container");
+```
 
 ## Tokio `time` Feature
 
-Verify `crates/platform/Cargo.toml` includes `time` in the tokio feature list:
+Add `time` to tokio features in `crates/platform/Cargo.toml` if not already present:
 
 ```toml
 tokio = { version = "1", features = ["sync", "process", "fs", "time"] }
@@ -134,21 +127,17 @@ tokio = { version = "1", features = ["sync", "process", "fs", "time"] }
 
 | File | Change |
 |------|--------|
-| `crates/platform/src/container/startup.rs` | Add `wait_for_container_gone`, call it after successful stop |
+| `crates/platform/src/container/startup.rs` | Thread runtime through GC, add `wait_for_container_gone`, split stop/remove logic by runtime |
 | `crates/platform/Cargo.toml` | Add `time` to tokio features if missing |
 
 ## Tests
 
-1. **`stop_triggers_rm_removal_skips_explicit_rm`** — mock port: `stop` returns `Ok`,
-   `exists` returns `true` once then `false`. Assert `remove` is never called and
-   result is `Ok(())`.
+1. **`docker_gc_polls_after_stop_no_explicit_rm`** — Docker runtime, mock port: `stop`
+   returns `Ok`, `exists` returns `true` once then `false`, `remove` never called.
+   Assert `Ok(())`.
 
-2. **`stop_no_auto_removal_falls_through_to_explicit_rm`** — mock port: `stop`
-   returns `Ok`, `exists` always returns `true` (timeout path), `remove` returns
-   `Ok`. Assert `remove` is called once and result is `Ok(())`.
+2. **`docker_gc_timeout_waiting_for_rm`** — Docker runtime, mock port: `stop` returns
+   `Ok`, `exists` always `true`. Use short timeout. Assert `Err` with "timed out".
 
-## Supersedes
-
-This plan supersedes `2026-06-25-container-gc-removal-poll-wait.md`, which proposed
-polling only on the error path. Polling on the success path (after stop) is cleaner
-— it handles the race proactively rather than reactively.
+3. **`macos_gc_calls_explicit_remove`** — macOS runtime, mock port: `stop` returns
+   `Ok`, `remove` returns `Ok`. Assert `remove` called once, `exists` never called.
