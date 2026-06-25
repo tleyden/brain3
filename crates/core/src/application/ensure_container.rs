@@ -7,6 +7,9 @@ use crate::domain::errors::ContainerError;
 use crate::domain::model::{ContainerConfig, ContainerNetworkIsolationStrategy, PortMapping};
 use crate::ports::container::{ContainerId, ContainerPort, NetworkPreparation};
 
+#[cfg(test)]
+use crate::domain::model::{ManagedContainerInfo, ManagedContainerScope};
+
 const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
 const DEFAULT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const DEFAULT_LOG_TAIL_LINES: usize = 40;
@@ -103,8 +106,8 @@ impl EnsureContainerUseCase {
             match self.port.get_container_ip(&id).await {
                 Ok(container_ip) => container_ip,
                 Err(error) => {
-                    return Err(
-                        self.startup_failed(
+                    return Err(self
+                        .startup_failed(
                             &id,
                             format!(
                                 "container '{}' started but failed during IP discovery: {}",
@@ -113,8 +116,7 @@ impl EnsureContainerUseCase {
                             ),
                             true,
                         )
-                        .await,
-                    )
+                        .await)
                 }
             }
         } else {
@@ -398,6 +400,13 @@ mod tests {
         ) -> Result<Option<String>, ContainerError> {
             Ok(None)
         }
+
+        async fn list_managed_containers(
+            &self,
+            _scope: &ManagedContainerScope,
+        ) -> Result<Vec<ManagedContainerInfo>, ContainerError> {
+            Ok(Vec::new())
+        }
     }
 
     fn sample_config() -> ContainerConfig {
@@ -408,6 +417,7 @@ mod tests {
             network_name: "brain3-mcp-net".into(),
             port_mappings: vec![],
             env_vars: vec![],
+            labels: vec![],
             bind_mounts: vec![],
             user: None,
             detach: true,
@@ -482,10 +492,7 @@ mod tests {
         assert_eq!(state.run_count, 0);
         assert_eq!(state.stop_count, 0);
         assert_eq!(state.remove_count, 0);
-        assert_eq!(
-            state.actions,
-            vec!["image_exists", "exists"]
-        );
+        assert_eq!(state.actions, vec!["image_exists", "exists"]);
     }
 
     #[tokio::test]

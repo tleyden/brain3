@@ -449,7 +449,9 @@ fn access_mode_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     let mut lines = vec![
         muted_line("Network Security controls cover ports, container identity, and isolation."),
-        muted_line("Change security defaults only when your client or host environment requires it."),
+        muted_line(
+            "Change security defaults only when your client or host environment requires it.",
+        ),
         muted_line("Disable internal-only networking only as a compatibility fallback."),
         blank_line(),
     ];
@@ -931,10 +933,20 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
 fn status_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     if let Some(error) = &state.error_message {
-        return vec![Line::from(vec![
-            Span::styled("Error: ", error_style()),
-            Span::styled(error.clone(), error_style()),
-        ])];
+        return error
+            .lines()
+            .enumerate()
+            .map(|(index, line)| {
+                if index == 0 {
+                    Line::from(vec![
+                        Span::styled("Error: ", error_style()),
+                        Span::styled(line.to_string(), error_style()),
+                    ])
+                } else {
+                    Line::from(Span::styled(line.to_string(), error_style()))
+                }
+            })
+            .collect();
     }
 
     if let Some(info) = &state.info_message {
@@ -1457,6 +1469,24 @@ mod tests {
         assert!(text.contains("SQLite DB: /tmp/brain3-home/brain3.db"));
         assert!(text.contains("Vault path does not exist"));
         assert!(text.contains("Gateway:  Not started"));
+    }
+
+    #[test]
+    fn status_panel_preserves_multiline_gc_guidance() {
+        let mut state = sample_state();
+        state.error_message = Some(
+            "Brain3 found managed MCP containers.\nRerun with:\n  brain3 --tui --gc-containers"
+                .into(),
+        );
+
+        let text = status_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Rerun with:"));
+        assert!(text.contains("--gc-containers"));
     }
 
     #[test]

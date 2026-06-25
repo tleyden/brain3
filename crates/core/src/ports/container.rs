@@ -1,5 +1,5 @@
 use crate::domain::errors::ContainerError;
-use crate::domain::model::ContainerConfig;
+use crate::domain::model::{ContainerConfig, ManagedContainerInfo, ManagedContainerScope};
 
 #[derive(Debug, Clone)]
 pub struct ContainerId(pub String);
@@ -22,6 +22,10 @@ pub trait ContainerPort: Send + Sync {
         network_name: &str,
     ) -> Result<NetworkPreparation, ContainerError>;
     async fn get_container_ip(&self, id: &ContainerId) -> Result<Option<String>, ContainerError>;
+    async fn list_managed_containers(
+        &self,
+        scope: &ManagedContainerScope,
+    ) -> Result<Vec<ManagedContainerInfo>, ContainerError>;
     async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError>;
     async fn stop(&self, id: &ContainerId) -> Result<(), ContainerError>;
     async fn remove(&self, id: &ContainerId) -> Result<(), ContainerError>;

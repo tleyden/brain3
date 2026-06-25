@@ -165,3 +165,47 @@ pub struct RuntimeLaunchPlan {
     pub env_file: PathBuf,
     pub log_file: PathBuf,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrphanContainerPolicy {
+    SkipDuringSetup,
+    FailClosed,
+    GarbageCollectExplicitly,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeStartupPolicy {
+    pub orphan_containers: OrphanContainerPolicy,
+}
+
+impl RuntimeStartupPolicy {
+    pub fn configured(gc_containers: bool) -> Self {
+        Self {
+            orphan_containers: if gc_containers {
+                OrphanContainerPolicy::GarbageCollectExplicitly
+            } else {
+                OrphanContainerPolicy::FailClosed
+            },
+        }
+    }
+
+    pub fn setup_or_reconfigure() -> Self {
+        Self {
+            orphan_containers: OrphanContainerPolicy::SkipDuringSetup,
+        }
+    }
+
+    pub fn checks_for_orphans(self) -> bool {
+        !matches!(
+            self.orphan_containers,
+            OrphanContainerPolicy::SkipDuringSetup
+        )
+    }
+
+    pub fn gc_containers_enabled(self) -> bool {
+        matches!(
+            self.orphan_containers,
+            OrphanContainerPolicy::GarbageCollectExplicitly
+        )
+    }
+}

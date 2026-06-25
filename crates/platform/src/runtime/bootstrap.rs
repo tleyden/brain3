@@ -3,11 +3,11 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{ContainerNetworkIsolationStrategy, GatewayConfig, TunnelConfig};
-use brain3_core::domain::setup::RuntimeLaunchPlan;
+use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::tunnel::TunnelPort;
 
 use crate::config::log_config;
-use crate::container::startup::{ensure_mcp_container, stop_mcp_container};
+use crate::container::startup::{ensure_mcp_container, installation_scope_id, stop_mcp_container};
 use crate::tunnel::start_tunnel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,8 +131,8 @@ mod tests {
     use std::sync::Arc;
 
     use brain3_core::domain::model::{
-        AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
-        OAuthConfig,
+        AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig,
+        MCPReverseProxyConfig, OAuthConfig,
     };
     use brain3_core::domain::setup::{RuntimeLaunchPlan, SetupPaths};
 
@@ -217,16 +217,18 @@ mod tests {
 pub async fn bootstrap_configured_runtime(
     config: Arc<GatewayConfig>,
     launch_plan: RuntimeLaunchPlan,
+    startup_policy: RuntimeStartupPolicy,
 ) -> Result<RuntimeBootstrap> {
     log_tunnel_mode(&config);
     ensure_named_tunnel_config_exists(&config)?;
     log_config::log_startup_config(&config);
 
     let upstream_secret = config.mcp_reverse_proxy.upstream_secret.clone();
+    let installation_id = installation_scope_id(&launch_plan.paths.app_home, &launch_plan.env_file);
 
     let mut config = config;
     let (container_status, managed_container_started) = if let Some(startup) = &config.container {
-        match ensure_mcp_container(startup).await {
+        match ensure_mcp_container(startup, startup_policy, &installation_id).await {
             Ok(Some(container_ip))
                 if startup.isolation_strategy
                     == Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp) =>
@@ -243,6 +245,7 @@ pub async fn bootstrap_configured_runtime(
                 (StartupStatus::Ready, true)
             }
             Ok(_) => (StartupStatus::Ready, true),
+            Err(error) if error.requires_explicit_gc() => return Err(error.into()),
             Err(error) => (
                 container_failure_status(startup.container_name.as_str(), &error),
                 error.started_container(),

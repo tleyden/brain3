@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::domain::model::ManagedContainerInfo;
+
 #[derive(Debug, Error)]
 pub enum ProxyError {
     #[error("unauthorized: {0}")]
@@ -34,6 +36,12 @@ pub enum ContainerError {
         logs: Option<String>,
         started_container: bool,
     },
+    #[error("{summary}")]
+    OrphanedManagedContainers {
+        summary: String,
+        installation_id: String,
+        containers: Vec<ManagedContainerInfo>,
+    },
     #[error("container error: {0}")]
     Other(String),
 }
@@ -42,6 +50,7 @@ impl ContainerError {
     pub fn summary(&self) -> String {
         match self {
             Self::StartupFailed { summary, .. } => summary.clone(),
+            Self::OrphanedManagedContainers { summary, .. } => summary.clone(),
             other => other.to_string(),
         }
     }
@@ -61,6 +70,37 @@ impl ContainerError {
                 started_container, ..
             } => *started_container,
             _ => false,
+        }
+    }
+
+    pub fn orphaned_managed_containers(&self) -> Option<&[ManagedContainerInfo]> {
+        match self {
+            Self::OrphanedManagedContainers { containers, .. } => Some(containers.as_slice()),
+            _ => None,
+        }
+    }
+
+    pub fn requires_explicit_gc(&self) -> bool {
+        matches!(self, Self::OrphanedManagedContainers { .. })
+    }
+
+    pub fn orphaned_managed_containers_for_installation(
+        installation_id: String,
+        containers: Vec<ManagedContainerInfo>,
+    ) -> Self {
+        let details = containers
+            .iter()
+            .map(|container| format!("{} ({})", container.name, container.state))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let summary = format!(
+            "Brain3 found managed MCP containers from this installation already present: {details}"
+        );
+
+        Self::OrphanedManagedContainers {
+            summary,
+            installation_id,
+            containers,
         }
     }
 }
