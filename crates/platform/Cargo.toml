@@ -16,7 +16,7 @@ reqwest = { version = "0.12", features = ["rustls-tls"], default-features = fals
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "time"] }
-tokio = { version = "1", features = ["sync", "process", "fs"] }
+tokio = { version = "1", features = ["sync", "process", "fs", "time"] }
 tracing = "0.1"
 urlencoding = "2"
 governor = "0.10"
