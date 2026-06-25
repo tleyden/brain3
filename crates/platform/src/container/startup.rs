@@ -307,16 +307,15 @@ async fn garbage_collect_managed_containers(
                 installation_id,
                 container = %container.name,
                 state = %container.state,
-                "removing stopped managed orphan MCP container"
+                "waiting for stopped managed orphan MCP container to be removed by Docker --rm"
             );
         }
 
         match runtime {
             ContainerRuntime::Docker => {
-                // Docker containers use --rm, so the daemon removes the container
-                // automatically after stop. Poll until it disappears; fall back to
-                // explicit docker rm only if it is still present after the timeout
-                // (e.g. a stopped container whose --rm somehow did not fire).
+                // Docker containers always use --rm. Whether we just stopped the
+                // container or it was already stopped, the daemon is responsible for
+                // removal. Poll until it disappears; never call explicit docker rm.
                 let gone = wait_for_container_gone(
                     port,
                     &id,
@@ -333,11 +332,11 @@ async fn garbage_collect_managed_containers(
                     );
                     continue;
                 }
-                tracing::debug!(
-                    installation_id,
-                    container = %container.name,
-                    "container still present after polling — falling back to explicit docker rm"
-                );
+                return Err(ContainerError::Other(format!(
+                    "timed out waiting for Docker to remove container '{}' via --rm; \
+                     Docker daemon may be unhealthy",
+                    container.name
+                )));
             }
             ContainerRuntime::MacOSContainer => {
                 // macOS containers do not use --rm; explicit removal is always needed.
@@ -644,23 +643,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn gc_docker_falls_back_to_explicit_rm_when_poll_times_out() {
-        // Docker runtime: exists() keeps returning true (--rm didn't fire).
-        // After timeout, we fall back to explicit docker rm.
+    async fn gc_docker_already_stopped_also_polls_not_rm() {
+        // Docker runtime: container is already stopped (not running). --rm is in
+        // progress. exists() returns false immediately. remove() must never be called.
         let port = MockContainerPort::new(MockState {
             managed_containers: vec![ManagedContainerInfo {
-                name: "brain3-stuck".into(),
+                name: "brain3-stopped".into(),
                 running: false,
                 state: "exited".into(),
                 labels: managed_container_labels("scope-1"),
             }],
-            // Always exists — simulates --rm not firing (enough for test timeout)
-            exists_responses: vec![true; 20],
+            // Already gone — --rm completed before we polled
+            exists_responses: vec![false],
             ..Default::default()
         });
 
         let containers = vec![ManagedContainerInfo {
-            name: "brain3-stuck".into(),
+            name: "brain3-stopped".into(),
             running: false,
             state: "exited".into(),
             labels: managed_container_labels("scope-1"),
@@ -673,10 +672,12 @@ mod tests {
             containers,
         )
         .await
-        .expect("gc should fall back to explicit rm on timeout");
+        .expect("gc should succeed via polling for already-stopped Docker container");
 
         let state = port.snapshot();
-        assert_eq!(state.remove_calls, vec!["brain3-stuck".to_string()]);
+        assert!(state.stop_calls.is_empty(), "stop should not be called on an already-stopped container");
+        assert!(state.remove_calls.is_empty(), "docker rm must never be called for Docker runtime");
+        assert_eq!(state.exists_calls, vec!["brain3-stopped".to_string()]);
     }
 
     #[tokio::test]
