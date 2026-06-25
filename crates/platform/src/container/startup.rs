@@ -270,13 +270,26 @@ async fn garbage_collect_managed_containers(
                 state = %container.state,
                 "stopping managed orphan MCP container before removal"
             );
-            port.stop(&id).await.map_err(|error| {
-                ContainerError::Other(format!(
-                    "failed to stop managed orphan container '{}': {}",
-                    container.name,
-                    error.summary()
-                ))
-            })?;
+            match port.stop(&id).await {
+                Ok(()) => {}
+                Err(ContainerError::CommandFailed { ref stderr, .. })
+                    if stderr.contains("No such container") =>
+                {
+                    tracing::debug!(
+                        installation_id,
+                        container = %container.name,
+                        "orphan container already gone during stop — skipping"
+                    );
+                    continue;
+                }
+                Err(error) => {
+                    return Err(ContainerError::Other(format!(
+                        "failed to stop managed orphan container '{}': {}",
+                        container.name,
+                        error.summary()
+                    )));
+                }
+            }
         } else {
             tracing::info!(
                 installation_id,
@@ -286,13 +299,26 @@ async fn garbage_collect_managed_containers(
             );
         }
 
-        port.remove(&id).await.map_err(|error| {
-            ContainerError::Other(format!(
-                "failed to remove managed orphan container '{}': {}",
-                container.name,
-                error.summary()
-            ))
-        })?;
+        match port.remove(&id).await {
+            Ok(()) => {}
+            Err(ContainerError::CommandFailed { ref stderr, .. })
+                if stderr.contains("No such container") =>
+            {
+                tracing::debug!(
+                    installation_id,
+                    container = %container.name,
+                    "orphan container already gone during remove — skipping"
+                );
+                continue;
+            }
+            Err(error) => {
+                return Err(ContainerError::Other(format!(
+                    "failed to remove managed orphan container '{}': {}",
+                    container.name,
+                    error.summary()
+                )));
+            }
+        }
         tracing::info!(
             installation_id,
             container = %container.name,
