@@ -93,7 +93,7 @@ sudo apt-get install cloudflared
 ### Install and run Brain3
 
 ```bash
-curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.2.5/install.sh | sh
+curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.2.6/install.sh | sh
 ```
 
 Now run it:
