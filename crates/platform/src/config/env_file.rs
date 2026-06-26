@@ -9,6 +9,9 @@ use brain3_core::domain::model::{
     TunnelConfig,
 };
 use rand::RngExt;
+
+use crate::setup::app_home::Brain3AppHome;
+
 const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 const DEFAULT_LOCAL_MCP_PORT: u16 = 2764;
@@ -470,7 +473,12 @@ fn load_tunnel_config(gateway_port: u16) -> Result<Option<TunnelConfig>, ConfigE
     if named {
         let config_file_str = env_var_or("B3_CF_TUNNEL_CONFIG_FILE", "");
         let config_file = if config_file_str.is_empty() {
-            PathBuf::from(format!(".cloudflared/{tunnel_name}.yml"))
+            let app_home = Brain3AppHome::resolve_from_env().map_err(|e| {
+                ConfigError::Missing(format!(
+                    "{e}; cannot resolve default Cloudflare tunnel config file path"
+                ))
+            })?;
+            app_home.cloudflared_dir.join(format!("{tunnel_name}.yml"))
         } else {
             PathBuf::from(config_file_str)
         };
@@ -557,7 +565,11 @@ mod tests {
         "B3_ACCESS_MODE",
         "B3_LOCAL_MCP_PORT",
         "LOCAL_GATEWAY_MCP_BEARER_TOKEN",
+        "B3_HOME",
         "B3_CF_QUICK_TUNNEL",
+        "B3_CF_TUNNEL_NAME",
+        "B3_CF_DOMAIN",
+        "B3_CF_TUNNEL_CONFIG_FILE",
     ];
 
     fn with_clean_config_env<T>(f: impl FnOnce() -> T) -> T {
@@ -813,6 +825,40 @@ mod tests {
 
             assert_eq!(config.access_mode, AccessMode::Both);
             assert!(config.tunnel.is_none(), "quick tunnel should be opt-in");
+        });
+    }
+
+    #[test]
+    fn load_defaults_named_tunnel_config_file_to_brain3_home() {
+        with_clean_config_env(|| {
+            let app_home = env::temp_dir().join("brain3-config-test-named-tunnel-home");
+            let token_db = env::temp_dir().join("brain3-config-test-named-tunnel.db");
+            let env_path = write_test_env_file(&format!(
+                "B3_OAUTH2_GATEWAY_CLIENT_SECRET=test-secret\n\
+                 B3_USERNAME=test-user\n\
+                 B3_PASSWORD=test-password\n\
+                 B3_TOKEN_DB_PATH={}\n\
+                 B3_HOME={}\n\
+                 B3_CF_TUNNEL_NAME=brain3-dev\n\
+                 B3_CF_DOMAIN=example.com\n\
+                 B3_CF_TUNNEL_CONFIG_FILE=\n",
+                token_db.display(),
+                app_home.display()
+            ));
+
+            let adapter = EnvFileConfigAdapter::new(Some(env_path));
+            let config = adapter.load().expect("expected config to load");
+            let tunnel = config.tunnel.expect("named tunnel should be configured");
+
+            match tunnel {
+                TunnelConfig::CloudflareNamed { config_file, .. } => {
+                    assert_eq!(
+                        config_file,
+                        app_home.join("cloudflared").join("brain3-dev.yml")
+                    );
+                }
+                other => panic!("expected named tunnel config, got {other:?}"),
+            }
         });
     }
 
