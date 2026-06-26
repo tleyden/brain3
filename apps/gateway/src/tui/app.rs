@@ -85,6 +85,11 @@ pub async fn run_gateway_tui(
                 .await
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
             preparation.paths.env_file = launch_plan.env_file.clone();
+            tracing::debug!(
+                env_file = %launch_plan.env_file.display(),
+                initial_step = "Summary",
+                "configured launch: TUI will open at Summary confirmation step before auto-starting"
+            );
             (
                 FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation),
                 startup_options.startup_policy,
