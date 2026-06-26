@@ -185,7 +185,7 @@ mod tests {
                 PathBuf::from("/tmp/brain3-home/cloudflared"),
             ),
             env_file: PathBuf::from("/tmp/brain3-home/.env"),
-            log_file: PathBuf::from("/tmp/brain3.log"),
+            log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
         };
 
         let not_owned = RuntimeBootstrap::new(

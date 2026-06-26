@@ -1607,7 +1607,7 @@ mod tests {
     fn sample_state() -> FirstRunTuiState {
         FirstRunTuiState::new(
             "127.0.0.1".into(),
-            PathBuf::from("/tmp/brain3.log"),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
             SetupPreparation {
                 paths: SetupPaths::new(
                     PathBuf::from("/tmp/brain3-home"),
@@ -1707,7 +1707,7 @@ mod tests {
                     PathBuf::from("/tmp/brain3-home/cloudflared"),
                 ),
                 env_file: PathBuf::from("/tmp/brain3-home/.env"),
-                log_file: PathBuf::from("/tmp/brain3.log"),
+                log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
             },
             None,
             StartupStatus::Failed {

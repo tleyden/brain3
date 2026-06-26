@@ -1,6 +1,5 @@
 use std::env;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use brain3_core::domain::errors::SetupError;
@@ -239,40 +238,17 @@ impl SetupSystemPort for PlatformSetupSystem {
         }
     }
 
-    async fn create_temp_log_file(&self) -> Result<PathBuf, SetupError> {
-        let temp_dir = env::temp_dir();
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-
-        for attempt in 0..10 {
-            let suffix = if attempt == 0 {
-                format!("{timestamp}")
-            } else {
-                format!("{timestamp}-{attempt}")
-            };
-            let path = temp_dir.join(format!("brain3-{suffix}.log"));
-            match fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&path)
-                .await
-            {
-                Ok(_) => return Ok(path),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => {
-                    return Err(SetupError::Io(format!(
-                        "create log file {}: {e}",
-                        path.display()
-                    )))
-                }
-            }
+    async fn resolve_log_file(&self, paths: &SetupPaths) -> Result<PathBuf, SetupError> {
+        if let Err(error) = fs::create_dir_all(&paths.app_home).await {
+            tracing::warn!(
+                path = %paths.app_home.display(),
+                error = %error,
+                "could not create app home for log file, falling back to temp dir"
+            );
+            return Ok(env::temp_dir().join("brain3.log"));
         }
 
-        Err(SetupError::Io(
-            "could not allocate a unique temp log file".into(),
-        ))
+        Ok(paths.app_home.join("brain3.log"))
     }
 
     async fn run_install_action(&self, action: InstallAction) -> Result<(), SetupError> {

@@ -764,7 +764,7 @@ mod tests {
         );
         let mut state = FirstRunTuiState::new_configured(
             "127.0.0.1".into(),
-            PathBuf::from("/tmp/brain3.log"),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
             sample_preparation(),
         );
         let paths = state.preparation.paths.clone();
@@ -821,7 +821,7 @@ mod tests {
                     brain3_core::domain::setup::RuntimeLaunchPlan {
                         paths: paths.clone(),
                         env_file: paths.env_file.clone(),
-                        log_file: PathBuf::from("/tmp/brain3.log"),
+                        log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
                     },
                     None,
                     StartupStatus::Failed {
@@ -858,7 +858,7 @@ mod tests {
         );
         let mut state = FirstRunTuiState::new_configured(
             "127.0.0.1".into(),
-            PathBuf::from("/tmp/brain3.log"),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
             sample_preparation(),
         );
 

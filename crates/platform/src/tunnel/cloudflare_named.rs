@@ -113,6 +113,10 @@ impl TunnelPort for CloudflareNamedTunnelAdapter {
                 self.config_file.display().to_string(),
             ));
         }
+        tracing::info!(
+            config_file = %self.config_file.display(),
+            "cloudflare tunnel config file present"
+        );
 
         // Pre-start: cleanup any stale connections before spawning.
         let (registered_before, stale_connections) = check_cf_registry(&self.tunnel_name).await;
