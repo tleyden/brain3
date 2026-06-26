@@ -1062,7 +1062,7 @@ mod tests {
 
         let state = FirstRunTuiState::new_configured(
             "127.0.0.1".into(),
-            PathBuf::from("/tmp/brain3.log"),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
             preparation,
         );
 
@@ -1092,7 +1092,7 @@ mod tests {
     fn sample_state() -> FirstRunTuiState {
         FirstRunTuiState::new(
             "127.0.0.1".into(),
-            PathBuf::from("/tmp/brain3.log"),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
             sample_preparation(),
         )
     }

@@ -1,3 +1,4 @@
+use std::env;
 use std::fs::OpenOptions;
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -5,6 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
+use brain3_core::domain::setup::SetupPaths;
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::setup::PlatformSetupSystem;
 use tracing_appender::non_blocking::NonBlocking;
@@ -69,15 +71,57 @@ impl Write for GatewayWriter {
 
 pub async fn init_logging(default_level: &str) -> Result<GatewayLogging> {
     let setup_system = PlatformSetupSystem::new();
+    let paths = setup_system.resolve_paths().unwrap_or_else(|error| {
+        let fallback_home = env::temp_dir().join("brain3");
+        tracing::warn!(
+            error = %error,
+            fallback_home = %fallback_home.display(),
+            "failed to resolve brain3 home for log file, falling back to temp dir"
+        );
+        SetupPaths::new(
+            fallback_home.clone(),
+            fallback_home.join(".env"),
+            fallback_home.join("cloudflared"),
+        )
+    });
     let log_file = setup_system
-        .create_temp_log_file()
+        .resolve_log_file(&paths)
         .await
-        .context("failed to allocate gateway log file")?;
+        .unwrap_or_else(|error| {
+            let fallback_log_file = env::temp_dir().join("brain3.log");
+            tracing::warn!(
+                error = %error,
+                fallback_log_file = %fallback_log_file.display(),
+                "failed to resolve gateway log file, falling back to temp dir"
+            );
+            fallback_log_file
+        });
 
-    let file = OpenOptions::new()
-        .append(true)
+    let mut log_options = OpenOptions::new();
+    log_options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        log_options.mode(0o600);
+    }
+
+    let file = log_options
         .open(&log_file)
         .with_context(|| format!("failed to open gateway log file {}", log_file.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .with_context(|| {
+                format!(
+                    "failed to set gateway log file permissions on {}",
+                    log_file.display()
+                )
+            })?;
+    }
 
     let (writer, guard) = tracing_appender::non_blocking(file);
     let mirror_to_stderr = Arc::new(AtomicBool::new(false));

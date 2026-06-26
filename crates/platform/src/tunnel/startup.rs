@@ -40,12 +40,21 @@ fn validate_named_tunnel_config_port(
     config_file: &Path,
     expected_port: u16,
 ) -> Result<(), TunnelError> {
+    tracing::info!(
+        config_file = %config_file.display(),
+        "reading cloudflare tunnel config for port validation"
+    );
     let content = std::fs::read_to_string(config_file).map_err(|e| {
         TunnelError::Other(format!(
             "failed to read tunnel config {}: {e}",
             config_file.display()
         ))
     })?;
+    tracing::info!(
+        config_file = %config_file.display(),
+        bytes = content.len(),
+        "cloudflare tunnel config read successfully"
+    );
 
     let mut found_service = false;
     for line in content.lines() {
@@ -61,7 +70,10 @@ fn validate_named_tunnel_config_port(
 
         // Extract port from "http[s]://host:PORT[/path]" by splitting on ':' from the right.
         if let Some(after_last_colon) = url.rsplitn(2, ':').next() {
-            let port_str = after_last_colon.split('/').next().unwrap_or(after_last_colon);
+            let port_str = after_last_colon
+                .split('/')
+                .next()
+                .unwrap_or(after_last_colon);
             if let Ok(config_port) = port_str.parse::<u16>() {
                 if config_port == expected_port {
                     return Ok(());

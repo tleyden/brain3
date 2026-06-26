@@ -414,7 +414,7 @@ mod tests {
                 .any(|candidate| candidate == path))
         }
 
-        async fn create_temp_log_file(&self) -> Result<PathBuf, SetupError> {
+        async fn resolve_log_file(&self, _paths: &SetupPaths) -> Result<PathBuf, SetupError> {
             Ok(PathBuf::from("/tmp/brain3.log"))
         }
 

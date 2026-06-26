@@ -460,6 +460,13 @@ async fn run_setup(state: &mut SetupState) {
         "Writing config to {}…",
         state.config_file.display()
     ));
+    tracing::info!(
+        config_path = %state.config_file.display(),
+        tunnel_name = %state.tunnel_name,
+        domain = %state.domain,
+        local_port = state.local_port,
+        "setup tui writing cloudflare tunnel config"
+    );
     match cf::write_config_file(
         &state.config_file,
         &tunnel_id,

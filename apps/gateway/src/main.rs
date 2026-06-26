@@ -718,11 +718,17 @@ async fn main() -> Result<()> {
                         "TuiConfigured: CloudflareNamed tunnel — cf-setup screen shown only when config_file is missing"
                     );
                 }
-                Some(_) => tracing::debug!("TuiConfigured: non-CloudflareNamed tunnel; cf-setup not applicable"),
-                None => tracing::debug!("TuiConfigured: no tunnel configured; cf-setup not applicable"),
+                Some(_) => tracing::debug!(
+                    "TuiConfigured: non-CloudflareNamed tunnel; cf-setup not applicable"
+                ),
+                None => {
+                    tracing::debug!("TuiConfigured: no tunnel configured; cf-setup not applicable")
+                }
             }
             if let Some(tunnel_config) = named_tunnel_setup_config(&config) {
-                tracing::debug!("TuiConfigured: cloudflared config file missing → launching cf-setup TUI");
+                tracing::debug!(
+                    "TuiConfigured: cloudflared config file missing → launching cf-setup TUI"
+                );
                 if !interactive_terminal {
                     return named_tunnel_setup_requires_tui(&args, &resolved_env);
                 }
@@ -944,7 +950,7 @@ mod tests {
                 LaunchMode::Tui,
                 &default_env,
                 false,
-                PathBuf::from("/tmp/brain3.log"),
+                PathBuf::from("/tmp/brain3-home/brain3.log"),
             )
             .expect("tui dispatch should succeed"),
             LaunchDispatch::TuiFirstRun
@@ -954,7 +960,7 @@ mod tests {
             LaunchMode::Cli,
             &default_env,
             false,
-            PathBuf::from("/tmp/brain3.log"),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
         )
         .expect_err("cli dispatch should refuse missing default env");
         assert!(
@@ -975,7 +981,7 @@ mod tests {
             LaunchMode::Tui,
             &resolved,
             false,
-            PathBuf::from("/tmp/brain3.log"),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
         )
         .expect_err("missing custom env should fail");
 

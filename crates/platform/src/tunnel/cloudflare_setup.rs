@@ -127,8 +127,20 @@ pub fn write_config_file(
         creds = credentials_file.display(),
     );
 
+    tracing::info!(
+        config_path = %config_path.display(),
+        tunnel_id = %tunnel_id,
+        tunnel_name = %tunnel_name,
+        domain = %domain,
+        local_port,
+        "writing cloudflare tunnel config"
+    );
     std::fs::write(config_path, content)
         .map_err(|e| TunnelError::SetupFailed(format!("could not write config file: {e}")))?;
+    tracing::info!(
+        config_path = %config_path.display(),
+        "cloudflare tunnel config written"
+    );
 
     Ok(())
 }
