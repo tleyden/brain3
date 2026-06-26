@@ -86,11 +86,20 @@ upload_required_metadata "$TARBALLS_DIR/SHA256SUMS.sig" "SHA256SUMS.sig"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/install.sh" ]; then
   echo "[install.sh]"
-  STAMPED="$(mktemp)"
-  sed "s|__BUCKET__|$BUCKET|g" "$SCRIPT_DIR/install.sh" > "$STAMPED"
-  aws s3 cp "$STAMPED" "s3://$BUCKET/releases/latest/install.sh" --region "$AWS_REGION"
-  aws s3 cp "$STAMPED" "s3://$BUCKET/releases/$VERSION/install.sh" --region "$AWS_REGION"
-  rm -f "$STAMPED"
+
+  # latest copy: always points at releases/latest
+  STAMPED_LATEST="$(mktemp)"
+  sed "s|__BUCKET__|$BUCKET|g" "$SCRIPT_DIR/install.sh" > "$STAMPED_LATEST"
+  aws s3 cp "$STAMPED_LATEST" "s3://$BUCKET/releases/latest/install.sh" --region "$AWS_REGION"
+  rm -f "$STAMPED_LATEST"
+
+  # versioned copy: points at releases/$VERSION so pinned installs stay pinned
+  STAMPED_VERSIONED="$(mktemp)"
+  sed -e "s|__BUCKET__|$BUCKET|g" \
+    -e "s|releases/latest|releases/$VERSION|g" \
+    "$SCRIPT_DIR/install.sh" > "$STAMPED_VERSIONED"
+  aws s3 cp "$STAMPED_VERSIONED" "s3://$BUCKET/releases/$VERSION/install.sh" --region "$AWS_REGION"
+  rm -f "$STAMPED_VERSIONED"
 fi
 
 echo ""
