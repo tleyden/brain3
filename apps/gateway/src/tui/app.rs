@@ -440,6 +440,9 @@ async fn event_loop(
                 _ => {}
             },
             SetupStep::ConnectionCard => match key.code {
+                KeyCode::Char('s') => {
+                    state.secrets_revealed = !state.secrets_revealed;
+                }
                 KeyCode::Enter => {
                     state.clear_messages();
                     state.show_runtime_status();
@@ -698,14 +701,8 @@ fn apply_startup_result(
             }
         } else {
             state.info_message = Some("Brain3 is running.".into());
-            // Wizard path shows the connection card first so the user can copy credentials.
-            // Configured-launch path goes straight to RuntimeStatus (credentials already known).
             if state.summary.is_some() {
-                state.step = if state.connection_card.is_some() {
-                    SetupStep::ConnectionCard
-                } else {
-                    SetupStep::RuntimeStatus
-                };
+                state.step = SetupStep::RuntimeStatus;
             }
         }
     }
@@ -753,6 +750,82 @@ mod tests {
     use crate::server::ConfiguredGatewaySession;
 
     use super::*;
+
+    #[test]
+    fn successful_wizard_startup_stays_on_runtime_status() {
+        let use_case = FirstRunSetupUseCase::new(
+            Arc::new(PlatformSetupSystem::with_environment(
+                SetupOperatingSystem::Linux,
+                None,
+            )),
+            SetupDefaults {
+                default_container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+            },
+        );
+        let mut state = FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            sample_preparation(),
+        );
+        let paths = state.preparation.paths.clone();
+        state.summary = Some(brain3_core::domain::setup::SetupSummary {
+            paths: paths.clone(),
+            draft: state.draft.clone(),
+            dependencies: state.preparation.dependencies.clone(),
+        });
+        state.step = SetupStep::RuntimeStatus;
+
+        apply_startup_result(
+            &mut state,
+            Ok(ConfiguredGatewaySession {
+                runtime: RuntimeBootstrap::new(
+                    Arc::new(GatewayConfig {
+                        port: 8421,
+                        host: "127.0.0.1".into(),
+                        token_db_path: PathBuf::from("/tmp/brain3-home/brain3.db"),
+                        oauth: OAuthConfig {
+                            client_id: "brain3-oauth2-client".into(),
+                            client_secret: "secret".into(),
+                            access_token_lifetime_secs: 3600,
+                            refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                            pkce_required: true,
+                            username: "admin".into(),
+                            password: "password".into(),
+                        },
+                        mcp_reverse_proxy: MCPReverseProxyConfig {
+                            mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                            upstream_secret: "secret".into(),
+                        },
+                        hostname_validation: HostnameValidationConfig {
+                            expected_host: None,
+                            enforce: true,
+                        },
+                        access_mode: AccessMode::Both,
+                        local_mcp: None,
+                        container: None,
+                        tunnel: None,
+                    }),
+                    "secret".into(),
+                    brain3_core::domain::setup::RuntimeLaunchPlan {
+                        paths: paths.clone(),
+                        env_file: paths.env_file.clone(),
+                        log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
+                    },
+                    Some("https://brain3.example.com".into()),
+                    StartupStatus::Ready,
+                    StartupStatus::NotConfigured,
+                    false,
+                ),
+                server: None,
+                display_url: Some("https://brain3.example.com".into()),
+            }),
+            &use_case,
+            None,
+        );
+
+        assert_eq!(state.step, SetupStep::RuntimeStatus);
+        assert!(state.connection_card.is_some());
+    }
 
     #[test]
     fn failed_startup_returns_user_to_summary_for_retry() {

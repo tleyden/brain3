@@ -756,6 +756,9 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ))];
     };
 
+    let client_secret = secret_display(&card.client_secret, state.secrets_revealed);
+    let password = secret_display(&card.password, state.secrets_revealed);
+
     let mut lines = vec![
         Line::from(Span::styled(
             "Brain3 is configured and running.",
@@ -770,9 +773,9 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         Line::from(Span::styled("Remote MCP", section_heading_style())),
         key_value_line("Server URL", format!("{}/mcp", card.server_url)),
         key_value_line("Client ID", card.client_id.clone()),
-        key_value_line("Client Secret", card.client_secret.clone()),
+        key_value_line("Client Secret", client_secret),
         key_value_line("Username", card.username.clone()),
-        key_value_line("Password", card.password.clone()),
+        key_value_line("Password", password),
     ];
 
     if let Some(local_mcp) = state
@@ -789,10 +792,25 @@ fn connection_card_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Endpoint",
             format!("http://localhost:{}/mcp", local_mcp.port),
         ));
-        lines.push(key_value_line("Token", local_mcp.bearer_token.clone()));
+        lines.push(key_value_line(
+            "Token",
+            secret_display(&local_mcp.bearer_token, state.secrets_revealed),
+        ));
     }
 
     lines
+}
+
+fn secret_display(secret: &str, revealed: bool) -> String {
+    if revealed {
+        secret.to_string()
+    } else {
+        mask(secret)
+    }
+}
+
+fn mask(secret: &str) -> String {
+    "*".repeat(secret.len().max(8))
 }
 
 fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
@@ -801,7 +819,7 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     )];
 
     if state.connection_card.is_some() {
-        lines.push(muted_line("Press c to switch back to MCP config settings."));
+        lines.push(muted_line("Press c to view MCP connection details."));
     }
 
     lines.push(muted_line("Press l to toggle the logs view."));
@@ -1024,7 +1042,18 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ],
         SetupStep::ConnectionCard => vec![
             primary_action_line("Open runtime status when you're ready."),
-            hint_line(vec![("[q]", "Quit"), ("[Enter]", "Open runtime status")]),
+            hint_line(vec![
+                (
+                    "[s]",
+                    if state.secrets_revealed {
+                        "Hide secrets"
+                    } else {
+                        "Reveal secrets"
+                    },
+                ),
+                ("[q]", "Quit"),
+                ("[Enter]", "Open runtime status"),
+            ]),
         ],
         SetupStep::RuntimeStatus => runtime_action_lines(state),
     }
@@ -1434,9 +1463,9 @@ mod tests {
         MCPReverseProxyConfig, OAuthConfig,
     };
     use brain3_core::domain::setup::{
-        DependencyAvailability, DependencyStatus, PackageManager, RuntimeLaunchPlan,
-        SetupDraftConfig, SetupOperatingSystem, SetupPaths, SetupPreparation, SetupStep,
-        TunnelModeDraft,
+        ConnectionCard, DependencyAvailability, DependencyStatus, PackageManager,
+        RuntimeLaunchPlan, SetupDraftConfig, SetupOperatingSystem, SetupPaths, SetupPreparation,
+        SetupStep, TunnelModeDraft,
     };
     use brain3_platform::runtime::{RuntimeBootstrap, StartupStatus};
 
@@ -1604,6 +1633,70 @@ mod tests {
         assert!(!summary_text.contains("Container network name"));
     }
 
+    #[test]
+    fn connection_card_masks_secrets_by_default() {
+        let mut state = sample_runtime_connection_card_state();
+
+        let text = connection_card_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Client Secret: ********"));
+        assert!(text.contains("Password: ********"));
+        assert!(text.contains("Token: ***********"));
+        assert!(!text.contains("client-secret"));
+        assert!(!text.contains("password"));
+        assert!(!text.contains("local-token"));
+
+        state.secrets_revealed = true;
+        let revealed_text = connection_card_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(revealed_text.contains("Client Secret: client-secret"));
+        assert!(revealed_text.contains("Password: password"));
+        assert!(revealed_text.contains("Token: local-token"));
+    }
+
+    #[test]
+    fn connection_card_action_hint_toggles_secret_visibility_label() {
+        let mut state = sample_runtime_connection_card_state();
+        state.step = SetupStep::ConnectionCard;
+
+        let masked_actions = action_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(masked_actions.contains("[s] Reveal secrets"));
+
+        state.secrets_revealed = true;
+        let revealed_actions = action_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(revealed_actions.contains("[s] Hide secrets"));
+    }
+
+    #[test]
+    fn runtime_hint_points_to_connection_details() {
+        let state = sample_runtime_connection_card_state();
+
+        let text = runtime_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Press c to view MCP connection details."));
+        assert!(!text.contains("switch back"));
+    }
+
     fn sample_state() -> FirstRunTuiState {
         FirstRunTuiState::new(
             "127.0.0.1".into(),
@@ -1717,6 +1810,65 @@ mod tests {
             false,
         ));
         state.error_message = Some("Vault path does not exist: /Obsidian/MyVault".into());
+        state
+    }
+
+    fn sample_runtime_connection_card_state() -> FirstRunTuiState {
+        let mut state = sample_state();
+        state.step = SetupStep::RuntimeStatus;
+        state.connection_card = Some(ConnectionCard {
+            server_url: "https://brain3.example.com".into(),
+            client_id: "brain3-oauth2-client".into(),
+            client_secret: "client-secret".into(),
+            username: "admin".into(),
+            password: "password".into(),
+            log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
+        });
+        state.runtime = Some(RuntimeBootstrap::new(
+            Arc::new(GatewayConfig {
+                port: 8421,
+                host: "127.0.0.1".into(),
+                token_db_path: PathBuf::from("/tmp/brain3-home/brain3.db"),
+                oauth: OAuthConfig {
+                    client_id: "brain3-oauth2-client".into(),
+                    client_secret: "client-secret".into(),
+                    access_token_lifetime_secs: 3600,
+                    refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                    pkce_required: true,
+                    username: "admin".into(),
+                    password: "password".into(),
+                },
+                mcp_reverse_proxy: MCPReverseProxyConfig {
+                    mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                    upstream_secret: "secret".into(),
+                },
+                hostname_validation: HostnameValidationConfig {
+                    expected_host: None,
+                    enforce: true,
+                },
+                access_mode: AccessMode::Both,
+                local_mcp: Some(brain3_core::domain::model::LocalMcpConfig {
+                    port: 8422,
+                    bearer_token: "local-token".into(),
+                }),
+                container: None,
+                tunnel: None,
+            }),
+            "secret".into(),
+            RuntimeLaunchPlan {
+                paths: SetupPaths::new(
+                    PathBuf::from("/tmp/brain3-home"),
+                    PathBuf::from("/tmp/brain3-home/.env"),
+                    PathBuf::from("/tmp/brain3-home/cloudflared"),
+                ),
+                env_file: PathBuf::from("/tmp/brain3-home/.env"),
+                log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
+            },
+            None,
+            StartupStatus::Ready,
+            StartupStatus::NotConfigured,
+            false,
+        ));
         state
     }
 }
