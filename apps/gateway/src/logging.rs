@@ -69,8 +69,14 @@ impl Write for GatewayWriter {
     }
 }
 
-pub async fn init_logging(default_level: &str) -> Result<GatewayLogging> {
-    let setup_system = PlatformSetupSystem::new();
+pub async fn init_logging(
+    default_level: &str,
+    brain3_home: Option<PathBuf>,
+) -> Result<GatewayLogging> {
+    let setup_system = match brain3_home {
+        Some(dir) => PlatformSetupSystem::with_home_override(dir),
+        None => PlatformSetupSystem::new(),
+    };
     let paths = setup_system.resolve_paths().unwrap_or_else(|error| {
         let fallback_home = env::temp_dir().join("brain3");
         tracing::warn!(

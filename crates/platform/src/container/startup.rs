@@ -639,7 +639,11 @@ mod tests {
 
         let state = port.snapshot();
         assert_eq!(state.stop_calls, vec!["brain3-running".to_string()]);
-        assert_eq!(state.remove_calls, Vec::<String>::new(), "docker rm should not be called when --rm handles removal");
+        assert_eq!(
+            state.remove_calls,
+            Vec::<String>::new(),
+            "docker rm should not be called when --rm handles removal"
+        );
     }
 
     #[tokio::test]
@@ -665,18 +669,19 @@ mod tests {
             labels: managed_container_labels("scope-1"),
         }];
 
-        garbage_collect_managed_containers(
-            &port,
-            ContainerRuntime::Docker,
-            "scope-1",
-            containers,
-        )
-        .await
-        .expect("gc should succeed via polling for already-stopped Docker container");
+        garbage_collect_managed_containers(&port, ContainerRuntime::Docker, "scope-1", containers)
+            .await
+            .expect("gc should succeed via polling for already-stopped Docker container");
 
         let state = port.snapshot();
-        assert!(state.stop_calls.is_empty(), "stop should not be called on an already-stopped container");
-        assert!(state.remove_calls.is_empty(), "docker rm must never be called for Docker runtime");
+        assert!(
+            state.stop_calls.is_empty(),
+            "stop should not be called on an already-stopped container"
+        );
+        assert!(
+            state.remove_calls.is_empty(),
+            "docker rm must never be called for Docker runtime"
+        );
         assert_eq!(state.exists_calls, vec!["brain3-stopped".to_string()]);
     }
 
@@ -708,6 +713,9 @@ mod tests {
         let state = port.snapshot();
         assert_eq!(state.stop_calls, vec!["brain3-macos".to_string()]);
         assert_eq!(state.remove_calls, vec!["brain3-macos".to_string()]);
-        assert!(state.exists_calls.is_empty(), "exists should not be polled for macOS");
+        assert!(
+            state.exists_calls.is_empty(),
+            "exists should not be polled for macOS"
+        );
     }
 }
