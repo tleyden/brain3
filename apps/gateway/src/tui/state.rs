@@ -676,7 +676,7 @@ fn increment_port_input(input: &mut String) {
     let Ok(port) = input.trim().parse::<u16>() else {
         return;
     };
-    let Some(port) = port.checked_add(10) else {
+    let Some(port) = port.checked_add(1000) else {
         return;
     };
     *input = port.to_string();
@@ -1030,15 +1030,15 @@ mod tests {
     }
 
     #[test]
-    fn hidden_dev_port_offset_adds_ten_to_visible_port_fields_only() {
+    fn hidden_dev_port_offset_adds_thousand_to_visible_port_fields() {
         let mut state = sample_state();
 
         state.apply_hidden_dev_port_offset();
 
-        assert_eq!(state.gateway_port_input, "8431");
-        assert_eq!(state.local_mcp_port_input, "8432");
-        assert_eq!(state.container_host_port_input, "8430");
-        assert_eq!(state.container_mcp_port_input, "8430");
+        assert_eq!(state.gateway_port_input, "9421");
+        assert_eq!(state.local_mcp_port_input, "9422");
+        assert_eq!(state.container_host_port_input, "9420");
+        assert_eq!(state.container_mcp_port_input, "9420");
         assert_eq!(state.access_token_lifetime_secs_input, "3600");
         assert_eq!(
             state.refresh_token_lifetime_secs_input,
