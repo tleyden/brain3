@@ -1009,7 +1009,9 @@ mod tests {
 
             let adapter = EnvFileConfigAdapter::new(Some(env_path));
             let config = adapter.load().expect("expected config to load");
-            let container = config.container.expect("container config should be present");
+            let container = config
+                .container
+                .expect("container config should be present");
 
             assert_eq!(container.container_name, "saved-container-name");
             assert_eq!(container.network_name, "saved-network-name");
