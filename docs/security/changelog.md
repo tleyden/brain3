@@ -4,6 +4,16 @@ Resolved security findings, listed by the version in which they were closed. See
 
 ---
 
+## v0.2.5
+
+### ✅ RESOLVED — TUI Connection Card Displayed Secrets By Default
+
+The gateway TUI no longer drops users directly onto the MCP connection card after successful first-run startup. It now lands on `RuntimeStatus`; users can still press `[c]` to view MCP connection details. On `ConnectionCard`, `client_secret`, password, and the local MCP bearer token are masked by default with at least eight `*` characters, and `[s]` explicitly toggles reveal/hide. The Summary wizard screen still shows credentials intentionally while the user is actively configuring them.
+
+Verified by TUI regression tests for startup routing, masked/revealed rendering, action hints, and runtime copy, plus full `cargo test`.
+
+---
+
 ## v0.1.7 → v0.1.8
 
 ### ✅ RESOLVED — Generated Passwords Lacked Symbol Character Class (L-8)
