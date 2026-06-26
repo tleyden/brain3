@@ -85,8 +85,21 @@ pub async fn run_gateway_tui(
                 .await
                 .map_err(|error| anyhow::anyhow!("{error}"))?;
             preparation.paths.env_file = launch_plan.env_file.clone();
+            tracing::debug!(
+                env_file = %launch_plan.env_file.display(),
+                "configured launch: auto-starting, skipping Summary confirmation step"
+            );
+            let mut state =
+                FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation);
+            finalize_and_start(
+                &mut state,
+                &use_case,
+                runtime_overrides.clone(),
+                startup_options.startup_policy,
+            )
+            .await;
             (
-                FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation),
+                state,
                 startup_options.startup_policy,
                 Some(startup_options.orphan_gc_rerun_command),
             )

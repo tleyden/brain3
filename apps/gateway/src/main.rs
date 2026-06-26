@@ -674,12 +674,19 @@ async fn main() -> Result<()> {
     let resolved_env = resolve_config_env_file(&args)?;
     let interactive_terminal = is_interactive_terminal();
     let mode = choose_launch_mode(&args);
-    let dispatch = plan_launch(
-        mode,
-        &resolved_env,
-        resolved_env.env_file.exists(),
-        logging.log_file.clone(),
-    )?;
+    let env_exists = resolved_env.env_file.exists();
+    let dispatch = plan_launch(mode, &resolved_env, env_exists, logging.log_file.clone())?;
+    tracing::debug!(
+        env_file = %resolved_env.env_file.display(),
+        env_exists = %env_exists,
+        dispatch = match &dispatch {
+            LaunchDispatch::TuiFirstRun => "TuiFirstRun",
+            LaunchDispatch::TuiConfigured { .. } => "TuiConfigured",
+            LaunchDispatch::Cli { .. } => "Cli",
+            LaunchDispatch::Setup { .. } => "Setup",
+        },
+        "launch dispatch resolved"
+    );
 
     match dispatch {
         LaunchDispatch::TuiFirstRun => {
@@ -698,12 +705,33 @@ async fn main() -> Result<()> {
         }
         LaunchDispatch::TuiConfigured { launch_plan } => {
             let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
+            match &config.tunnel {
+                Some(brain3_core::domain::model::TunnelConfig::CloudflareNamed {
+                    tunnel_name,
+                    config_file,
+                    ..
+                }) => {
+                    tracing::debug!(
+                        tunnel_name = %tunnel_name,
+                        config_file = %config_file.display(),
+                        config_file_exists = %config_file.exists(),
+                        "TuiConfigured: CloudflareNamed tunnel — cf-setup screen shown only when config_file is missing"
+                    );
+                }
+                Some(_) => tracing::debug!("TuiConfigured: non-CloudflareNamed tunnel; cf-setup not applicable"),
+                None => tracing::debug!("TuiConfigured: no tunnel configured; cf-setup not applicable"),
+            }
             if let Some(tunnel_config) = named_tunnel_setup_config(&config) {
+                tracing::debug!("TuiConfigured: cloudflared config file missing → launching cf-setup TUI");
                 if !interactive_terminal {
                     return named_tunnel_setup_requires_tui(&args, &resolved_env);
                 }
                 return setup_tui::run(tunnel_config).await;
             }
+            tracing::debug!(
+                "TuiConfigured: cloudflared config file present (or no named tunnel) → \
+                 launching main TUI at Summary confirmation step"
+            );
             if !interactive_terminal {
                 return noninteractive_configured_launch_guidance(&args, &resolved_env);
             }
