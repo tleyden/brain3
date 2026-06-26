@@ -351,6 +351,9 @@ async fn event_loop(
                 KeyCode::Char('t') if !state.ports_focus_is_text_field() => {
                     state.toggle_ports_boolean();
                 }
+                KeyCode::Char('^') => {
+                    state.apply_hidden_dev_port_offset();
+                }
                 KeyCode::Backspace if state.ports_focus_is_text_field() => {
                     match state.ports_focus {
                         PortsField::GatewayPort => {

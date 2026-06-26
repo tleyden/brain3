@@ -353,6 +353,30 @@ impl FirstRunTuiState {
         }
     }
 
+    pub fn apply_hidden_dev_port_offset(&mut self) {
+        increment_port_input(&mut self.gateway_port_input);
+        increment_port_input(&mut self.local_mcp_port_input);
+        increment_port_input(&mut self.container_host_port_input);
+        increment_port_input(&mut self.container_mcp_port_input);
+        self.container_name_input = "brain3-dev-mcp-vault-tools".into();
+        self.container_network_name_input = "brain3-dev-mcp-net".into();
+
+        if let Ok(port) = self.gateway_port_input.trim().parse::<u16>() {
+            self.draft.gateway_port = port;
+        }
+        if let Ok(port) = self.local_mcp_port_input.trim().parse::<u16>() {
+            self.draft.local_mcp_port = port;
+        }
+        if let Ok(port) = self.container_host_port_input.trim().parse::<u16>() {
+            self.draft.container_host_port = port;
+        }
+        if let Ok(port) = self.container_mcp_port_input.trim().parse::<u16>() {
+            self.draft.container_mcp_port = port;
+        }
+        self.draft.container_name = self.container_name_input.clone();
+        self.draft.container_network_name = self.container_network_name_input.clone();
+    }
+
     pub fn ports_focus_is_text_field(&self) -> bool {
         matches!(
             self.ports_focus,
@@ -646,6 +670,16 @@ impl FirstRunTuiState {
 
         self.dependency_action_index = self.dependency_action_index.min(action_count - 1);
     }
+}
+
+fn increment_port_input(input: &mut String) {
+    let Ok(port) = input.trim().parse::<u16>() else {
+        return;
+    };
+    let Some(port) = port.checked_add(1000) else {
+        return;
+    };
+    *input = port.to_string();
 }
 
 pub fn validate_port_input(input: &str, label: &str) -> Result<u16, String> {
@@ -993,6 +1027,28 @@ mod tests {
 
         assert_eq!(request.draft.container_name, "custom-container");
         assert_eq!(request.draft.container_network_name, "custom-network");
+    }
+
+    #[test]
+    fn hidden_dev_port_offset_adds_thousand_to_visible_port_fields() {
+        let mut state = sample_state();
+
+        state.apply_hidden_dev_port_offset();
+
+        assert_eq!(state.gateway_port_input, "9421");
+        assert_eq!(state.local_mcp_port_input, "9422");
+        assert_eq!(state.container_host_port_input, "9420");
+        assert_eq!(state.container_mcp_port_input, "9420");
+        assert_eq!(state.access_token_lifetime_secs_input, "3600");
+        assert_eq!(
+            state.refresh_token_lifetime_secs_input,
+            (90 * 24 * 60 * 60).to_string()
+        );
+        assert_eq!(state.container_name_input, "brain3-dev-mcp-vault-tools");
+        assert_eq!(state.container_network_name_input, "brain3-dev-mcp-net");
+        assert!(state.draft.pkce_required);
+        assert!(state.draft.enforce_hostname_check);
+        assert!(state.draft.container_network_isolated);
     }
 
     #[test]
