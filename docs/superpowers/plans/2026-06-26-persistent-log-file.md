@@ -36,17 +36,18 @@ async fn create_temp_log_file(&self) -> Result<PathBuf, SetupError>;
 async fn resolve_log_file(&self, paths: &SetupPaths) -> Result<PathBuf, SetupError>;
 ```
 
-The impl creates `paths.app_home` dir if missing (best-effort, don't fail startup if
-this fails — fall back to temp file and log a warning).
+The impl ensures the app-home directory structure exists via `ensure_app_home_dirs`
+(best-effort, don't fail startup if this fails — fall back to temp file and log a
+warning).
 
 ### 2. Platform implementation (`system.rs`)
 
 ```rust
 async fn resolve_log_file(&self, paths: &SetupPaths) -> Result<PathBuf, SetupError> {
-    // Create app_home if it doesn't exist yet (first run before setup wizard)
-    if let Err(e) = fs::create_dir_all(&paths.app_home).await {
+    // Create app-home dirs if they don't exist yet (first run before setup wizard).
+    if let Err(e) = self.ensure_app_home_dirs(paths).await {
         tracing::warn!(path = %paths.app_home.display(), error = %e,
-            "could not create app home for log file, falling back to temp dir");
+            "could not create app home dirs for log file, falling back to temp dir");
         // fall back to old behaviour
         let path = env::temp_dir().join("brain3.log");
         return Ok(path);
@@ -73,11 +74,24 @@ pub async fn init_logging(default_level: &str) -> Result<GatewayLogging> {
         .resolve_log_file(&paths)
         .await
         .unwrap_or_else(|_| env::temp_dir().join("brain3.log"));
+    let mut options = OpenOptions::new();
+    options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options.open(&log_file)?;
+    #[cfg(unix)]
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     // rest unchanged
 }
 ```
 
 If `resolve_paths` fails (no HOME set, unusual), we fall back gracefully without crashing.
+The logging initializer must create the file on first run and enforce `0600`
+permissions on Unix so persistent logs are not left world-readable by umask or
+pre-existing file mode.
 
 ### 4. Update mock and test fixtures
 

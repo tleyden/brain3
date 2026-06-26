@@ -239,11 +239,11 @@ impl SetupSystemPort for PlatformSetupSystem {
     }
 
     async fn resolve_log_file(&self, paths: &SetupPaths) -> Result<PathBuf, SetupError> {
-        if let Err(error) = fs::create_dir_all(&paths.app_home).await {
+        if let Err(error) = self.ensure_app_home_dirs(paths).await {
             tracing::warn!(
                 path = %paths.app_home.display(),
                 error = %error,
-                "could not create app home for log file, falling back to temp dir"
+                "could not create app home dirs for log file, falling back to temp dir"
             );
             return Ok(env::temp_dir().join("brain3.log"));
         }

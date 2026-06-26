@@ -97,11 +97,31 @@ pub async fn init_logging(default_level: &str) -> Result<GatewayLogging> {
             fallback_log_file
         });
 
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
+    let mut log_options = OpenOptions::new();
+    log_options.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        log_options.mode(0o600);
+    }
+
+    let file = log_options
         .open(&log_file)
         .with_context(|| format!("failed to open gateway log file {}", log_file.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))
+            .with_context(|| {
+                format!(
+                    "failed to set gateway log file permissions on {}",
+                    log_file.display()
+                )
+            })?;
+    }
 
     let (writer, guard) = tracing_appender::non_blocking(file);
     let mirror_to_stderr = Arc::new(AtomicBool::new(false));
