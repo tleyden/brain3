@@ -418,7 +418,10 @@ def vault_create_overwrite_file(
 @mcp.tool(
     name="vault_apply_unified_diff",
     description=(
-        "Apply a unified diff to an existing vault file. Prefer over vault_create_overwrite_file — cheaper and safer.\n\n"
+        "Apply a unified diff to an existing vault file (target = `path` arg). "
+        "Prefer over vault_create_overwrite_file — cheaper and safer.\n\n"
+        "Submit just the hunk(s); file headers (--- / +++) are optional and inferred from `path`. "
+        "Standard full diffs with headers are also accepted.\n\n"
         "CRITICAL: the counts in @@ -L,N +L,N @@ must exactly match the lines in the hunk body. "
         "N counts context lines (' ') AND changed lines ('-'/'+'); context lines count toward both old and new. "
         "Common mistake: writing ,3 but omitting the context lines — the body then has only 1 line, not 3, and the patch is rejected.\n\n"

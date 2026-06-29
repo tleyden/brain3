@@ -219,6 +219,74 @@ class ToolWritePatchApiTests(unittest.TestCase):
             (self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content
         )
 
+    def test_apply_unified_diff_accepts_hunk_only_middle_line(self):
+        original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
+        updated_content = original_content.replace("Line 50\n", "Updated line 50\n")
+        diff_text = "@@ -50,1 +50,1 @@\n-Line 50\n+Updated line 50\n"
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content
+        )
+
+    def test_apply_unified_diff_hunk_only_dry_run_reports_hunk_metadata(self):
+        original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
+        diff_text = "@@ -50,1 +50,1 @@\n-Line 50\n+Updated line 50\n"
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff(
+                "large-note.md", diff_text, dry_run=True
+            )
+        )
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["dry_run"])
+        self.assertTrue(result["would_change"])
+        self.assertFalse(result["applied"])
+        self.assertEqual(
+            result["hunks"],
+            [
+                {
+                    "header": "@@ -50,1 +50,1 @@",
+                    "old_start": 50,
+                    "old_count": 1,
+                    "new_count": 1,
+                }
+            ],
+        )
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), original_content
+        )
+
+    def test_apply_unified_diff_accepts_multi_hunk_hunk_only_patch(self):
+        original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
+        updated_content = original_content.replace(
+            "Line 10\n", "Updated line 10\n"
+        ).replace("Line 90\n", "Updated line 90\n")
+        diff_text = (
+            "@@ -10,1 +10,1 @@\n"
+            "-Line 10\n"
+            "+Updated line 10\n"
+            "@@ -90,1 +90,1 @@\n"
+            "-Line 90\n"
+            "+Updated line 90\n"
+        )
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content
+        )
+
     def test_apply_unified_diff_appends_lines_at_end_of_file(self):
         original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
         updated_content = original_content + "Append A\nAppend B\n"
@@ -282,6 +350,36 @@ class ToolWritePatchApiTests(unittest.TestCase):
         )
 
         self.assertEqual(result["error_code"], "invalid_patch")
+
+    def test_apply_unified_diff_rejects_garbage_prefix_with_clear_message(self):
+        diff_text = "not a diff\n@@ -50,1 +50,1 @@\n-Line 50\n+Updated line 50\n"
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertIn(
+            "hunk header (@@ ...) or unified diff file headers", result["error"]
+        )
+
+    def test_apply_unified_diff_rejects_fenced_patch(self):
+        diff_text = (
+            "```diff\n"
+            "@@ -50,1 +50,1 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+            "```\n"
+        )
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertIn(
+            "hunk header (@@ ...) or unified diff file headers", result["error"]
+        )
 
     # --- context_mismatch RCA diagnostic tests ---
     # These tests should FAIL until the fix is applied.

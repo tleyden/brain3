@@ -13,6 +13,9 @@ from ..vault import read_file, write_file_atomic
 logger = logging.getLogger(__name__)
 
 HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
+PATCH_START_MESSAGE = (
+    "Patch must start with a hunk header (@@ ...) or unified diff file headers (--- / +++)"
+)
 
 
 class PatchError(ValueError):
@@ -49,19 +52,31 @@ def _hunk_metadata(hunk: dict) -> dict:
 def _parse_unified_diff(path: str, diff_text: str) -> list[dict]:
     diff_text = diff_text.replace("\r\n", "\n")
     lines = diff_text.splitlines(keepends=True)
-    if len(lines) < 3 or not lines[0].startswith("--- ") or not lines[1].startswith("+++ "):
-        raise PatchError("invalid_patch", "Patch must start with unified diff file headers")
+    if not lines:
+        raise PatchError("invalid_patch", PATCH_START_MESSAGE)
 
-    old_path = _normalize_diff_path(lines[0][4:])
-    new_path = _normalize_diff_path(lines[1][4:])
-    if old_path != new_path:
-        raise PatchError("invalid_patch", "Rename patches are not supported")
-    if old_path != path:
-        raise PatchError("path_mismatch", f"Patch headers target '{old_path}', expected '{path}'")
+    index = 0
+    if lines[0].startswith("--- "):
+        if len(lines) < 2 or not lines[1].startswith("+++ "):
+            raise PatchError(
+                "invalid_patch",
+                "Patch must start with unified diff file headers (--- / +++)",
+            )
+
+        old_path = _normalize_diff_path(lines[0][4:])
+        new_path = _normalize_diff_path(lines[1][4:])
+        if old_path != new_path:
+            raise PatchError("invalid_patch", "Rename patches are not supported")
+        if old_path != path:
+            raise PatchError(
+                "path_mismatch", f"Patch headers target '{old_path}', expected '{path}'"
+            )
+        index = 2
+    elif not lines[0].startswith("@@ "):
+        raise PatchError("invalid_patch", PATCH_START_MESSAGE)
 
     hunks: list[dict] = []
     parsed_hunks: list[dict] = []
-    index = 2
     while index < len(lines):
         line = lines[index]
         if line.startswith("--- ") or line.startswith("+++ "):

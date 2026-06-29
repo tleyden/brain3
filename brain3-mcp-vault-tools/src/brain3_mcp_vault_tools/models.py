@@ -89,7 +89,10 @@ class VaultApplyUnifiedDiffInput(BaseModel):
     )
     diff: str = Field(
         ...,
-        description="Unified diff text for a single file",
+        description=(
+            "Unified diff hunk(s) for a single file; file headers optional and "
+            "inferred from path"
+        ),
         min_length=1,
         max_length=MAX_CONTENT_SIZE * 2,
     )
