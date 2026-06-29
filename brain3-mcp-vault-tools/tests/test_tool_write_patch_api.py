@@ -236,14 +236,14 @@ class ToolWritePatchApiTests(unittest.TestCase):
         self.assertEqual(result["error_code"], "invalid_patch")
 
     # --- context_mismatch RCA diagnostic tests ---
-    # These three tests prove the three failure modes of the strict
-    # splitlines(keepends=True) comparison in _apply_hunks.
+    # These tests should FAIL until the fix is applied.
+    # Each one constructs a valid patch that should succeed, but currently
+    # triggers context_mismatch due to newline handling bugs in _apply_hunks.
 
     def test_apply_unified_diff_crlf_patch_against_lf_file(self):
         # Scenario A: diff string has \r\n line endings, file has \n.
         # current[1:] gives "hello\r\n"; result_lines entry is "hello\n" → mismatch.
         (self.vault / "crlf-test.md").write_bytes(b"hello\nworld\nfoo\n")
-        # Build a syntactically valid patch but with \r\n throughout.
         patch_lf = (
             "--- crlf-test.md\n"
             "+++ crlf-test.md\n"
@@ -259,18 +259,17 @@ class ToolWritePatchApiTests(unittest.TestCase):
             self.server.vault_apply_unified_diff("crlf-test.md", patch_crlf)
         )
 
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
         self.assertEqual(
-            result.get("error_code"),
-            "context_mismatch",
-            "CRLF patch against LF file should produce context_mismatch",
+            (self.vault / "crlf-test.md").read_bytes(),
+            b"hello\nworld\ninserted\nfoo\n",
         )
 
     def test_apply_unified_diff_patch_missing_trailing_newline(self):
         # Scenario B: the patch string itself does not end with \n.
-        # splitlines(keepends=True) gives the last context line without \n,
-        # e.g. text = "foo", but the file line is "foo\n" → mismatch.
+        # The last context line becomes "foo" (no \n) but the file line is "foo\n".
         (self.vault / "notail-patch.md").write_bytes(b"hello\nworld\nfoo\n")
-        # Intentionally omit the trailing newline from the patch string.
         patch_no_trailing_nl = (
             "--- notail-patch.md\n"
             "+++ notail-patch.md\n"
@@ -278,23 +277,23 @@ class ToolWritePatchApiTests(unittest.TestCase):
             " hello\n"
             " world\n"
             "+inserted\n"
-            " foo"          # <-- no trailing \n
+            " foo"  # no trailing \n on the patch string
         )
 
         result = json.loads(
             self.server.vault_apply_unified_diff("notail-patch.md", patch_no_trailing_nl)
         )
 
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
         self.assertEqual(
-            result.get("error_code"),
-            "context_mismatch",
-            "Patch whose last line lacks \\n should produce context_mismatch",
+            (self.vault / "notail-patch.md").read_bytes(),
+            b"hello\nworld\ninserted\nfoo\n",
         )
 
     def test_apply_unified_diff_file_missing_trailing_newline(self):
         # Scenario C: the file does not end with \n.
-        # result_lines[-1] = "foo" (no \n), but the patch context line " foo\n"
-        # yields text = "foo\n" → mismatch.
+        # result_lines[-1] = "foo" but patch context text = "foo\n" → mismatch.
         (self.vault / "notail-file.md").write_bytes(b"hello\nworld\nfoo")
         patch = (
             "--- notail-file.md\n"
@@ -310,10 +309,11 @@ class ToolWritePatchApiTests(unittest.TestCase):
             self.server.vault_apply_unified_diff("notail-file.md", patch)
         )
 
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
         self.assertEqual(
-            result.get("error_code"),
-            "context_mismatch",
-            "File without trailing newline should produce context_mismatch when patch context line has \\n",
+            (self.vault / "notail-file.md").read_bytes(),
+            b"hello\nworld\ninserted\nfoo",
         )
 
     # --- end RCA diagnostic tests ---
