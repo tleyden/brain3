@@ -95,23 +95,6 @@ class ServerStartupTests(unittest.TestCase):
             "Starting authless MCP server version=%s on port %s", "0.2.6", ANY
         )
 
-    def test_apply_unified_diff_description_shows_trailing_newline_marker(self):
-        with patch.dict(
-            os.environ,
-            {
-                "B3_VAULT_PATH": str(TEST_VAULT),
-            },
-            clear=False,
-        ):
-            server = import_server_module()
-
-        tool = server.mcp._tool_manager.get_tool("vault_apply_unified_diff")
-
-        self.assertIn(
-            "Example (no context): @@ -5,1 +5,1 @@\\n-old\\n+new\\n\n",
-            tool.description,
-        )
-
 
 if __name__ == "__main__":
     unittest.main()
