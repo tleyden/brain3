@@ -91,9 +91,9 @@ pub async fn run_gateway_tui(
             );
             let mut state =
                 FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation);
-            finalize_and_start(
+            start_without_writing_env(
                 &mut state,
-                &use_case,
+                launch_plan,
                 runtime_overrides.clone(),
                 startup_options.startup_policy,
             )
@@ -135,7 +135,9 @@ async fn event_loop(
     orphan_gc_rerun_command: Option<&str>,
 ) -> Result<()> {
     loop {
-        handle_runtime_tick(state);
+        if handle_runtime_tick(state) {
+            return Ok(());
+        }
 
         if let Some(rx) = &mut state.startup_rx {
             if let Ok(result) = rx.try_recv() {
@@ -157,8 +159,9 @@ async fn event_loop(
             continue;
         }
 
-        if key.code == KeyCode::Char('q') {
-            return Ok(());
+        if key.code == KeyCode::Char('q') && state.step != SetupStep::ShuttingDown {
+            initiate_shutdown(state);
+            continue;
         }
 
         match state.step {
@@ -488,14 +491,106 @@ async fn event_loop(
                 }
                 _ => {}
             },
+            SetupStep::ShuttingDown => {}
         }
     }
 }
 
-fn handle_runtime_tick(state: &mut FirstRunTuiState) {
+fn initiate_shutdown(state: &mut FirstRunTuiState) {
+    tracing::info!("shutdown requested from TUI");
+    let server = state.server.take();
+    let mut runtime = state.runtime.take();
+    let startup_rx = state.startup_rx.take();
+    let (tx, rx) = oneshot::channel();
+
+    tokio::spawn(async move {
+        let cleanup_timeout = shutdown_cleanup_timeout();
+        let cleanup_result = tokio::time::timeout(cleanup_timeout, async move {
+            tracing::debug!(
+                has_server = server.is_some(),
+                has_runtime = runtime.is_some(),
+                has_startup_task = startup_rx.is_some(),
+                "running TUI shutdown cleanup task"
+            );
+            if let Some(server) = server {
+                if let Err(error) = server.shutdown().await {
+                    tracing::warn!(%error, "gateway server shutdown returned an error");
+                }
+            }
+            if let Some(ref mut runtime) = runtime {
+                runtime.shutdown_managed_runtime().await;
+            }
+            if let Some(startup_rx) = startup_rx {
+                match startup_rx.await {
+                    Ok(Ok(mut session)) => {
+                        tracing::debug!(
+                            "startup completed after shutdown request; cleaning up returned handles"
+                        );
+                        if let Some(server) = session.server {
+                            if let Err(error) = server.shutdown().await {
+                                tracing::warn!(
+                                    %error,
+                                    "gateway server shutdown returned an error after startup completed"
+                                );
+                            }
+                        }
+                        session.runtime.shutdown_managed_runtime().await;
+                    }
+                    Ok(Err(error)) => {
+                        tracing::debug!(%error, "startup task failed after shutdown request");
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "startup task channel closed after shutdown request");
+                    }
+                }
+            }
+        })
+        .await;
+        if cleanup_result.is_err() {
+            tracing::warn!(
+                timeout_ms = cleanup_timeout.as_millis(),
+                "TUI shutdown cleanup task timed out; leaving TUI after best-effort cleanup"
+            );
+        }
+        tracing::debug!("TUI shutdown cleanup task completed");
+        let _ = tx.send(());
+    });
+
+    state.clear_messages();
+    state.tick_count = 0;
+    state.step = SetupStep::ShuttingDown;
+    state.cleanup_rx = Some(rx);
+}
+
+#[cfg(not(test))]
+fn shutdown_cleanup_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+#[cfg(test)]
+fn shutdown_cleanup_timeout() -> Duration {
+    Duration::from_millis(25)
+}
+
+fn handle_runtime_tick(state: &mut FirstRunTuiState) -> bool {
     state.tick_count = state.tick_count.wrapping_add(1);
     if matches!(state.step, SetupStep::RuntimeStatus) {
         state.refresh_runtime_logs();
+    }
+    if let Some(rx) = &mut state.cleanup_rx {
+        match rx.try_recv() {
+            Ok(()) => {
+                state.cleanup_rx = None;
+                tracing::info!("shutdown cleanup finished; leaving TUI");
+                return true;
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                state.cleanup_rx = None;
+                tracing::warn!("shutdown cleanup task channel closed before completion signal");
+                return true;
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+        }
     }
     if let Some(rx) = &mut state.probe_rx {
         match rx.try_recv() {
@@ -512,6 +607,7 @@ fn handle_runtime_tick(state: &mut FirstRunTuiState) {
             Err(_) => {}
         }
     }
+    false
 }
 
 fn runtime_logs_page_size() -> usize {
@@ -618,6 +714,27 @@ async fn finalize_and_start(
     });
 
     state.summary = Some(summary);
+    state.startup_rx = Some(rx);
+    state.info_message = Some("Starting Brain3...".into());
+    state.step = SetupStep::RuntimeStatus;
+}
+
+async fn start_without_writing_env(
+    state: &mut FirstRunTuiState,
+    launch_plan: RuntimeLaunchPlan,
+    runtime_overrides: RuntimeOverrides,
+    startup_policy: RuntimeStartupPolicy,
+) {
+    state.clear_messages();
+    let host = state.host.clone();
+    let (tx, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let _ = tx.send(
+            start_configured_runtime_session(&host, launch_plan, runtime_overrides, startup_policy)
+                .await,
+        );
+    });
+    // Leave summary as None so startup result handling uses the loaded runtime config.
     state.startup_rx = Some(rx);
     state.info_message = Some("Starting Brain3...".into());
     state.step = SetupStep::RuntimeStatus;
@@ -750,6 +867,71 @@ mod tests {
     use crate::server::ConfiguredGatewaySession;
 
     use super::*;
+
+    #[tokio::test]
+    async fn configured_startup_begins_without_wizard_summary() {
+        let preparation = sample_preparation();
+        let paths = preparation.paths.clone();
+        let mut state = FirstRunTuiState::new_configured(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            preparation,
+        );
+
+        start_without_writing_env(
+            &mut state,
+            brain3_core::domain::setup::RuntimeLaunchPlan {
+                paths: paths.clone(),
+                env_file: paths.env_file.clone(),
+                log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
+            },
+            RuntimeOverrides::default(),
+            RuntimeStartupPolicy::configured(false),
+        )
+        .await;
+
+        assert_eq!(state.step, SetupStep::RuntimeStatus);
+        assert!(state.summary.is_none());
+        assert!(state.startup_rx.is_some());
+        assert_eq!(state.info_message.as_deref(), Some("Starting Brain3..."));
+    }
+
+    #[tokio::test]
+    async fn shutdown_resets_tick_count_for_elapsed_message() {
+        let mut state = FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            sample_preparation(),
+        );
+        state.tick_count = 999;
+
+        initiate_shutdown(&mut state);
+
+        assert_eq!(state.step, SetupStep::ShuttingDown);
+        assert_eq!(state.tick_count, 0);
+    }
+
+    #[tokio::test]
+    async fn shutdown_cleanup_completes_when_startup_rx_stays_pending() {
+        let mut state = FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            sample_preparation(),
+        );
+        let (_startup_tx, startup_rx) = oneshot::channel();
+        state.startup_rx = Some(startup_rx);
+
+        initiate_shutdown(&mut state);
+
+        let cleanup_rx = state
+            .cleanup_rx
+            .take()
+            .expect("shutdown should install cleanup receiver");
+        tokio::time::timeout(Duration::from_millis(250), cleanup_rx)
+            .await
+            .expect("cleanup should be bounded")
+            .expect("cleanup task should send completion");
+    }
 
     #[test]
     fn successful_wizard_startup_stays_on_runtime_status() {

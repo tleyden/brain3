@@ -87,6 +87,7 @@ pub struct FirstRunTuiState {
     pub connection_card: Option<ConnectionCard>,
     pub runtime: Option<RuntimeBootstrap>,
     pub server: Option<GatewayServerHandle>,
+    pub cleanup_rx: Option<oneshot::Receiver<()>>,
     pub error_message: Option<String>,
     pub info_message: Option<String>,
     pub vault_path_input: String,
@@ -151,6 +152,7 @@ impl FirstRunTuiState {
             connection_card: None,
             runtime: None,
             server: None,
+            cleanup_rx: None,
             error_message: None,
             info_message: None,
             auth_focus: AuthField::Username,
@@ -619,6 +621,7 @@ impl FirstRunTuiState {
                 .connection_card
                 .as_ref()
                 .map(|_| SetupStep::ConnectionCard),
+            SetupStep::ShuttingDown => None,
         }
     }
 

@@ -127,6 +127,7 @@ pub enum SetupStep {
     Summary,
     ConnectionCard,
     RuntimeStatus,
+    ShuttingDown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

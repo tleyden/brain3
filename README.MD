@@ -537,7 +537,7 @@ The runtime status screen now reports whether the container is actually `Ready` 
 
 ## Credits 
 
-* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) was the inspiration and contributed code to the MCP server layer. Brain3 mainly adds container-based isolation.
+* [obsidian-web-mcp](https://github.com/jimprosser/obsidian-web-mcp) was the inspiration and contributed code to the MCP server layer. Brain3 extends it with container-based isolation and a gateway server rewritten in Rust for future Tauri2 compatibility.
 
 
 ## License 
