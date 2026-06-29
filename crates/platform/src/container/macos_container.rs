@@ -158,7 +158,24 @@ impl ContainerPort for MacOsContainerAdapter {
     }
 
     async fn exists(&self, id: &ContainerId) -> Result<bool, ContainerError> {
-        command_succeeds("container", &["inspect", &id.0]).await
+        match run_command("container", &["inspect", &id.0]).await {
+            Ok(out) => {
+                // Do not simplify this back to a plain exit-code check.
+                //
+                // Apple's `container inspect <name>` currently differs from Docker:
+                // for a missing container it can exit 0 and print `[]` instead of
+                // failing. If we only trust the status code, callers conclude the
+                // container exists and then raise a false name-conflict before the
+                // container has ever been created. Treat inspect output as the
+                // source of truth here: a non-empty JSON array means the container
+                // was found, while `[]` means "not found" despite the successful
+                // process exit.
+                let json: Value = serde_json::from_str(&out).unwrap_or(Value::Array(vec![]));
+                Ok(json.as_array().map_or(false, |arr| !arr.is_empty()))
+            }
+            Err(ContainerError::CommandFailed { .. }) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     async fn is_running(&self, id: &ContainerId) -> Result<bool, ContainerError> {
