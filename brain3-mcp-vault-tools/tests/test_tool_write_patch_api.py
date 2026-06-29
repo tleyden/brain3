@@ -318,6 +318,80 @@ class ToolWritePatchApiTests(unittest.TestCase):
 
     # --- end RCA diagnostic tests ---
 
+    # --- Unicode / emoji context line tests ---
+    # The hypothesis: emoji or non-ASCII characters in context lines cause
+    # context_mismatch when there is a Unicode normalization mismatch between
+    # the file and the patch (NFC vs NFD, or variation-selector presence).
+    # Tests 2 and 3 below should FAIL until Unicode normalization is added to
+    # the comparison.  Test 1 is the positive control — identical encoding,
+    # should already pass.
+
+    def test_apply_unified_diff_emoji_context_identical_encoding(self):
+        # Positive control: emoji in context lines, same codepoints in file and
+        # patch.  Should succeed with the current code.
+        content = "## 7. ⏰ Alarm\nsome content\nmore content\n"
+        (self.vault / "emoji-same.md").write_text(content, encoding="utf-8")
+        patch = (
+            "--- emoji-same.md\n"
+            "+++ emoji-same.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " ## 7. ⏰ Alarm\n"
+            " some content\n"
+            "+inserted\n"
+            " more content\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("emoji-same.md", patch))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    def test_apply_unified_diff_nfc_file_nfd_patch_context(self):
+        # NFC in file (é = é precomposed), NFD in patch context
+        # (é = e + combining accent).  Same visible character, but
+        # different codepoint sequences → context_mismatch unless normalization
+        # is applied before comparison.
+        content = "## Setup\nfoo résumé bar\nsome content\n"
+        (self.vault / "nfc-file.md").write_text(content, encoding="utf-8")
+        patch = (
+            "--- nfc-file.md\n"
+            "+++ nfc-file.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " ## Setup\n"
+            " foo résumé bar\n"   # NFD é
+            "+inserted\n"
+            " some content\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("nfc-file.md", patch))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    def test_apply_unified_diff_emoji_variation_selector_mismatch(self):
+        # File has bare emoji ⏰ (⏰); patch context has the same emoji
+        # followed by variation-selector-16 ️ (⏰️).  Visually identical
+        # but different codepoint sequences → context_mismatch unless
+        # normalization strips variation selectors before comparison.
+        content = "## 7. ⏰ Alarm\nsome content\nmore content\n"
+        (self.vault / "emoji-vs.md").write_text(content, encoding="utf-8")
+        patch = (
+            "--- emoji-vs.md\n"
+            "+++ emoji-vs.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " ## 7. ⏰️ Alarm\n"   # with variation selector-16
+            " some content\n"
+            "+inserted\n"
+            " more content\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("emoji-vs.md", patch))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    # --- end Unicode / emoji context line tests ---
+
     def test_batch_frontmatter_update_preserves_body_content(self):
         result = json.loads(
             self.server.vault_batch_frontmatter_update(
