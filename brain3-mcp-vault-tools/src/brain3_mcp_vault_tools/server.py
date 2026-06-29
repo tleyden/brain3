@@ -354,7 +354,7 @@ mcp = GuardedFastMCP(
 
 @mcp.tool(
     name="vault_read",
-    description="Read a vault file. Prefer line-window reads when preparing an edit to an existing file, then follow with vault_apply_unified_diff using the returned full-file content hash.",
+    description="Read a vault file. Use numbered=true for line-window reads before vault_apply_unified_diff; use the returned full-file content hash.",
     annotations={
         "readOnlyHint": True,
         "destructiveHint": False,
@@ -367,11 +367,18 @@ def vault_read(
     start_line: int | None = None,
     end_line: int | None = None,
     tail_lines: int | None = None,
+    numbered: bool = False,
 ) -> str:
     inp = VaultReadInput(
-        path=path, start_line=start_line, end_line=end_line, tail_lines=tail_lines
+        path=path,
+        start_line=start_line,
+        end_line=end_line,
+        tail_lines=tail_lines,
+        numbered=numbered,
     )
-    return _vault_read(inp.path, inp.start_line, inp.end_line, inp.tail_lines)
+    return _vault_read(
+        inp.path, inp.start_line, inp.end_line, inp.tail_lines, inp.numbered
+    )
 
 
 @mcp.tool(

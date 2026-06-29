@@ -58,6 +58,7 @@ def vault_read(
     start_line: int | None = None,
     end_line: int | None = None,
     tail_lines: int | None = None,
+    numbered: bool = False,
 ) -> str:
     """Read a file from the vault, optionally returning only a line window."""
     try:
@@ -71,7 +72,7 @@ def vault_read(
 
         fm_data = _parse_frontmatter(content)
 
-        return json.dumps({
+        result = {
             "path": path,
             "content": content_window,
             "metadata": metadata,
@@ -81,7 +82,18 @@ def vault_read(
             "returned_start_line": returned_start_line,
             "returned_end_line": returned_end_line,
             "has_trailing_newline": content.endswith("\n"),
-        }, default=str)
+        }
+        if numbered:
+            result["numbered_lines"] = [
+                {"line": line_number, "text": text}
+                for line_number, text in zip(
+                    range(returned_start_line, returned_end_line + 1),
+                    content_window.splitlines(),
+                    strict=False,
+                )
+            ]
+
+        return json.dumps(result, default=str)
     except ValueError as e:
         return json.dumps({"error": str(e), "path": path})
     except FileNotFoundError:

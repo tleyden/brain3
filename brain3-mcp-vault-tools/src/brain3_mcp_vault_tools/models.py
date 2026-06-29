@@ -40,6 +40,10 @@ class VaultReadInput(BaseModel):
         ge=1,
         description="Optional number of lines to read from the end of the file",
     )
+    numbered: bool = Field(
+        default=False,
+        description="Include line-numbered text for preparing unified diff hunk headers",
+    )
 
     @model_validator(mode="after")
     def validate_line_window(self):

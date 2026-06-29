@@ -18,9 +18,10 @@ HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 class PatchError(ValueError):
     """Structured patch application error."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, details: dict | None = None):
         super().__init__(message)
         self.code = code
+        self.details = details
 
 
 def _content_hash(content: str) -> str:
@@ -34,6 +35,15 @@ def _normalize_diff_path(raw_path: str) -> str:
     if path.startswith("a/") or path.startswith("b/"):
         path = path[2:]
     return path
+
+
+def _hunk_metadata(hunk: dict) -> dict:
+    return {
+        "header": hunk["header"],
+        "old_start": hunk["old_start"],
+        "old_count": hunk["old_count"],
+        "new_count": hunk["new_count"],
+    }
 
 
 def _parse_unified_diff(path: str, diff_text: str) -> list[dict]:
@@ -50,6 +60,7 @@ def _parse_unified_diff(path: str, diff_text: str) -> list[dict]:
         raise PatchError("path_mismatch", f"Patch headers target '{old_path}', expected '{path}'")
 
     hunks: list[dict] = []
+    parsed_hunks: list[dict] = []
     index = 2
     while index < len(lines):
         line = lines[index]
@@ -62,6 +73,7 @@ def _parse_unified_diff(path: str, diff_text: str) -> list[dict]:
         if not match:
             raise PatchError("invalid_patch", f"Invalid hunk header: {line.rstrip()}")
 
+        header = line.rstrip("\n")
         old_start = int(match.group(1))
         old_count = int(match.group(2) or "1")
         new_count = int(match.group(4) or "1")
@@ -84,14 +96,28 @@ def _parse_unified_diff(path: str, diff_text: str) -> list[dict]:
         actual_old_count = sum(1 for op, _ in hunk_lines if op in {" ", "-"})
         actual_new_count = sum(1 for op, _ in hunk_lines if op in {" ", "+"})
         if actual_old_count != old_count or actual_new_count != new_count:
-            raise PatchError("invalid_patch", "Hunk line counts do not match header counts")
+            raise PatchError(
+                "invalid_patch",
+                "Hunk line counts do not match header counts",
+                {
+                    "header": header,
+                    "expected_old_count": old_count,
+                    "actual_old_count": actual_old_count,
+                    "expected_new_count": new_count,
+                    "actual_new_count": actual_new_count,
+                    "parsed_hunks": parsed_hunks,
+                },
+            )
 
-        hunks.append(
-            {
-                "old_start": old_start,
-                "lines": hunk_lines,
-            }
-        )
+        hunk = {
+            "header": header,
+            "old_start": old_start,
+            "old_count": old_count,
+            "new_count": new_count,
+            "lines": hunk_lines,
+        }
+        hunks.append(hunk)
+        parsed_hunks.append(_hunk_metadata(hunk))
 
     if not hunks:
         raise PatchError("invalid_patch", "Patch contains no hunks")
@@ -169,6 +195,7 @@ def vault_apply_unified_diff(
                     "would_change": would_change,
                     "previous_content_hash": current_hash,
                     "content_hash": updated_hash,
+                    "hunks": [_hunk_metadata(hunk) for hunk in hunks],
                 }
             )
 
@@ -188,7 +215,10 @@ def vault_apply_unified_diff(
     except FileNotFoundError:
         return json.dumps({"error": f"File not found: {path}", "error_code": "file_not_found", "path": path})
     except PatchError as e:
-        return json.dumps({"error": str(e), "error_code": e.code, "path": path})
+        result = {"error": str(e), "error_code": e.code, "path": path}
+        if e.details is not None:
+            result["details"] = e.details
+        return json.dumps(result)
     except ValueError as e:
         return json.dumps({"error": str(e), "error_code": "invalid_patch", "path": path})
     except Exception as e:
