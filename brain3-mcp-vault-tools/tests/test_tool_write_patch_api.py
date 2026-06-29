@@ -235,6 +235,89 @@ class ToolWritePatchApiTests(unittest.TestCase):
 
         self.assertEqual(result["error_code"], "invalid_patch")
 
+    # --- context_mismatch RCA diagnostic tests ---
+    # These three tests prove the three failure modes of the strict
+    # splitlines(keepends=True) comparison in _apply_hunks.
+
+    def test_apply_unified_diff_crlf_patch_against_lf_file(self):
+        # Scenario A: diff string has \r\n line endings, file has \n.
+        # current[1:] gives "hello\r\n"; result_lines entry is "hello\n" → mismatch.
+        (self.vault / "crlf-test.md").write_bytes(b"hello\nworld\nfoo\n")
+        # Build a syntactically valid patch but with \r\n throughout.
+        patch_lf = (
+            "--- crlf-test.md\n"
+            "+++ crlf-test.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " hello\n"
+            " world\n"
+            "+inserted\n"
+            " foo\n"
+        )
+        patch_crlf = patch_lf.replace("\n", "\r\n")
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("crlf-test.md", patch_crlf)
+        )
+
+        self.assertEqual(
+            result.get("error_code"),
+            "context_mismatch",
+            "CRLF patch against LF file should produce context_mismatch",
+        )
+
+    def test_apply_unified_diff_patch_missing_trailing_newline(self):
+        # Scenario B: the patch string itself does not end with \n.
+        # splitlines(keepends=True) gives the last context line without \n,
+        # e.g. text = "foo", but the file line is "foo\n" → mismatch.
+        (self.vault / "notail-patch.md").write_bytes(b"hello\nworld\nfoo\n")
+        # Intentionally omit the trailing newline from the patch string.
+        patch_no_trailing_nl = (
+            "--- notail-patch.md\n"
+            "+++ notail-patch.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " hello\n"
+            " world\n"
+            "+inserted\n"
+            " foo"          # <-- no trailing \n
+        )
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("notail-patch.md", patch_no_trailing_nl)
+        )
+
+        self.assertEqual(
+            result.get("error_code"),
+            "context_mismatch",
+            "Patch whose last line lacks \\n should produce context_mismatch",
+        )
+
+    def test_apply_unified_diff_file_missing_trailing_newline(self):
+        # Scenario C: the file does not end with \n.
+        # result_lines[-1] = "foo" (no \n), but the patch context line " foo\n"
+        # yields text = "foo\n" → mismatch.
+        (self.vault / "notail-file.md").write_bytes(b"hello\nworld\nfoo")
+        patch = (
+            "--- notail-file.md\n"
+            "+++ notail-file.md\n"
+            "@@ -1,3 +1,4 @@\n"
+            " hello\n"
+            " world\n"
+            "+inserted\n"
+            " foo\n"
+        )
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("notail-file.md", patch)
+        )
+
+        self.assertEqual(
+            result.get("error_code"),
+            "context_mismatch",
+            "File without trailing newline should produce context_mismatch when patch context line has \\n",
+        )
+
+    # --- end RCA diagnostic tests ---
+
     def test_batch_frontmatter_update_preserves_body_content(self):
         result = json.loads(
             self.server.vault_batch_frontmatter_update(
