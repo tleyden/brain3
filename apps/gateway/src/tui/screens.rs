@@ -123,6 +123,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::Summary => "Summary",
         SetupStep::ConnectionCard => "MCP Config Settings",
         SetupStep::RuntimeStatus => "Runtime Status",
+        SetupStep::ShuttingDown => "Shutting Down",
     }
 }
 
@@ -131,6 +132,7 @@ fn body_panel_title(state: &FirstRunTuiState) -> &'static str {
         SetupStep::ConnectionCard => "MCP Config",
         SetupStep::RuntimeStatus if state.runtime_view == RuntimeView::Logs => "Logs",
         SetupStep::RuntimeStatus => "Runtime Status",
+        SetupStep::ShuttingDown => "Brain3",
         _ => "Details",
     }
 }
@@ -149,6 +151,7 @@ fn progress_caption(step: SetupStep) -> &'static str {
         SetupStep::ConnectionCard | SetupStep::RuntimeStatus => {
             "Brain3 is configured. Use the connection details or monitor runtime status."
         }
+        SetupStep::ShuttingDown => "Brain3 is stopping local runtime resources.",
     }
 }
 
@@ -161,7 +164,7 @@ fn wizard_stage_index(step: SetupStep) -> usize {
         SetupStep::Auth => 4,
         SetupStep::PortsAndSettings => 5,
         SetupStep::Summary => 6,
-        SetupStep::ConnectionCard | SetupStep::RuntimeStatus => 7,
+        SetupStep::ConnectionCard | SetupStep::RuntimeStatus | SetupStep::ShuttingDown => 7,
     }
 }
 
@@ -176,6 +179,7 @@ fn body_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::Summary => summary_lines(state),
         SetupStep::ConnectionCard => connection_card_lines(state),
         SetupStep::RuntimeStatus => runtime_lines(state),
+        SetupStep::ShuttingDown => shutting_down_lines(state),
     }
 }
 
@@ -267,6 +271,34 @@ fn welcome_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             state.preparation.paths.env_file.display().to_string(),
         ),
         key_value_line("Logs", state.log_file.display().to_string()),
+    ]
+}
+
+fn shutting_down_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
+    vec![
+        blank_line(),
+        Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner_char(state.tick_count)),
+                accent_style(),
+            ),
+            Span::styled(
+                "Shutting down Brain3 container,",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled("  ", muted_style()),
+            Span::styled(
+                "this should only take a few seconds",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        blank_line(),
     ]
 }
 
@@ -1056,6 +1088,7 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             ]),
         ],
         SetupStep::RuntimeStatus => runtime_action_lines(state),
+        SetupStep::ShuttingDown => Vec::new(),
     }
 }
 
@@ -1681,6 +1714,14 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(revealed_actions.contains("[s] Hide secrets"));
+    }
+
+    #[test]
+    fn shutting_down_action_hints_are_empty() {
+        let mut state = sample_state();
+        state.step = SetupStep::ShuttingDown;
+
+        assert!(action_lines(&state).is_empty());
     }
 
     #[test]
