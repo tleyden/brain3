@@ -18,6 +18,8 @@ use super::state::{
     PortsField, RuntimeView, SummaryField,
 };
 
+const SHUTDOWN_LONG_RUNNING_TICKS: u64 = 150;
+
 pub fn draw(f: &mut ratatui::Frame, state: &FirstRunTuiState) {
     let area = f.area();
     let chunks = Layout::default()
@@ -275,6 +277,12 @@ fn welcome_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 }
 
 fn shutting_down_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
+    let detail = if state.tick_count >= SHUTDOWN_LONG_RUNNING_TICKS {
+        "taking longer than expected; waiting for startup or cleanup to finish"
+    } else {
+        "this should only take a few seconds"
+    };
+
     vec![
         blank_line(),
         Line::from(vec![
@@ -283,7 +291,7 @@ fn shutting_down_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
                 accent_style(),
             ),
             Span::styled(
-                "Shutting down Brain3 container,",
+                "Shutting down Brain3...",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -292,7 +300,7 @@ fn shutting_down_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         Line::from(vec![
             Span::styled("  ", muted_style()),
             Span::styled(
-                "this should only take a few seconds",
+                detail,
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -1722,6 +1730,37 @@ mod tests {
         state.step = SetupStep::ShuttingDown;
 
         assert!(action_lines(&state).is_empty());
+    }
+
+    #[test]
+    fn shutting_down_text_is_runtime_neutral() {
+        let mut state = sample_state();
+        state.step = SetupStep::ShuttingDown;
+
+        let text = body_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("Shutting down Brain3..."));
+        assert!(!text.contains("Shutting down Brain3 container"));
+    }
+
+    #[test]
+    fn shutting_down_text_mentions_longer_wait_after_threshold() {
+        let mut state = sample_state();
+        state.step = SetupStep::ShuttingDown;
+        state.tick_count = 150;
+
+        let text = body_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("taking longer than expected"));
+        assert!(!text.contains("this should only take a few seconds"));
     }
 
     #[test]

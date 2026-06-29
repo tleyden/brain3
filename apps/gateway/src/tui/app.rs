@@ -504,51 +504,72 @@ fn initiate_shutdown(state: &mut FirstRunTuiState) {
     let (tx, rx) = oneshot::channel();
 
     tokio::spawn(async move {
-        tracing::debug!(
-            has_server = server.is_some(),
-            has_runtime = runtime.is_some(),
-            has_startup_task = startup_rx.is_some(),
-            "running TUI shutdown cleanup task"
-        );
-        if let Some(server) = server {
-            if let Err(error) = server.shutdown().await {
-                tracing::warn!(%error, "gateway server shutdown returned an error");
+        let cleanup_timeout = shutdown_cleanup_timeout();
+        let cleanup_result = tokio::time::timeout(cleanup_timeout, async move {
+            tracing::debug!(
+                has_server = server.is_some(),
+                has_runtime = runtime.is_some(),
+                has_startup_task = startup_rx.is_some(),
+                "running TUI shutdown cleanup task"
+            );
+            if let Some(server) = server {
+                if let Err(error) = server.shutdown().await {
+                    tracing::warn!(%error, "gateway server shutdown returned an error");
+                }
             }
-        }
-        if let Some(ref mut runtime) = runtime {
-            runtime.shutdown_managed_runtime().await;
-        }
-        if let Some(startup_rx) = startup_rx {
-            match startup_rx.await {
-                Ok(Ok(mut session)) => {
-                    tracing::debug!(
-                        "startup completed after shutdown request; cleaning up returned handles"
-                    );
-                    if let Some(server) = session.server {
-                        if let Err(error) = server.shutdown().await {
-                            tracing::warn!(
-                                %error,
-                                "gateway server shutdown returned an error after startup completed"
-                            );
+            if let Some(ref mut runtime) = runtime {
+                runtime.shutdown_managed_runtime().await;
+            }
+            if let Some(startup_rx) = startup_rx {
+                match startup_rx.await {
+                    Ok(Ok(mut session)) => {
+                        tracing::debug!(
+                            "startup completed after shutdown request; cleaning up returned handles"
+                        );
+                        if let Some(server) = session.server {
+                            if let Err(error) = server.shutdown().await {
+                                tracing::warn!(
+                                    %error,
+                                    "gateway server shutdown returned an error after startup completed"
+                                );
+                            }
                         }
+                        session.runtime.shutdown_managed_runtime().await;
                     }
-                    session.runtime.shutdown_managed_runtime().await;
-                }
-                Ok(Err(error)) => {
-                    tracing::debug!(%error, "startup task failed after shutdown request");
-                }
-                Err(error) => {
-                    tracing::debug!(%error, "startup task channel closed after shutdown request");
+                    Ok(Err(error)) => {
+                        tracing::debug!(%error, "startup task failed after shutdown request");
+                    }
+                    Err(error) => {
+                        tracing::debug!(%error, "startup task channel closed after shutdown request");
+                    }
                 }
             }
+        })
+        .await;
+        if cleanup_result.is_err() {
+            tracing::warn!(
+                timeout_ms = cleanup_timeout.as_millis(),
+                "TUI shutdown cleanup task timed out; leaving TUI after best-effort cleanup"
+            );
         }
         tracing::debug!("TUI shutdown cleanup task completed");
         let _ = tx.send(());
     });
 
     state.clear_messages();
+    state.tick_count = 0;
     state.step = SetupStep::ShuttingDown;
     state.cleanup_rx = Some(rx);
+}
+
+#[cfg(not(test))]
+fn shutdown_cleanup_timeout() -> Duration {
+    Duration::from_secs(30)
+}
+
+#[cfg(test)]
+fn shutdown_cleanup_timeout() -> Duration {
+    Duration::from_millis(25)
 }
 
 fn handle_runtime_tick(state: &mut FirstRunTuiState) -> bool {
@@ -873,6 +894,43 @@ mod tests {
         assert!(state.summary.is_none());
         assert!(state.startup_rx.is_some());
         assert_eq!(state.info_message.as_deref(), Some("Starting Brain3..."));
+    }
+
+    #[tokio::test]
+    async fn shutdown_resets_tick_count_for_elapsed_message() {
+        let mut state = FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            sample_preparation(),
+        );
+        state.tick_count = 999;
+
+        initiate_shutdown(&mut state);
+
+        assert_eq!(state.step, SetupStep::ShuttingDown);
+        assert_eq!(state.tick_count, 0);
+    }
+
+    #[tokio::test]
+    async fn shutdown_cleanup_completes_when_startup_rx_stays_pending() {
+        let mut state = FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            sample_preparation(),
+        );
+        let (_startup_tx, startup_rx) = oneshot::channel();
+        state.startup_rx = Some(startup_rx);
+
+        initiate_shutdown(&mut state);
+
+        let cleanup_rx = state
+            .cleanup_rx
+            .take()
+            .expect("shutdown should install cleanup receiver");
+        tokio::time::timeout(Duration::from_millis(250), cleanup_rx)
+            .await
+            .expect("cleanup should be bounded")
+            .expect("cleanup task should send completion");
     }
 
     #[test]
