@@ -14,6 +14,8 @@
 - For Python tests in `brain3-mcp-vault-tools`, run: `cd brain3-mcp-vault-tools && uv run --with mcp python -m unittest discover -s tests -v`. This discovers and runs all tests in the `tests/` directory. (`pytest` is not installed; `uv run --with mcp python -m unittest` is the correct runner.)
 - This project is new, so default to verbose logging.  Of course, never log secrets or sensitive data.
 - This project is highly sensitive from a security point of view, don't introduce new points of ingress without first updating the threat model in SECURITY_AUDIT.MD under the Threat Model section.
+- Keep tool descriptions as lean as possible, and number of tools as few as possible.  These take up valuable space in the context window.
+- The MCP server is a "dumb server" that interacts with an AI.  The AI calls it and interprets the results, and can call multiple MCP tools in composition.  The AI is smart, but cannot count numbers and has other limitations.  Always keep that delicate dance in mind.
 
 # Rust Development & Hexagonal Architecture: Best Practices
 
