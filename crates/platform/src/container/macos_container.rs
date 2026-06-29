@@ -11,10 +11,67 @@ use super::process::{command_succeeds, run_command};
 
 pub struct MacOsContainerAdapter;
 
+#[derive(Debug, PartialEq, Eq)]
 enum InternalNetworkState {
     Missing,
     Compatible,
     Incompatible,
+}
+
+fn value_bool(value: &Value, keys: &[&str]) -> bool {
+    keys.iter()
+        .any(|key| value.get(key).and_then(Value::as_bool).unwrap_or(false))
+}
+
+fn macos_network_entry_is_compatible(entry: &Value) -> bool {
+    if value_bool(entry, &["internal", "Internal", "isInternal", "IsInternal"]) {
+        return true;
+    }
+
+    let Some(config) = entry.get("config").or_else(|| entry.get("Config")) else {
+        return false;
+    };
+
+    if value_bool(config, &["internal", "Internal", "isInternal", "IsInternal"]) {
+        return true;
+    }
+
+    let mode = config
+        .get("mode")
+        .or_else(|| config.get("Mode"))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let plugin = config
+        .get("pluginInfo")
+        .or_else(|| config.get("PluginInfo"))
+        .and_then(|plugin_info| plugin_info.get("plugin").or_else(|| plugin_info.get("Plugin")))
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+
+    mode.eq_ignore_ascii_case("hostOnly") && plugin == "container-network-vmnet"
+}
+
+fn parse_macos_network_inspect_state(
+    output: &str,
+) -> Result<InternalNetworkState, ContainerError> {
+    let value: Value = serde_json::from_str(output).map_err(|error| {
+        ContainerError::Other(format!(
+            "failed to parse macOS container network inspect output: {error}"
+        ))
+    })?;
+    let entries = value.as_array().ok_or_else(|| {
+        ContainerError::Other("macOS container network inspect output was not a JSON array".into())
+    })?;
+
+    if entries.is_empty() {
+        return Ok(InternalNetworkState::Missing);
+    }
+
+    if entries.iter().any(macos_network_entry_is_compatible) {
+        Ok(InternalNetworkState::Compatible)
+    } else {
+        Ok(InternalNetworkState::Incompatible)
+    }
 }
 
 async fn inspect_internal_network_state(
@@ -22,18 +79,11 @@ async fn inspect_internal_network_state(
 ) -> Result<InternalNetworkState, ContainerError> {
     match run_command("container", &["network", "inspect", name]).await {
         Ok(out) => {
-            let normalized: String = out
-                .chars()
-                .filter(|ch| !ch.is_whitespace())
-                .collect::<String>()
-                .to_ascii_lowercase();
-            if normalized.contains("\"internal\":true")
-                || normalized.contains("\"isinternal\":true")
-            {
-                Ok(InternalNetworkState::Compatible)
-            } else {
-                Ok(InternalNetworkState::Incompatible)
-            }
+            // Apple `container network inspect <missing-name>` can exit 0 and
+            // print `[]`. Parse the JSON instead of trusting the exit status so
+            // a missing network is created instead of reported as a false
+            // incompatible-network conflict.
+            parse_macos_network_inspect_state(&out)
         }
         Err(ContainerError::CommandFailed { .. }) => Ok(InternalNetworkState::Missing),
         Err(e) => Err(e),
@@ -371,5 +421,87 @@ mod tests {
             parse_macos_container_refs(output),
             vec!["one".to_string(), "two".to_string(), "three".to_string()]
         );
+    }
+
+    #[test]
+    fn parse_macos_network_inspect_state_treats_empty_array_as_missing() {
+        assert_eq!(
+            parse_macos_network_inspect_state("[]").expect("empty array should parse"),
+            InternalNetworkState::Missing
+        );
+    }
+
+    #[test]
+    fn parse_macos_network_inspect_state_accepts_apple_hostonly_vmnet_network() {
+        let output = r#"
+[
+  {
+    "id": "brain3-mcp-net",
+    "state": "running",
+    "config": {
+      "labels": {},
+      "pluginInfo": {
+        "plugin": "container-network-vmnet",
+        "variant": "reserved"
+      },
+      "id": "brain3-mcp-net",
+      "mode": "hostOnly",
+      "creationDate": 804003688.420691
+    },
+    "status": {
+      "ipv6Subnet": "fd73:6958:a2bd:ef71::/64",
+      "ipv4Gateway": "192.168.129.1",
+      "ipv4Subnet": "192.168.129.0/24"
+    }
+  }
+]
+"#;
+
+        assert_eq!(
+            parse_macos_network_inspect_state(output).expect("network inspect should parse"),
+            InternalNetworkState::Compatible
+        );
+    }
+
+    #[test]
+    fn parse_macos_network_inspect_state_preserves_legacy_internal_boolean_support() {
+        let output = r#"[{"name":"brain3-mcp-net","internal":true}]"#;
+
+        assert_eq!(
+            parse_macos_network_inspect_state(output).expect("network inspect should parse"),
+            InternalNetworkState::Compatible
+        );
+    }
+
+    #[test]
+    fn parse_macos_network_inspect_state_rejects_existing_non_internal_network() {
+        let output = r#"
+[
+  {
+    "id": "default",
+    "state": "running",
+    "config": {
+      "pluginInfo": {
+        "plugin": "container-network-vmnet",
+        "variant": "default"
+      },
+      "mode": "nat"
+    }
+  }
+]
+"#;
+
+        assert_eq!(
+            parse_macos_network_inspect_state(output).expect("network inspect should parse"),
+            InternalNetworkState::Incompatible
+        );
+    }
+
+    #[test]
+    fn parse_macos_network_inspect_state_rejects_malformed_output() {
+        let error = parse_macos_network_inspect_state("not json")
+            .expect_err("malformed inspect output should be an error");
+
+        assert!(matches!(error, ContainerError::Other(_)));
     }
 }
