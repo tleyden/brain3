@@ -11,8 +11,11 @@
 - We need fairly verbose logging and tracing to diagnose errors.  Just use the appropriate log level so we can control the noise.  Without this, its a black box.
 - Everything in the poc dir is dead legacy.  Ignore it unless specifically asked.  The top level rust project and brain3-mcp-vault-tools are the only active codebases.
 - Run cargo test, which should pass, before considering a change as finished.
+- For Python tests in `brain3-mcp-vault-tools`, run: `cd brain3-mcp-vault-tools && uv run --with mcp python -m unittest discover -s tests -v`. This discovers and runs all tests in the `tests/` directory. (`pytest` is not installed; `uv run --with mcp python -m unittest` is the correct runner.)
 - This project is new, so default to verbose logging.  Of course, never log secrets or sensitive data.
 - This project is highly sensitive from a security point of view, don't introduce new points of ingress without first updating the threat model in SECURITY_AUDIT.MD under the Threat Model section.
+- Keep tool descriptions as lean as possible, and number of tools as few as possible.  These take up valuable space in the context window.
+- The MCP server is a "dumb server" that interacts with an AI.  The AI calls it and interprets the results, and can call multiple MCP tools in composition.  The AI is smart, but cannot count numbers and has other limitations.  Always keep that delicate dance in mind.
 
 # Rust Development & Hexagonal Architecture: Best Practices
 
@@ -26,7 +29,7 @@ Based on the provided sources, here is a summary of best practices for Rust deve
 - **Asynchronous Efficiency:** Utilize mature runtimes like Tokio for high-performance concurrent tasks. Avoid performing blocking I/O inside asynchronous functions to prevent stalling the executor.
 - **Contain External Dependencies:** Wrap third-party crates (like database clients or web frameworks) in internal types to prevent implementation details from leaking into the core application logic.
 - **Database Management:** Use connection pooling (e.g., `sqlx::Pool`, `r2d2`) for efficient access and manage state changes within transactions to maintain data integrity.
-- **Robust Testing, focused on public or internal API boundaries:** Implement a mix of unit tests for business logic and integration tests for external boundaries. Use mocking libraries like `mockall` to simulate dependency behavior during testing.  Be very judidicous about writing unit tests, they create a lot of tech debt.  Never write tests for log output for example.  It must just be core functionality on public apis.  Never test private apis, because they constantly break.
+- **Robust Testing, focused on public or internal API boundaries:** Implement a mix of unit tests for business logic and integration tests for external boundaries. Use mocking libraries like `mockall` to simulate dependency behavior during testing.  Be very judidicous about writing unit tests, they create a lot of tech debt.  Never write tests for log output for example.  It must just be core functionality on public apis.  Never test private apis, because they constantly break.  Don't test tool description strings either.  We only want to test the tool's behavior, not its description.
 - **Leverage Design Patterns:** Use the Newtype pattern to encapsulate data and enforce domain-specific validation at the type level.
 
 ## Hexagonal Architecture Best Practices

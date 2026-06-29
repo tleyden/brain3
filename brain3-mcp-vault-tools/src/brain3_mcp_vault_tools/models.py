@@ -40,6 +40,10 @@ class VaultReadInput(BaseModel):
         ge=1,
         description="Optional number of lines to read from the end of the file",
     )
+    numbered: bool = Field(
+        default=False,
+        description="Include line-numbered text for preparing unified diff hunk headers",
+    )
 
     @model_validator(mode="after")
     def validate_line_window(self):
@@ -85,7 +89,10 @@ class VaultApplyUnifiedDiffInput(BaseModel):
     )
     diff: str = Field(
         ...,
-        description="Unified diff text for a single file",
+        description=(
+            "Unified diff hunk(s) for a single file; file headers optional and "
+            "inferred from path"
+        ),
         min_length=1,
         max_length=MAX_CONTENT_SIZE * 2,
     )

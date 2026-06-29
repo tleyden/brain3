@@ -354,7 +354,7 @@ mcp = GuardedFastMCP(
 
 @mcp.tool(
     name="vault_read",
-    description="Read a vault file. Prefer line-window reads when preparing an edit to an existing file, then follow with vault_apply_unified_diff using the returned full-file content hash.",
+    description="Read a vault file. Use numbered=true for line-window reads before vault_apply_unified_diff; use the returned full-file content hash.",
     annotations={
         "readOnlyHint": True,
         "destructiveHint": False,
@@ -367,11 +367,18 @@ def vault_read(
     start_line: int | None = None,
     end_line: int | None = None,
     tail_lines: int | None = None,
+    numbered: bool = False,
 ) -> str:
     inp = VaultReadInput(
-        path=path, start_line=start_line, end_line=end_line, tail_lines=tail_lines
+        path=path,
+        start_line=start_line,
+        end_line=end_line,
+        tail_lines=tail_lines,
+        numbered=numbered,
     )
-    return _vault_read(inp.path, inp.start_line, inp.end_line, inp.tail_lines)
+    return _vault_read(
+        inp.path, inp.start_line, inp.end_line, inp.tail_lines, inp.numbered
+    )
 
 
 @mcp.tool(
@@ -410,7 +417,17 @@ def vault_create_overwrite_file(
 
 @mcp.tool(
     name="vault_apply_unified_diff",
-    description="Apply a unified diff to a single existing text file. This is the default edit path for existing notes when feasible, including one-line changes in large files and small EOF appends. Lean toward this instead of vault_create_overwrite_file because it is cheaper in tokens and safer.",
+    description=(
+        "Apply a unified diff to an existing vault file (target = `path` arg). "
+        "Prefer over vault_create_overwrite_file — cheaper and safer.\n\n"
+        "Submit just the hunk(s); file headers (--- / +++) are optional and inferred from `path`. "
+        "Standard full diffs with headers are also accepted.\n\n"
+        "CRITICAL: the counts in @@ -L,N +L,N @@ must exactly match the lines in the hunk body. "
+        "N counts context lines (' ') AND changed lines ('-'/'+'); context lines count toward both old and new. "
+        "Common mistake: writing ,3 but omitting the context lines — the body then has only 1 line, not 3, and the patch is rejected.\n\n"
+        "Example (no context): @@ -5,1 +5,1 @@\\n-old\\n+new\\n\n"
+        "Example (1 context each side): @@ -4,3 +4,3 @@\\n ctx\\n-old\\n+new\\n ctx"
+    ),
     annotations={
         "readOnlyHint": False,
         "destructiveHint": True,

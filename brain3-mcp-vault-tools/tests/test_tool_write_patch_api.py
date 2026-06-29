@@ -111,6 +111,26 @@ class ToolWritePatchApiTests(unittest.TestCase):
         self.assertEqual(result["total_lines"], 100)
         self.assertEqual(result["content_hash"], sha256_text(full_content))
         self.assertTrue(result["has_trailing_newline"])
+        self.assertNotIn("numbered_lines", result)
+
+    def test_vault_read_numbered_window_returns_line_numbers(self):
+        result = json.loads(
+            self.server.vault_read(
+                "large-note.md", start_line=40, end_line=42, numbered=True
+            )
+        )
+
+        self.assertEqual(result["content"], "Line 40\nLine 41\nLine 42\n")
+        self.assertEqual(result["returned_start_line"], 40)
+        self.assertEqual(result["returned_end_line"], 42)
+        self.assertEqual(
+            result["numbered_lines"],
+            [
+                {"line": 40, "text": "Line 40"},
+                {"line": 41, "text": "Line 41"},
+                {"line": 42, "text": "Line 42"},
+            ],
+        )
 
     def test_vault_read_returns_tail_window_and_full_file_hash(self):
         full_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
@@ -149,6 +169,33 @@ class ToolWritePatchApiTests(unittest.TestCase):
             (self.vault / "large-note.md").read_text(encoding="utf-8"), original_content
         )
 
+    def test_apply_unified_diff_dry_run_reports_hunk_metadata(self):
+        updated_content = (
+            (self.vault / "large-note.md")
+            .read_text(encoding="utf-8")
+            .replace("Line 50\n", "Updated line 50\n")
+        )
+        diff_text = self._unified_diff("large-note.md", updated_content)
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff(
+                "large-note.md", diff_text, dry_run=True
+            )
+        )
+
+        self.assertNotIn("error", result)
+        self.assertEqual(
+            result["hunks"],
+            [
+                {
+                    "header": "@@ -47,7 +47,7 @@",
+                    "old_start": 47,
+                    "old_count": 7,
+                    "new_count": 7,
+                }
+            ],
+        )
+
     def test_apply_unified_diff_changes_one_middle_line(self):
         original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
         updated_content = original_content.replace("Line 50\n", "Updated line 50\n")
@@ -163,6 +210,75 @@ class ToolWritePatchApiTests(unittest.TestCase):
                 diff_text,
                 expected_hash=read_result["content_hash"],
             )
+        )
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+        self.assertNotIn("hunks", result)
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content
+        )
+
+    def test_apply_unified_diff_accepts_hunk_only_middle_line(self):
+        original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
+        updated_content = original_content.replace("Line 50\n", "Updated line 50\n")
+        diff_text = "@@ -50,1 +50,1 @@\n-Line 50\n+Updated line 50\n"
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), updated_content
+        )
+
+    def test_apply_unified_diff_hunk_only_dry_run_reports_hunk_metadata(self):
+        original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
+        diff_text = "@@ -50,1 +50,1 @@\n-Line 50\n+Updated line 50\n"
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff(
+                "large-note.md", diff_text, dry_run=True
+            )
+        )
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["dry_run"])
+        self.assertTrue(result["would_change"])
+        self.assertFalse(result["applied"])
+        self.assertEqual(
+            result["hunks"],
+            [
+                {
+                    "header": "@@ -50,1 +50,1 @@",
+                    "old_start": 50,
+                    "old_count": 1,
+                    "new_count": 1,
+                }
+            ],
+        )
+        self.assertEqual(
+            (self.vault / "large-note.md").read_text(encoding="utf-8"), original_content
+        )
+
+    def test_apply_unified_diff_accepts_multi_hunk_hunk_only_patch(self):
+        original_content = (self.vault / "large-note.md").read_text(encoding="utf-8")
+        updated_content = original_content.replace(
+            "Line 10\n", "Updated line 10\n"
+        ).replace("Line 90\n", "Updated line 90\n")
+        diff_text = (
+            "@@ -10,1 +10,1 @@\n"
+            "-Line 10\n"
+            "+Updated line 10\n"
+            "@@ -90,1 +90,1 @@\n"
+            "-Line 90\n"
+            "+Updated line 90\n"
+        )
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
         )
 
         self.assertNotIn("error", result)
@@ -234,6 +350,36 @@ class ToolWritePatchApiTests(unittest.TestCase):
         )
 
         self.assertEqual(result["error_code"], "invalid_patch")
+
+    def test_apply_unified_diff_rejects_garbage_prefix_with_clear_message(self):
+        diff_text = "not a diff\n@@ -50,1 +50,1 @@\n-Line 50\n+Updated line 50\n"
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertIn(
+            "hunk header (@@ ...) or unified diff file headers", result["error"]
+        )
+
+    def test_apply_unified_diff_rejects_fenced_patch(self):
+        diff_text = (
+            "```diff\n"
+            "@@ -50,1 +50,1 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+            "```\n"
+        )
+
+        result = json.loads(
+            self.server.vault_apply_unified_diff("large-note.md", diff_text)
+        )
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertIn(
+            "hunk header (@@ ...) or unified diff file headers", result["error"]
+        )
 
     # --- context_mismatch RCA diagnostic tests ---
     # These tests should FAIL until the fix is applied.
@@ -391,6 +537,138 @@ class ToolWritePatchApiTests(unittest.TestCase):
         self.assertTrue(result["applied"])
 
     # --- end Unicode / emoji context line tests ---
+
+    # --- Hunk count mismatch RCA tests ---
+    # These tests verify that the parser rejects patches where the @@ header
+    # advertises more lines than the hunk body actually contains — the root
+    # cause of the "Hunk line counts do not match header counts" failure
+    # reported for 2026-Q3.md.  The bug was in the patch generator (client),
+    # not in Brain3's application logic; these tests confirm the server already
+    # detects and rejects such malformed patches, and that correct patches pass.
+
+    def test_apply_unified_diff_rejects_hunk_count_mismatch_rca_scenario(self):
+        # Exact class of failure from the RCA: header claims 3 lines on each
+        # side but the body contains only 1 deletion and 1 insertion.
+        # @@ -50,3 +50,3 @@ advertises old=3, new=3; body has old=1, new=1.
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -50,3 +50,3 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertIn("Hunk line counts do not match header counts", result["error"])
+        self.assertEqual(
+            result["details"],
+            {
+                "header": "@@ -50,3 +50,3 @@",
+                "expected_old_count": 3,
+                "actual_old_count": 1,
+                "expected_new_count": 3,
+                "actual_new_count": 1,
+                "parsed_hunks": [],
+            },
+        )
+
+    def test_apply_unified_diff_count_mismatch_reports_prior_parsed_hunks(self):
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -10,1 +10,1 @@\n"
+            "-Line 10\n"
+            "+Updated line 10\n"
+            "@@ -50,3 +50,3 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertEqual(result["details"]["header"], "@@ -50,3 +50,3 @@")
+        self.assertEqual(
+            result["details"]["parsed_hunks"],
+            [
+                {
+                    "header": "@@ -10,1 +10,1 @@",
+                    "old_start": 10,
+                    "old_count": 1,
+                    "new_count": 1,
+                }
+            ],
+        )
+
+    def test_apply_unified_diff_accepts_minimal_single_line_header(self):
+        # Correct minimal patch: @@ -50,1 +50,1 @@ with exactly 1 line each side.
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -50,1 +50,1 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    def test_apply_unified_diff_accepts_implicit_single_line_header(self):
+        # @@ -50 +50 @@ omits the count entirely; the spec treats missing count
+        # as 1.  This is the most concise valid form for a single-line swap.
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -50 +50 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    def test_apply_unified_diff_accepts_single_change_with_matching_context(self):
+        # Correct patch with context: @@ -49,3 +49,3 @@ plus 1 context before
+        # and 1 context after the changed line (total 3 lines each side).
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -49,3 +49,3 @@\n"
+            " Line 49\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+            " Line 51\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    def test_apply_unified_diff_rejects_context_lines_omitted_from_body(self):
+        # Generator bug variant: header claims 3 context lines but context was
+        # dropped from the body, leaving only the changed lines.
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -49,3 +49,3 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+            # context lines Line 49 and Line 51 are missing
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertIn("Hunk line counts do not match header counts", result["error"])
+
+    # --- end Hunk count mismatch RCA tests ---
 
     def test_batch_frontmatter_update_preserves_body_content(self):
         result = json.loads(
