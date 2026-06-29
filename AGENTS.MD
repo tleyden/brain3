@@ -11,6 +11,7 @@
 - We need fairly verbose logging and tracing to diagnose errors.  Just use the appropriate log level so we can control the noise.  Without this, its a black box.
 - Everything in the poc dir is dead legacy.  Ignore it unless specifically asked.  The top level rust project and brain3-mcp-vault-tools are the only active codebases.
 - Run cargo test, which should pass, before considering a change as finished.
+- For Python tests in `brain3-mcp-vault-tools`, run: `cd brain3-mcp-vault-tools && uv run --with mcp python -m unittest discover -s tests -v`. This discovers and runs all tests in the `tests/` directory. (`pytest` is not installed; `uv run --with mcp python -m unittest` is the correct runner.)
 - This project is new, so default to verbose logging.  Of course, never log secrets or sensitive data.
 - This project is highly sensitive from a security point of view, don't introduce new points of ingress without first updating the threat model in SECURITY_AUDIT.MD under the Threat Model section.
 

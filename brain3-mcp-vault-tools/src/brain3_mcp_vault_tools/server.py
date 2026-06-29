@@ -410,7 +410,41 @@ def vault_create_overwrite_file(
 
 @mcp.tool(
     name="vault_apply_unified_diff",
-    description="Apply a unified diff to a single existing text file. This is the default edit path for existing notes when feasible, including one-line changes in large files and small EOF appends. Lean toward this instead of vault_create_overwrite_file because it is cheaper in tokens and safer.",
+    description=(
+        "Apply a unified diff to a single existing text file. "
+        "This is the default edit path for existing notes, including one-line changes in large files and small EOF appends. "
+        "Prefer this over vault_create_overwrite_file — it is cheaper in tokens and safer.\n\n"
+        "DIFF FORMAT RULES — read carefully, the server validates these strictly:\n\n"
+        "1. Start with file headers:\n"
+        "   --- <path>\n"
+        "   +++ <path>\n"
+        "   (both paths must match the `path` argument)\n\n"
+        "2. Each hunk starts with a header:\n"
+        "   @@ -<old_start>,<old_count> +<new_start>,<new_count> @@\n"
+        "   <old_count> MUST equal the number of lines in the hunk body that begin with ' ' or '-'.\n"
+        "   <new_count> MUST equal the number of lines in the hunk body that begin with ' ' or '+'.\n"
+        "   Context lines (leading space) count toward BOTH counts.\n"
+        "   Omitting ,<count> is shorthand for ,1 — only use that for a single-line hunk.\n\n"
+        "3. MOST COMMON MISTAKE: writing @@ -L,3 +L,3 @@ but only emitting the changed lines "
+        "without the context lines. The counts in the header must match the lines actually present "
+        "in the body. If you include no context lines, use ,1 (or omit the count). "
+        "If you include one context line before and after the change, use ,3.\n\n"
+        "EXAMPLES:\n\n"
+        "Minimal (no context, single-line replacement):\n"
+        "--- notes/foo.md\n"
+        "+++ notes/foo.md\n"
+        "@@ -5,1 +5,1 @@\n"
+        "-old line\n"
+        "+new line\n\n"
+        "With one context line before and after:\n"
+        "--- notes/foo.md\n"
+        "+++ notes/foo.md\n"
+        "@@ -4,3 +4,3 @@\n"
+        " context before\n"
+        "-old line\n"
+        "+new line\n"
+        " context after\n"
+    ),
     annotations={
         "readOnlyHint": False,
         "destructiveHint": True,

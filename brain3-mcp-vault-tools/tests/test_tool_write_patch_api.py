@@ -392,6 +392,99 @@ class ToolWritePatchApiTests(unittest.TestCase):
 
     # --- end Unicode / emoji context line tests ---
 
+    # --- Hunk count mismatch RCA tests ---
+    # These tests verify that the parser rejects patches where the @@ header
+    # advertises more lines than the hunk body actually contains — the root
+    # cause of the "Hunk line counts do not match header counts" failure
+    # reported for 2026-Q3.md.  The bug was in the patch generator (client),
+    # not in Brain3's application logic; these tests confirm the server already
+    # detects and rejects such malformed patches, and that correct patches pass.
+
+    def test_apply_unified_diff_rejects_hunk_count_mismatch_rca_scenario(self):
+        # Exact class of failure from the RCA: header claims 3 lines on each
+        # side but the body contains only 1 deletion and 1 insertion.
+        # @@ -50,3 +50,3 @@ advertises old=3, new=3; body has old=1, new=1.
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -50,3 +50,3 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertIn("Hunk line counts do not match header counts", result["error"])
+
+    def test_apply_unified_diff_accepts_minimal_single_line_header(self):
+        # Correct minimal patch: @@ -50,1 +50,1 @@ with exactly 1 line each side.
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -50,1 +50,1 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    def test_apply_unified_diff_accepts_implicit_single_line_header(self):
+        # @@ -50 +50 @@ omits the count entirely; the spec treats missing count
+        # as 1.  This is the most concise valid form for a single-line swap.
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -50 +50 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    def test_apply_unified_diff_accepts_single_change_with_matching_context(self):
+        # Correct patch with context: @@ -49,3 +49,3 @@ plus 1 context before
+        # and 1 context after the changed line (total 3 lines each side).
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -49,3 +49,3 @@\n"
+            " Line 49\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+            " Line 51\n"
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertNotIn("error", result)
+        self.assertTrue(result["applied"])
+
+    def test_apply_unified_diff_rejects_context_lines_omitted_from_body(self):
+        # Generator bug variant: header claims 3 context lines but context was
+        # dropped from the body, leaving only the changed lines.
+        diff = (
+            "--- large-note.md\n"
+            "+++ large-note.md\n"
+            "@@ -49,3 +49,3 @@\n"
+            "-Line 50\n"
+            "+Updated line 50\n"
+            # context lines Line 49 and Line 51 are missing
+        )
+
+        result = json.loads(self.server.vault_apply_unified_diff("large-note.md", diff))
+
+        self.assertEqual(result["error_code"], "invalid_patch")
+        self.assertIn("Hunk line counts do not match header counts", result["error"])
+
+    # --- end Hunk count mismatch RCA tests ---
+
     def test_batch_frontmatter_update_preserves_body_content(self):
         result = json.loads(
             self.server.vault_batch_frontmatter_update(
