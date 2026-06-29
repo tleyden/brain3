@@ -91,9 +91,9 @@ pub async fn run_gateway_tui(
             );
             let mut state =
                 FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation);
-            finalize_and_start(
+            start_without_writing_env(
                 &mut state,
-                &use_case,
+                launch_plan,
                 runtime_overrides.clone(),
                 startup_options.startup_policy,
             )
@@ -698,6 +698,27 @@ async fn finalize_and_start(
     state.step = SetupStep::RuntimeStatus;
 }
 
+async fn start_without_writing_env(
+    state: &mut FirstRunTuiState,
+    launch_plan: RuntimeLaunchPlan,
+    runtime_overrides: RuntimeOverrides,
+    startup_policy: RuntimeStartupPolicy,
+) {
+    state.clear_messages();
+    let host = state.host.clone();
+    let (tx, rx) = oneshot::channel();
+    tokio::spawn(async move {
+        let _ = tx.send(
+            start_configured_runtime_session(&host, launch_plan, runtime_overrides, startup_policy)
+                .await,
+        );
+    });
+    // Leave summary as None so startup result handling uses the loaded runtime config.
+    state.startup_rx = Some(rx);
+    state.info_message = Some("Starting Brain3...".into());
+    state.step = SetupStep::RuntimeStatus;
+}
+
 fn apply_startup_result(
     state: &mut FirstRunTuiState,
     result: anyhow::Result<ConfiguredGatewaySession>,
@@ -825,6 +846,34 @@ mod tests {
     use crate::server::ConfiguredGatewaySession;
 
     use super::*;
+
+    #[tokio::test]
+    async fn configured_startup_begins_without_wizard_summary() {
+        let preparation = sample_preparation();
+        let paths = preparation.paths.clone();
+        let mut state = FirstRunTuiState::new_configured(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            preparation,
+        );
+
+        start_without_writing_env(
+            &mut state,
+            brain3_core::domain::setup::RuntimeLaunchPlan {
+                paths: paths.clone(),
+                env_file: paths.env_file.clone(),
+                log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
+            },
+            RuntimeOverrides::default(),
+            RuntimeStartupPolicy::configured(false),
+        )
+        .await;
+
+        assert_eq!(state.step, SetupStep::RuntimeStatus);
+        assert!(state.summary.is_none());
+        assert!(state.startup_rx.is_some());
+        assert_eq!(state.info_message.as_deref(), Some("Starting Brain3..."));
+    }
 
     #[test]
     fn successful_wizard_startup_stays_on_runtime_status() {
