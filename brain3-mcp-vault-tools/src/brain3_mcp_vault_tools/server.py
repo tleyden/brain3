@@ -415,7 +415,7 @@ def vault_create_overwrite_file(
         "CRITICAL: the counts in @@ -L,N +L,N @@ must exactly match the lines in the hunk body. "
         "N counts context lines (' ') AND changed lines ('-'/'+'); context lines count toward both old and new. "
         "Common mistake: writing ,3 but omitting the context lines — the body then has only 1 line, not 3, and the patch is rejected.\n\n"
-        "Example (no context): @@ -5,1 +5,1 @@\\n-old\\n+new\n"
+        "Example (no context): @@ -5,1 +5,1 @@\\n-old\\n+new\\n\n"
         "Example (1 context each side): @@ -4,3 +4,3 @@\\n ctx\\n-old\\n+new\\n ctx"
     ),
     annotations={
