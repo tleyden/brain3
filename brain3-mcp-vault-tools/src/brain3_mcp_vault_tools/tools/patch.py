@@ -4,6 +4,9 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
+
+_VARIATION_SELECTORS_RE = re.compile("[︀-️\U000e0100-\U000e01ef]")
 
 from ..vault import read_file, write_file_atomic
 
@@ -108,10 +111,16 @@ def _apply_hunks(content: str, hunks: list[dict]) -> str:
         end_index = start_index + len(old_segment)
         actual_segment = result_lines[start_index:end_index]
 
-        # Strip trailing \n for comparison so that a patch whose last line lacks
-        # a newline (LLM-generated diffs) or a file whose last line lacks a
-        # newline both match correctly.
-        if [s.rstrip("\n") for s in actual_segment] != [s.rstrip("\n") for s in old_segment]:
+        # Normalize to NFC and strip trailing \n before comparing so that
+        # NFC/NFD mismatches, emoji variation-selector differences, a patch
+        # whose last line lacks a newline, and a file whose last line lacks a
+        # newline all match correctly.
+        def _norm(s: str) -> str:
+            s = unicodedata.normalize("NFC", s)
+            s = _VARIATION_SELECTORS_RE.sub("", s)
+            return s.rstrip("\n")
+
+        if [_norm(s) for s in actual_segment] != [_norm(s) for s in old_segment]:
             raise PatchError("context_mismatch", "Patch context does not match current file content")
 
         # For context lines use the file's original content so the file's exact
