@@ -4,6 +4,9 @@ import hashlib
 import json
 import logging
 import re
+import unicodedata
+
+_VARIATION_SELECTORS_RE = re.compile("[︀-️\U000e0100-\U000e01ef]")
 
 from ..vault import read_file, write_file_atomic
 
@@ -34,6 +37,7 @@ def _normalize_diff_path(raw_path: str) -> str:
 
 
 def _parse_unified_diff(path: str, diff_text: str) -> list[dict]:
+    diff_text = diff_text.replace("\r\n", "\n")
     lines = diff_text.splitlines(keepends=True)
     if len(lines) < 3 or not lines[0].startswith("--- ") or not lines[1].startswith("+++ "):
         raise PatchError("invalid_patch", "Patch must start with unified diff file headers")
@@ -100,15 +104,37 @@ def _apply_hunks(content: str, hunks: list[dict]) -> str:
     offset = 0
 
     for hunk in hunks:
-        old_segment = [text for op, text in hunk["lines"] if op in {" ", "-"}]
-        new_segment = [text for op, text in hunk["lines"] if op in {" ", "+"}]
+        hunk_lines = hunk["lines"]
+        old_segment = [text for op, text in hunk_lines if op in {" ", "-"}]
 
         start_index = max(0, hunk["old_start"] - 1 + offset)
         end_index = start_index + len(old_segment)
         actual_segment = result_lines[start_index:end_index]
 
-        if actual_segment != old_segment:
+        # Normalize to NFC and strip trailing \n before comparing so that
+        # NFC/NFD mismatches, emoji variation-selector differences, a patch
+        # whose last line lacks a newline, and a file whose last line lacks a
+        # newline all match correctly.
+        def _norm(s: str) -> str:
+            s = unicodedata.normalize("NFC", s)
+            s = _VARIATION_SELECTORS_RE.sub("", s)
+            return s.rstrip("\n")
+
+        if [_norm(s) for s in actual_segment] != [_norm(s) for s in old_segment]:
             raise PatchError("context_mismatch", "Patch context does not match current file content")
+
+        # For context lines use the file's original content so the file's exact
+        # newline characters (including trailing-newline status) are preserved.
+        new_segment = []
+        file_pos = start_index
+        for op, text in hunk_lines:
+            if op == " ":
+                new_segment.append(result_lines[file_pos])
+                file_pos += 1
+            elif op == "-":
+                file_pos += 1
+            else:  # "+"
+                new_segment.append(text)
 
         result_lines[start_index:end_index] = new_segment
         offset += len(new_segment) - len(old_segment)
