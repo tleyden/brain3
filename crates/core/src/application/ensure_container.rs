@@ -275,9 +275,8 @@ async fn ports_ready(port_mappings: &[PortMapping], probe_host_override: Option<
 }
 
 async fn tcp_port_ready_async(host: &str, port: u16) -> bool {
-    let host = host.to_owned();
-    let probe_host = host.clone();
-    match tokio::task::spawn_blocking(move || tcp_port_ready(&probe_host, port)).await {
+    let owned_host = host.to_owned();
+    match tokio::task::spawn_blocking(move || tcp_port_ready(&owned_host, port)).await {
         Ok(ready) => ready,
         Err(error) => {
             tracing::warn!(
