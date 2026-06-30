@@ -1,6 +1,5 @@
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use crate::domain::errors::ContainerError;
@@ -10,8 +9,9 @@ use crate::ports::container::{ContainerId, ContainerPort, NetworkPreparation};
 #[cfg(test)]
 use crate::domain::model::{ManagedContainerInfo, ManagedContainerScope};
 
-const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(5);
+const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
 const DEFAULT_STARTUP_POLL_INTERVAL: Duration = Duration::from_millis(200);
+const STARTUP_PROGRESS_LOG_INTERVAL: Duration = Duration::from_secs(5);
 const DEFAULT_LOG_TAIL_LINES: usize = 40;
 const TCP_CONNECT_TIMEOUT: Duration = Duration::from_millis(200);
 
@@ -147,7 +147,9 @@ impl EnsureContainerUseCase {
         config: &ContainerConfig,
         probe_host_override: Option<&str>,
     ) -> Result<(), ContainerError> {
-        let deadline = Instant::now() + self.probe_settings.timeout;
+        let started_at = Instant::now();
+        let deadline = started_at + self.probe_settings.timeout;
+        let mut next_progress_log = started_at + STARTUP_PROGRESS_LOG_INTERVAL;
         let probe_desc = if let Some(host) = probe_host_override {
             config
                 .port_mappings
@@ -181,20 +183,14 @@ impl EnsureContainerUseCase {
                     .await);
             }
 
-            let ports_ready = config.port_mappings.is_empty()
-                || config.port_mappings.iter().all(|mapping| {
-                    if let Some(host) = probe_host_override {
-                        tcp_port_ready(host, mapping.container_port)
-                    } else {
-                        tcp_port_ready(&mapping.host_address, mapping.host_port)
-                    }
-                });
+            let ports_ready = ports_ready(&config.port_mappings, probe_host_override).await;
 
             if ports_ready {
                 return Ok(());
             }
 
-            if Instant::now() >= deadline {
+            let now = Instant::now();
+            if now >= deadline {
                 return Err(self
                     .startup_failed(
                         id,
@@ -207,7 +203,19 @@ impl EnsureContainerUseCase {
                     .await);
             }
 
-            sleep(self.probe_settings.poll_interval);
+            if now >= next_progress_log {
+                tracing::info!(
+                    container = %config.name,
+                    elapsed_s = started_at.elapsed().as_secs(),
+                    timeout_s = self.probe_settings.timeout.as_secs(),
+                    "waiting for container to become reachable"
+                );
+                while next_progress_log <= now {
+                    next_progress_log += STARTUP_PROGRESS_LOG_INTERVAL;
+                }
+            }
+
+            tokio::time::sleep(self.probe_settings.poll_interval).await;
         }
     }
 
@@ -246,6 +254,39 @@ impl EnsureContainerUseCase {
             summary,
             logs,
             started_container,
+        }
+    }
+}
+
+async fn ports_ready(port_mappings: &[PortMapping], probe_host_override: Option<&str>) -> bool {
+    for mapping in port_mappings {
+        let (host, port) = if let Some(host) = probe_host_override {
+            (host, mapping.container_port)
+        } else {
+            (mapping.host_address.as_str(), mapping.host_port)
+        };
+
+        if !tcp_port_ready_async(host, port).await {
+            return false;
+        }
+    }
+
+    true
+}
+
+async fn tcp_port_ready_async(host: &str, port: u16) -> bool {
+    let host = host.to_owned();
+    let probe_host = host.clone();
+    match tokio::task::spawn_blocking(move || tcp_port_ready(&probe_host, port)).await {
+        Ok(ready) => ready,
+        Err(error) => {
+            tracing::warn!(
+                host,
+                port,
+                error = %error,
+                "startup TCP readiness task failed"
+            );
+            false
         }
     }
 }
@@ -453,6 +494,14 @@ mod tests {
         )
     }
 
+    #[test]
+    fn default_startup_probe_timeout_allows_slow_container_startup() {
+        assert_eq!(
+            StartupProbeSettings::default().timeout,
+            Duration::from_secs(120)
+        );
+    }
+
     #[tokio::test]
     async fn pulls_missing_image_before_running_container() {
         let port = Arc::new(MockContainerPort::new(MockState::default()));
@@ -651,6 +700,57 @@ mod tests {
         let state = port.snapshot();
         assert_eq!(state.logs_tail_count, 1);
         assert!(state.actions.contains(&"logs_tail"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn startup_probe_yields_while_waiting_for_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let unused_port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            ..Default::default()
+        }));
+        let use_case = EnsureContainerUseCase::with_probe_settings(
+            port,
+            StartupProbeSettings {
+                timeout: Duration::from_millis(40),
+                poll_interval: Duration::from_millis(10),
+                log_tail_lines: 10,
+            },
+        );
+        let mut config = sample_config();
+        config.port_mappings = vec![PortMapping {
+            host_address: "127.0.0.1".into(),
+            host_port: unused_port,
+            container_port: 2765,
+        }];
+
+        let mut ensure = tokio::spawn(async move { use_case.ensure(&config).await });
+        let mut timer_ticks = 0;
+
+        let error = loop {
+            tokio::select! {
+                result = &mut ensure => {
+                    break result
+                        .expect("startup probe task should join")
+                        .expect_err("closed port should fail startup verification");
+                }
+                _ = tokio::time::sleep(Duration::from_millis(1)) => {
+                    timer_ticks += 1;
+                }
+            }
+        };
+
+        assert!(
+            matches!(error, ContainerError::StartupFailed { .. }),
+            "expected startup failure, got {error:?}"
+        );
+        assert!(
+            timer_ticks > 0,
+            "startup probe should yield to other Tokio tasks while waiting"
+        );
     }
 
     #[tokio::test]
