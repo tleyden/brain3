@@ -37,11 +37,11 @@ pub(crate) fn format_container_diagnostics_dump(
     match logs {
         Ok(logs) if logs.is_empty() => {
             dump.push_str(&format!(
-                "--- logs (tail {DIAGNOSTIC_LOG_LINES}) ---\n<empty>\n"
+                "Container logs (tail {DIAGNOSTIC_LOG_LINES}):\n<empty>\n"
             ));
         }
         Ok(logs) => {
-            dump.push_str(&format!("--- logs (tail {DIAGNOSTIC_LOG_LINES}) ---\n"));
+            dump.push_str(&format!("Container logs (tail {DIAGNOSTIC_LOG_LINES}):\n"));
             dump.push_str(&logs);
             if !logs.ends_with('\n') {
                 dump.push('\n');
@@ -153,7 +153,7 @@ mod tests {
         assert!(dump.starts_with("=== brain3 container diagnostics: brain3-mcp-vault-tools ===\n"));
         assert!(dump.contains("exists: true\n"));
         assert!(dump.contains("running: true\n"));
-        assert!(dump.contains("--- logs (tail 10000) ---\nline one\nline two\n"));
+        assert!(dump.contains("Container logs (tail 10000):\nline one\nline two\n"));
         assert!(
             dump.ends_with("=== end brain3 container diagnostics: brain3-mcp-vault-tools ===\n")
         );
