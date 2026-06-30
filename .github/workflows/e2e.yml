@@ -14,12 +14,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build MCP container image from source
-        run: |
-          docker build \
-            -f ./brain3-mcp-vault-tools/Containerfile \
-            -t brain3-mcp-vault-tools:e2e-local \
-            ./brain3-mcp-vault-tools
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Install uv
+        run: python -m pip install --upgrade pip uv
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -30,7 +31,5 @@ jobs:
         run: cargo build -p brain3
 
       - name: Run E2E smoke tests
-        run: |
-          cargo test -p brain3 --test e2e_smoke --features e2e \
-            -- --nocapture
-        timeout-minutes: 5
+        run: uv run scripts/e2e_smoke.py
+        timeout-minutes: 15
