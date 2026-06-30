@@ -21,6 +21,27 @@ Full release process for Brain3. Execute each step using the Bash tool — do no
 
 ---
 
+## Step 0 — Ensure we're on a release branch
+
+Before bumping anything, check the current branch:
+
+```bash
+git rev-parse --abbrev-ref HEAD
+```
+
+The version bump must happen on a dedicated release branch named `bump_version_<XYZ>` (the version with dots removed — e.g. `0.2.8` → `bump_version_028`), **not** on `main`.
+
+- If already on the expected `bump_version_<XYZ>` branch, proceed to Step 1.
+- Otherwise (on `main` or any other branch), **stop and offer to create the branch** for the user. Do not create it without confirmation. Once confirmed, run:
+
+```bash
+git checkout -b bump_version_<XYZ>
+```
+
+Only after we're on the release branch should you continue to Step 1.
+
+---
+
 ## Step 1 — Bump version in files
 
 Run the bump script (it detects the current version from `apps/gateway/Cargo.toml`, applies all replacements, and refreshes `Cargo.lock`):
@@ -44,7 +65,9 @@ Do NOT commit — tell the user to commit themselves, as per project instruction
 
 ## Step 2 — Tag and push (triggers CI release workflow)
 
-Ask the user to confirm before tagging and pushing. Once confirmed, run:
+**The tag does not require the PR to be merged first.** The release workflow builds from whatever commit the tag points at, so you can tag the `bump_version_<XYZ>` branch HEAD directly — even while its PR is still open or blocked on review. Don't wait for the merge to cut the release.
+
+Ask the user to confirm before tagging and pushing. Once confirmed, run (tags the current HEAD, i.e. the release branch commit):
 
 ```bash
 VERSION=vX.Y.Z

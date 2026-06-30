@@ -84,7 +84,7 @@ class ServerStartupTests(unittest.TestCase):
         with (
             patch.object(server, "_start_process_resources"),
             patch.object(server, "_stop_process_resources"),
-            patch.object(server, "_package_version", return_value="0.2.7"),
+            patch.object(server, "_package_version", return_value="0.2.8"),
             patch.object(server.logger, "info") as info_mock,
             patch.object(server.mcp, "run") as run_mock,
         ):
@@ -92,7 +92,7 @@ class ServerStartupTests(unittest.TestCase):
 
         run_mock.assert_called_once_with(transport="streamable-http")
         info_mock.assert_any_call(
-            "Starting authless MCP server version=%s on port %s", "0.2.7", ANY
+            "Starting authless MCP server version=%s on port %s", "0.2.8", ANY
         )
 
 
