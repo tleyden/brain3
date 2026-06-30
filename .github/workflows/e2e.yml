@@ -9,13 +9,14 @@ on:
       - main
     types:
       - labeled
+      - synchronize
 
 permissions: read-all
 
 jobs:
   e2e-docker-linux:
     name: E2E smoke - Docker / Linux
-    if: github.event_name == 'push' || github.event.label.name == 'run-e2e-test'
+    if: github.event_name == 'push' || github.event.label.name == 'run-e2e-test' || contains(github.event.pull_request.labels.*.name, 'run-e2e-test')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
