@@ -318,6 +318,21 @@ def vault_search_frontmatter(
             match_type=match_type,
             path_prefix=path_prefix,
         )
+        snapshot = frontmatter_index.debug_snapshot(path_prefix=path_prefix)
+        logger.info(
+            "vault_search_frontmatter index query result: field=%r value=%r "
+            "match_type=%r path_prefix=%r result_count=%d result_paths=%s "
+            "index_file_count=%d prefix_file_count=%d sample_keys=%s",
+            field,
+            value,
+            match_type,
+            path_prefix,
+            len(results),
+            [item["path"] for item in results[:max_results]],
+            snapshot["file_count"],
+            snapshot["prefix_file_count"],
+            snapshot["sample_keys"],
+        )
 
         formatted = []
         for item in results[:max_results]:

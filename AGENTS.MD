@@ -10,12 +10,20 @@
 - To support  remote mcp with https and oauth2.1, as many AI apps require, the gateway must have a public ingress via a cloudflare tunnel or otherwise.
 - We need fairly verbose logging and tracing to diagnose errors.  Just use the appropriate log level so we can control the noise.  Without this, its a black box.
 - Everything in the poc dir is dead legacy.  Ignore it unless specifically asked.  The top level rust project and brain3-mcp-vault-tools are the only active codebases.
-- Run cargo test, which should pass, before considering a change as finished.
-- For Python tests in `brain3-mcp-vault-tools`, run: `cd brain3-mcp-vault-tools && uv run --with mcp python -m unittest discover -s tests -v`. This discovers and runs all tests in the `tests/` directory. (`pytest` is not installed; `uv run --with mcp python -m unittest` is the correct runner.)
 - This project is new, so default to verbose logging.  Of course, never log secrets or sensitive data.
 - This project is highly sensitive from a security point of view, don't introduce new points of ingress without first updating the threat model in SECURITY_AUDIT.MD under the Threat Model section.
 - Keep tool descriptions as lean as possible, and number of tools as few as possible.  These take up valuable space in the context window.
 - The MCP server is a "dumb server" that interacts with an AI.  The AI calls it and interprets the results, and can call multiple MCP tools in composition.  The AI is smart, but cannot count numbers and has other limitations.  Always keep that delicate dance in mind.
+- Write plans to docs/superpowers/plans with file format name: docs/superpowers/plans/2026-06-29-plan-name.md
+
+# Local testing and verification
+
+- Always verify every change locally before considering it finished. This is fast and local, so there is no excuse to skip it:
+  - Compile the test targets (catches errors in `#[cfg(test)]` code that a plain `cargo build` misses): `cargo test -p brain3 --no-run`.
+  - Run the unit tests: `cargo test` (which should pass).
+- For Python tests in `brain3-mcp-vault-tools`, run: `cd brain3-mcp-vault-tools && uv run --with mcp python -m unittest discover -s tests -v`. This discovers and runs all tests in the `tests/` directory. (`pytest` is not installed; `uv run --with mcp python -m unittest` is the correct runner.)
+- E2E smoke tests verify end-to-end behaviour but are slower and run on CI, so by default only run them when the user explicitly asks. However, run them yourself without being asked when the change is big or risky (e.g. touches the gateway server, MCP proxy, container startup, or vault-tools), or when the E2E tests themselves changed.
+  - Run with: `uv run scripts/e2e_smoke.py`. Raw equivalent for transparency: `docker build -f ./brain3-mcp-vault-tools/Containerfile -t brain3-mcp-vault-tools:e2e-local ./brain3-mcp-vault-tools` followed by `cargo test -p brain3 --test e2e_smoke --features e2e -- --nocapture`.
 
 # Rust Development & Hexagonal Architecture: Best Practices
 

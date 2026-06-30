@@ -104,7 +104,7 @@ pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), 
     port.stop(&id).await
 }
 
-fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
+pub(crate) fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
     match runtime {
         ContainerRuntime::Docker => Arc::new(DockerContainerAdapter),
         ContainerRuntime::MacOSContainer => Arc::new(MacOsContainerAdapter),
@@ -157,6 +157,9 @@ fn build_container_config(
     }
     if let Some(ref level) = startup.mcp_log_level {
         env_vars.push(("B3_VAULT_MCP_LOG_LEVEL".into(), level.clone()));
+    }
+    if startup.enable_sync_reindex_tool {
+        env_vars.push(("BRAIN3_ENABLE_SYNC_REINDEX_TOOL".into(), "true".into()));
     }
 
     let mut bind_mounts = vec![BindMount {
@@ -540,6 +543,7 @@ mod tests {
             isolation_strategy: Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp),
             dev_mount_source: None,
             mcp_log_level: None,
+            enable_sync_reindex_tool: false,
         }
     }
 

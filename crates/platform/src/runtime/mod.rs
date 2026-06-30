@@ -1,4 +1,5 @@
 pub mod bootstrap;
+pub mod diagnostics;
 pub mod health_probe;
 
 pub use bootstrap::{

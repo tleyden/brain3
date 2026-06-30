@@ -162,6 +162,8 @@ pub struct ContainerStartupConfig {
     /// Log level forwarded to the MCP server inside the container
     /// (e.g. "trace" to log full request/response bodies). `None` = server default.
     pub mcp_log_level: Option<String>,
+    /// Enable synchronous reindex tool for testing (disables async file watcher).
+    pub enable_sync_reindex_tool: bool,
 }
 
 #[derive(Debug, Clone)]

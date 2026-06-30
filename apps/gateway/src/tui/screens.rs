@@ -1869,6 +1869,7 @@ mod tests {
                     network_name: "brain3-mcp-net".into(),
                     dev_mount_source: None,
                     mcp_log_level: None,
+                    enable_sync_reindex_tool: false,
                 }),
                 tunnel: None,
             }),

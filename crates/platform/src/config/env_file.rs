@@ -418,6 +418,8 @@ fn load_container_startup_config(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
+    let enable_sync_reindex_tool = env_bool("BRAIN3_ENABLE_SYNC_REINDEX_TOOL", false);
+
     Ok(Some(ContainerStartupConfig {
         runtime,
         image,
@@ -430,6 +432,7 @@ fn load_container_startup_config(
         isolation_strategy,
         dev_mount_source,
         mcp_log_level,
+        enable_sync_reindex_tool,
     }))
 }
 

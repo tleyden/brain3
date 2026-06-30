@@ -175,6 +175,7 @@ mod tests {
                 isolation_strategy: None,
                 dev_mount_source: None,
                 mcp_log_level: None,
+                enable_sync_reindex_tool: false,
             }),
             tunnel: None,
         });
