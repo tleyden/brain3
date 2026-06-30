@@ -197,7 +197,7 @@ def list_directory(
                 continue
 
             # Apply glob pattern filter
-            if pattern and not fnmatch.fnmatch(entry.name, pattern):
+            if pattern and not fnmatch.fnmatch(entry.name.lower(), pattern.lower()):
                 if is_dir:
                     _walk(entry, current_depth + 1)
                 continue

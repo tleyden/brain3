@@ -19,6 +19,18 @@ INOTIFY_LIMIT_PATHS = (
 )
 
 
+def _is_markdown(path: Path) -> bool:
+    """Return True for markdown files, matching the extension case-insensitively."""
+    return path.suffix.lower() == ".md"
+
+
+def _iter_markdown_files(root: Path):
+    """Yield markdown files under root, recognising any case of the .md extension."""
+    for path in root.rglob("*"):
+        if path.is_file() and _is_markdown(path):
+            yield path
+
+
 class FrontmatterIndex:
     """Thread-safe in-memory index of YAML frontmatter for fast queries."""
 
@@ -53,7 +65,7 @@ class FrontmatterIndex:
                 config.FRONTMATTER_INDEX_DEBOUNCE,
                 self._sync_mode,
             )
-            for md_path in config.VAULT_PATH.rglob("*.md"):
+            for md_path in _iter_markdown_files(config.VAULT_PATH):
                 if self._is_excluded(md_path):
                     logger.info(
                         "Frontmatter startup scan skipped excluded file: path=%s",
@@ -150,7 +162,7 @@ class FrontmatterIndex:
             config.VAULT_PATH.exists(),
         )
 
-        for md_path in config.VAULT_PATH.rglob("*.md"):
+        for md_path in _iter_markdown_files(config.VAULT_PATH):
             if self._is_excluded(md_path):
                 continue
             rel = str(md_path.relative_to(config.VAULT_PATH))
@@ -205,6 +217,10 @@ class FrontmatterIndex:
             List of {"path": relative_path, "frontmatter": dict}.
         """
         results: list[dict] = []
+        field_lower = field.lower()
+        value_lower = value.lower()
+        path_prefix_lower = path_prefix.lower() if path_prefix else None
+
         with self._lock:
             stats = {
                 "indexed_files": len(self._index),
@@ -216,50 +232,27 @@ class FrontmatterIndex:
             }
             samples: list[dict[str, object]] = []
             for rel_path, fm in self._index.items():
-                if path_prefix and not rel_path.startswith(path_prefix):
-                    stats["prefix_skipped"] += 1
+                if path_prefix_lower and not rel_path.lower().startswith(
+                    path_prefix_lower
+                ):
                     continue
-                stats["prefix_considered"] += 1
-                has_field = field in fm
-                if has_field:
-                    stats["field_present"] += 1
-                else:
-                    stats["field_missing"] += 1
-                matched = False
+
+                matched_keys = [key for key in fm if str(key).lower() == field_lower]
+                if not matched_keys:
+                    continue
+
+                hit = False
                 if match_type == "exists":
-                    if has_field:
-                        results.append({"path": rel_path, "frontmatter": fm})
-                        matched = True
+                    hit = True
                 elif match_type == "exact":
-                    if has_field and str(fm[field]) == value:
-                        results.append({"path": rel_path, "frontmatter": fm})
-                        matched = True
-                elif match_type == "contains":
-                    if has_field and value.lower() in str(fm[field]).lower():
-                        results.append({"path": rel_path, "frontmatter": fm})
-                        matched = True
-                if matched:
-                    stats["matched"] += 1
-                if len(samples) < 10:
-                    samples.append(
-                        {
-                            "path": rel_path,
-                            "has_field": has_field,
-                            "field_value": _safe_value_repr(fm.get(field)),
-                            "matched": matched,
-                            "metadata_keys": _metadata_keys(fm),
-                        }
+                    hit = any(
+                        str(fm[key]).lower() == value_lower for key in matched_keys
                     )
-            logger.info(
-                "Frontmatter index search evaluated: field=%r value=%r match_type=%r "
-                "path_prefix=%r stats=%s sample=%s",
-                field,
-                value,
-                match_type,
-                path_prefix,
-                stats,
-                samples,
-            )
+                elif match_type == "contains":
+                    hit = any(value_lower in str(fm[key]).lower() for key in matched_keys)
+
+                if hit:
+                    results.append({"path": rel_path, "frontmatter": fm})
         return results
 
     def debug_snapshot(
@@ -406,7 +399,7 @@ class _VaultEventHandler(FileSystemEventHandler):
             )
             return
         path = Path(event.src_path)
-        if path.suffix != ".md":
+        if not _is_markdown(path):
             logger.info(
                 "Frontmatter watchdog event ignored: reason=non_markdown event_type=%s path=%s suffix=%s",
                 event.event_type,
@@ -444,8 +437,8 @@ class _VaultEventHandler(FileSystemEventHandler):
             "scheduled=false",
             _display_path(event.src_path),
             _display_path(getattr(event, "dest_path", None)),
-            Path(event.src_path).suffix == ".md",
-            Path(getattr(event, "dest_path", "")).suffix == ".md",
+            _is_markdown(Path(event.src_path)),
+            _is_markdown(Path(getattr(event, "dest_path", ""))),
             Path(getattr(event, "dest_path", "")).exists(),
         )
 

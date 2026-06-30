@@ -197,7 +197,10 @@ class VaultSearchInput(BaseModel):
     )
     file_pattern: str = Field(
         default="*.md",
-        description="Glob pattern for files to search (e.g. '*.md', '*.canvas')",
+        description=(
+            "Case-insensitive glob pattern for files to search "
+            "(e.g. '*.md', '*.canvas')"
+        ),
         max_length=50,
     )
     max_results: int = Field(
@@ -232,7 +235,10 @@ class VaultSearchFrontmatterInput(BaseModel):
     )
     match_type: Literal["exact", "contains", "exists"] = Field(
         default="exact",
-        description="How to match: 'exact' for equality, 'contains' for substring, 'exists' to check field presence",
+        description=(
+            "Case-insensitive match: 'exact' equality, 'contains' substring, "
+            "'exists' field presence"
+        ),
     )
     path_prefix: str | None = Field(
         default=None,
