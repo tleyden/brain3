@@ -11,14 +11,13 @@ from pathlib import Path
 import frontmatter
 
 from .. import config
-from ..vault import resolve_vault_path
 
 logger = logging.getLogger(__name__)
 
 
 def _build_ripgrep_command(
     query: str,
-    search_path: Path,
+    search_paths: list[Path],
     file_pattern: str,
     max_results: int,
     context_lines: int,
@@ -28,25 +27,76 @@ def _build_ripgrep_command(
         "rg",
         "--json",
         f"--max-count={max_results}",
-        f"--glob={file_pattern}",
+        f"--iglob={file_pattern}",
         "-i",
         f"--context={context_lines}",
         query,
-        str(search_path),
     ]
 
     for excluded in config.EXCLUDED_DIRS:
-        cmd.insert(-2, f"--glob=!{excluded}/")
+        cmd.insert(-1, f"--glob=!{excluded}/")
+
+    cmd.extend(str(path) for path in search_paths)
 
     return cmd
+
+
+def _iglob_match(name: str, pattern: str) -> bool:
+    """Case-insensitive glob match."""
+    return fnmatch.fnmatch(name.lower(), pattern.lower())
 
 
 def _display_path(path: Path) -> str:
     """Return a path relative to the vault when possible for concise logging."""
     try:
-        return str(path.relative_to(config.VAULT_PATH))
+        return str(path.resolve().relative_to(config.VAULT_PATH.resolve()))
     except ValueError:
         return str(path)
+
+
+def _resolve_case_insensitive_search_dirs(path_prefix: str | None) -> list[Path]:
+    """Resolve all vault directories matching a path prefix case-insensitively."""
+    if not path_prefix:
+        return [config.VAULT_PATH]
+
+    if "\x00" in path_prefix:
+        raise ValueError("Path contains null bytes")
+
+    parts = Path(path_prefix).parts
+    for part in parts:
+        if part.startswith("."):
+            raise ValueError(
+                f"Path component '{part}' starts with '.'; "
+                "dotfiles and hidden directories are not allowed"
+            )
+
+    candidates = [config.VAULT_PATH.resolve()]
+    for part in parts:
+        part_lower = part.lower()
+        next_candidates: list[Path] = []
+        for directory in candidates:
+            try:
+                children = directory.iterdir()
+            except OSError:
+                continue
+
+            for child in children:
+                if not child.is_dir():
+                    continue
+                if child.name in config.EXCLUDED_DIRS:
+                    continue
+                if child.name.lower().startswith(part_lower):
+                    next_candidates.append(child)
+        candidates = next_candidates
+        if not candidates:
+            break
+
+    vault_root = config.VAULT_PATH.resolve()
+    return [
+        path
+        for path in candidates
+        if path == vault_root or str(path.resolve()).startswith(str(vault_root) + "/")
+    ]
 
 
 def _iter_searchable_files(search_path: Path):
@@ -59,7 +109,9 @@ def _iter_searchable_files(search_path: Path):
         yield file_path
 
 
-def _collect_search_scope(query: str, search_path: Path, file_pattern: str) -> dict[str, object]:
+def _collect_search_scope(
+    query: str, search_path: Path, file_pattern: str
+) -> dict[str, object]:
     """Summarize which files are in scope for search logging."""
     query_lower = query.lower()
     total_files = 0
@@ -72,7 +124,7 @@ def _collect_search_scope(query: str, search_path: Path, file_pattern: str) -> d
         total_files += 1
         rel_path = _display_path(file_path)
         filename_match = query_lower in rel_path.lower()
-        candidate = fnmatch.fnmatch(file_path.name, file_pattern)
+        candidate = _iglob_match(file_path.name, file_pattern)
 
         if candidate:
             candidate_files += 1
@@ -94,7 +146,7 @@ def _collect_search_scope(query: str, search_path: Path, file_pattern: str) -> d
 
 def _search_ripgrep(
     query: str,
-    search_path: Path,
+    search_paths: list[Path],
     file_pattern: str,
     max_results: int,
     context_lines: int,
@@ -102,7 +154,7 @@ def _search_ripgrep(
     """Search using ripgrep for performance."""
     cmd = _build_ripgrep_command(
         query=query,
-        search_path=search_path,
+        search_paths=search_paths,
         file_pattern=file_pattern,
         max_results=max_results,
         context_lines=context_lines,
@@ -114,8 +166,6 @@ def _search_ripgrep(
         return []
 
     matches = []
-    current_match = None
-
     for line in result.stdout.splitlines():
         try:
             data = json.loads(line)
@@ -126,7 +176,9 @@ def _search_ripgrep(
             match_data = data["data"]
             file_path = match_data["path"]["text"]
             try:
-                rel_path = str(Path(file_path).relative_to(config.VAULT_PATH))
+                rel_path = str(
+                    Path(file_path).resolve().relative_to(config.VAULT_PATH.resolve())
+                )
             except ValueError:
                 continue
 
@@ -147,7 +199,7 @@ def _search_ripgrep(
 
 def _search_python(
     query: str,
-    search_path: Path,
+    search_paths: list[Path],
     file_pattern: str,
     max_results: int,
     context_lines: int,
@@ -156,35 +208,38 @@ def _search_python(
     query_lower = query.lower()
     matches = []
 
-    for file_path in _iter_searchable_files(search_path):
-        if not fnmatch.fnmatch(file_path.name, file_pattern):
-            continue
+    for search_path in search_paths:
+        for file_path in _iter_searchable_files(search_path):
+            if not _iglob_match(file_path.name, file_pattern):
+                continue
 
-        try:
-            content = file_path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, PermissionError):
-            continue
+            try:
+                content = file_path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, PermissionError):
+                continue
 
-        lines = content.splitlines()
-        for i, line in enumerate(lines):
-            if query_lower in line.lower():
-                start = max(0, i - context_lines)
-                end = min(len(lines), i + context_lines + 1)
-                context = "\n".join(lines[start:end])
+            lines = content.splitlines()
+            for i, line in enumerate(lines):
+                if query_lower in line.lower():
+                    start = max(0, i - context_lines)
+                    end = min(len(lines), i + context_lines + 1)
+                    context = "\n".join(lines[start:end])
 
-                try:
-                    rel_path = str(file_path.relative_to(config.VAULT_PATH))
-                except ValueError:
-                    continue
+                    try:
+                        rel_path = str(
+                            file_path.resolve().relative_to(config.VAULT_PATH.resolve())
+                        )
+                    except ValueError:
+                        continue
 
-                matches.append({
-                    "path": rel_path,
-                    "line_number": i + 1,
-                    "match_context": context,
-                })
+                    matches.append({
+                        "path": rel_path,
+                        "line_number": i + 1,
+                        "match_context": context,
+                    })
 
-                if len(matches) >= max_results:
-                    return matches
+                    if len(matches) >= max_results:
+                        return matches
 
     return matches
 
@@ -211,29 +266,47 @@ def vault_search(
 ) -> str:
     """Search for text across vault files."""
     try:
-        if path_prefix:
-            search_path = resolve_vault_path(path_prefix)
-        else:
-            search_path = config.VAULT_PATH
+        search_paths = _resolve_case_insensitive_search_dirs(path_prefix)
 
-        if not search_path.is_dir():
+        if not search_paths:
             logger.error(
-                "vault_search invalid path: path_prefix=%r resolved_path=%s is not a directory",
+                "vault_search invalid path: path_prefix=%r is not a directory",
                 path_prefix,
-                search_path,
             )
             return json.dumps({"error": f"Search path is not a directory: {path_prefix}"})
 
-        scope = _collect_search_scope(query, search_path, file_pattern)
+        scopes = [
+            _collect_search_scope(query, search_path, file_pattern)
+            for search_path in search_paths
+        ]
+        scope = {
+            "total_files": sum(item["total_files"] for item in scopes),
+            "candidate_files": sum(item["candidate_files"] for item in scopes),
+            "sample_candidates": [
+                candidate
+                for item in scopes
+                for candidate in item["sample_candidates"]
+            ][:5],
+            "filename_matches_in_candidates": [
+                candidate
+                for item in scopes
+                for candidate in item["filename_matches_in_candidates"]
+            ][:5],
+            "filename_matches_excluded_by_pattern": [
+                candidate
+                for item in scopes
+                for candidate in item["filename_matches_excluded_by_pattern"]
+            ][:5],
+        }
         rg_available = shutil.which("rg") is not None
         backend = "ripgrep" if rg_available else "python"
 
         logger.info(
-            "vault_search request: query=%r path_prefix=%r resolved_path=%s file_pattern=%r "
+            "vault_search request: query=%r path_prefix=%r resolved_paths=%s file_pattern=%r "
             "max_results=%d context_lines=%d backend=%s search_mode=content_only case_insensitive=true",
             query,
             path_prefix,
-            search_path,
+            [_display_path(path) for path in search_paths],
             file_pattern,
             max_results,
             context_lines,
@@ -252,17 +325,21 @@ def vault_search(
                 shlex.join(
                     _build_ripgrep_command(
                         query=query,
-                        search_path=search_path,
+                        search_paths=search_paths,
                         file_pattern=file_pattern,
                         max_results=max_results,
                         context_lines=context_lines,
                     )
                 ),
             )
-            matches = _search_ripgrep(query, search_path, file_pattern, max_results, context_lines)
+            matches = _search_ripgrep(
+                query, search_paths, file_pattern, max_results, context_lines
+            )
         else:
             logger.info("vault_search fallback: using Python line-by-line content scan")
-            matches = _search_python(query, search_path, file_pattern, max_results, context_lines)
+            matches = _search_python(
+                query, search_paths, file_pattern, max_results, context_lines
+            )
 
         for match in matches:
             file_full_path = config.VAULT_PATH / match["path"]

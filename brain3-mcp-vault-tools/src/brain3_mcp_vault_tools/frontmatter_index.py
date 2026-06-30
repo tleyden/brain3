@@ -38,7 +38,9 @@ class FrontmatterIndex:
         observer: Observer | None = None
 
         try:
-            for md_path in config.VAULT_PATH.rglob("*.md"):
+            for md_path in config.VAULT_PATH.rglob("*"):
+                if not md_path.is_file() or md_path.suffix.lower() != ".md":
+                    continue
                 if self._is_excluded(md_path):
                     continue
                 rel = str(md_path.relative_to(config.VAULT_PATH))
@@ -111,19 +113,33 @@ class FrontmatterIndex:
             List of {"path": relative_path, "frontmatter": dict}.
         """
         results: list[dict] = []
+        field_lower = field.lower()
+        value_lower = value.lower()
+        path_prefix_lower = path_prefix.lower() if path_prefix else None
+
         with self._lock:
             for rel_path, fm in self._index.items():
-                if path_prefix and not rel_path.startswith(path_prefix):
+                if path_prefix_lower and not rel_path.lower().startswith(
+                    path_prefix_lower
+                ):
                     continue
+
+                matched_keys = [key for key in fm if str(key).lower() == field_lower]
+                if not matched_keys:
+                    continue
+
+                hit = False
                 if match_type == "exists":
-                    if field in fm:
-                        results.append({"path": rel_path, "frontmatter": fm})
+                    hit = True
                 elif match_type == "exact":
-                    if field in fm and str(fm[field]) == value:
-                        results.append({"path": rel_path, "frontmatter": fm})
+                    hit = any(
+                        str(fm[key]).lower() == value_lower for key in matched_keys
+                    )
                 elif match_type == "contains":
-                    if field in fm and value.lower() in str(fm[field]).lower():
-                        results.append({"path": rel_path, "frontmatter": fm})
+                    hit = any(value_lower in str(fm[key]).lower() for key in matched_keys)
+
+                if hit:
+                    results.append({"path": rel_path, "frontmatter": fm})
         return results
 
     # -- Internal helpers --
@@ -185,7 +201,7 @@ class _VaultEventHandler(FileSystemEventHandler):
         if event.is_directory:
             return
         path = Path(event.src_path)
-        if path.suffix != ".md":
+        if path.suffix.lower() != ".md":
             return
         if self._index._is_excluded(path):
             return
