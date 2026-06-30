@@ -104,7 +104,7 @@ pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), 
     port.stop(&id).await
 }
 
-fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
+pub(crate) fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
     match runtime {
         ContainerRuntime::Docker => Arc::new(DockerContainerAdapter),
         ContainerRuntime::MacOSContainer => Arc::new(MacOsContainerAdapter),

@@ -100,10 +100,16 @@ AGENTS.MD).
   - Build the port via `container_port_for_runtime(startup.runtime)`,
     `id = ContainerId(container_name)`.
   - Call `port.logs_tail(&id, DIAGNOSTIC_LOG_LINES)` with a generous const
-    (`10_000` — 2000 is not enough headroom). No trait change. Note this is a
-    *tail*: anything older than the last 10K lines is dropped, but failures show
-    up near the end so that's fine. It's buffered into one `String` then printed;
-    10K lines of (quiet) MCP server logs is trivially small.
+    (`10_000` — 2000 is not enough headroom). No trait change.
+  - This is a **quick one-shot dump, not a follow.** `logs_tail` runs
+    `docker logs --tail N` (never `--follow`/`-f`), so docker prints the last N
+    lines and **exits immediately** — it does not stream or block. (Same as Unix
+    `tail` without `-f`.) `run_command(...).output().await` just waits for that
+    fast exit and collects the text.
+  - `--tail` only *caps* how much we capture (last 10K lines; older lines are
+    dropped). Failures show up near the end, so the cap is fine and is preferred
+    over dumping the entire unbounded log. It's buffered into one `String` then
+    printed; 10K lines of (quiet) MCP server logs is trivially small.
   - Also call `exists` / `is_running` so the dump notes container state when logs
     are empty.
   - Emit with banner delimiters to **stdout via `println!`**:

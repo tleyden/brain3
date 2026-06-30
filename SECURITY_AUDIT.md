@@ -59,6 +59,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - Unauthenticated internet clients reaching the gateway directly or via Cloudflare tunnels
 - The single preregistered confidential AI client that holds Brain3’s client id and secret
 - Local host filesystem and temp-directory principals
+- Local process-control principals that can signal the running gateway process
 - The boundary between the Rust gateway and the `brain3-mcp-vault-tools` container
 - Vault content that may be user-controlled or, in some deployments, third-party-controlled
 
@@ -81,6 +82,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - `poc/` is dead legacy and out of active scan scope
 - Rust memory safety is assumed; this scan focused on logic, policy, and boundary bugs rather than memory corruption
 - Prompt injection is generally out of scope for user-controlled vault content, but not for vaults the user does not fully control
+- The gateway's SIGUSR1 diagnostics trigger is local-only: a sender must already be able to signal the gateway process, and the dump is written only to that process's stdout plus a log-file marker. The dump includes the MCP container's own logs, so the container must continue to avoid logging secrets; trace-level body logging remains covered by Finding 4.
 
 ## Findings
 
