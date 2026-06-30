@@ -504,6 +504,29 @@ cargo test
 </details>
 
 <details>
+<summary><strong>Running E2E tests</strong></summary>
+
+E2E tests start a real Brain3 gateway against a locally-built Docker container.
+They require Docker and are not run by default.
+
+Step 1 - build the MCP container image from source:
+
+```bash
+docker build \
+  -f ./brain3-mcp-vault-tools/Containerfile \
+  -t brain3-mcp-vault-tools:e2e-local \
+  ./brain3-mcp-vault-tools
+```
+
+Step 2 - run the tests:
+
+```bash
+cargo test -p brain3 --test e2e_smoke --features e2e -- --nocapture
+```
+
+</details>
+
+<details>
 <summary><strong>Install a PR build</strong></summary>
 
 PR install scripts are published at `https://brain3.s3.amazonaws.com/pr/<PR_NUMBER>/install.sh` while the PR is open.

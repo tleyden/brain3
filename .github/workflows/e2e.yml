@@ -1,0 +1,36 @@
+name: E2E
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions: read-all
+
+jobs:
+  e2e-docker-linux:
+    name: E2E smoke - Docker / Linux
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build MCP container image from source
+        run: |
+          docker build \
+            -f ./brain3-mcp-vault-tools/Containerfile \
+            -t brain3-mcp-vault-tools:e2e-local \
+            ./brain3-mcp-vault-tools
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build brain3 binary
+        run: cargo build -p brain3
+
+      - name: Run E2E smoke tests
+        run: |
+          cargo test -p brain3 --test e2e_smoke --features e2e \
+            -- --nocapture
+        timeout-minutes: 5

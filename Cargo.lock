@@ -308,6 +308,7 @@ dependencies = [
  "oxide-auth",
  "ratatui",
  "rmcp",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-appender",
