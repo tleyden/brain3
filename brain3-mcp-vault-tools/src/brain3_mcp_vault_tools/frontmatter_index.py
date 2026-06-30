@@ -19,6 +19,18 @@ INOTIFY_LIMIT_PATHS = (
 )
 
 
+def _is_markdown(path: Path) -> bool:
+    """Return True for markdown files, matching the extension case-insensitively."""
+    return path.suffix.lower() == ".md"
+
+
+def _iter_markdown_files(root: Path):
+    """Yield markdown files under root, recognising any case of the .md extension."""
+    for path in root.rglob("*"):
+        if path.is_file() and _is_markdown(path):
+            yield path
+
+
 class FrontmatterIndex:
     """Thread-safe in-memory index of YAML frontmatter for fast queries."""
 
@@ -53,7 +65,7 @@ class FrontmatterIndex:
                 config.FRONTMATTER_INDEX_DEBOUNCE,
                 self._sync_mode,
             )
-            for md_path in config.VAULT_PATH.rglob("*.md"):
+            for md_path in _iter_markdown_files(config.VAULT_PATH):
                 if self._is_excluded(md_path):
                     logger.info(
                         "Frontmatter startup scan skipped excluded file: path=%s",
@@ -150,7 +162,7 @@ class FrontmatterIndex:
             config.VAULT_PATH.exists(),
         )
 
-        for md_path in config.VAULT_PATH.rglob("*.md"):
+        for md_path in _iter_markdown_files(config.VAULT_PATH):
             if self._is_excluded(md_path):
                 continue
             rel = str(md_path.relative_to(config.VAULT_PATH))
@@ -387,7 +399,7 @@ class _VaultEventHandler(FileSystemEventHandler):
             )
             return
         path = Path(event.src_path)
-        if path.suffix != ".md":
+        if not _is_markdown(path):
             logger.info(
                 "Frontmatter watchdog event ignored: reason=non_markdown event_type=%s path=%s suffix=%s",
                 event.event_type,
@@ -425,8 +437,8 @@ class _VaultEventHandler(FileSystemEventHandler):
             "scheduled=false",
             _display_path(event.src_path),
             _display_path(getattr(event, "dest_path", None)),
-            Path(event.src_path).suffix == ".md",
-            Path(getattr(event, "dest_path", "")).suffix == ".md",
+            _is_markdown(Path(event.src_path)),
+            _is_markdown(Path(getattr(event, "dest_path", ""))),
             Path(getattr(event, "dest_path", "")).exists(),
         )
 
