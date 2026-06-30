@@ -65,7 +65,9 @@ Do NOT commit — tell the user to commit themselves, as per project instruction
 
 ## Step 2 — Tag and push (triggers CI release workflow)
 
-Ask the user to confirm before tagging and pushing. Once confirmed, run:
+**The tag does not require the PR to be merged first.** The release workflow builds from whatever commit the tag points at, so you can tag the `bump_version_<XYZ>` branch HEAD directly — even while its PR is still open or blocked on review. Don't wait for the merge to cut the release.
+
+Ask the user to confirm before tagging and pushing. Once confirmed, run (tags the current HEAD, i.e. the release branch commit):
 
 ```bash
 VERSION=vX.Y.Z
