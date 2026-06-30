@@ -1,6 +1,6 @@
 #![cfg(feature = "e2e")]
 
-use std::collections::HashSet;
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io;
@@ -223,80 +223,223 @@ async fn e2e_smoke_local_docker() -> Result<(), Box<dyn std::error::Error>> {
         .tools
         .iter()
         .map(|tool| tool.name.as_ref())
-        .collect::<HashSet<_>>();
-    for expected in [
-        "vault_create_overwrite_file",
-        "vault_read",
+        .collect::<BTreeSet<_>>();
+    let expected_tool_names = BTreeSet::from([
         "vault_apply_unified_diff",
-        "vault_search",
+        "vault_batch_frontmatter_update",
+        "vault_batch_read",
+        "vault_create_overwrite_file",
         "vault_delete",
+        "vault_list",
+        "vault_move",
+        "vault_read",
+        "vault_search",
+        "vault_search_frontmatter",
+    ]);
+    assert_eq!(tool_names, expected_tool_names);
+
+    for (path, content) in [
+        (
+            "projects/alpha.md",
+            "---\nstatus: draft\ntags:\n  - work\n---\n# Alpha\nAlpha kickoff details.\n",
+        ),
+        (
+            "projects/beta.md",
+            "---\nstatus: draft\n---\n# Beta\nBeta planning details.\n",
+        ),
+        (
+            "daily/2026-06-30.md",
+            "# 2026-06-30\nDaily note for project planning.\n",
+        ),
     ] {
-        assert!(tool_names.contains(expected), "missing MCP tool {expected}");
+        let create = call_tool_json(
+            &client,
+            "vault_create_overwrite_file",
+            json!({
+                "path": path,
+                "content": content,
+            }),
+        )
+        .await?;
+        assert_eq!(create["path"], path);
+        assert_eq!(create["created"], true);
     }
 
-    let create = call_tool_json(
+    let project_list = call_tool_json(
         &client,
-        "vault_create_overwrite_file",
-        json!({
-            "path": "e2e-test/note.md",
-            "content": "# E2E Test\nHello world.",
-        }),
+        "vault_list",
+        json!({"path": "projects", "depth": 1}),
     )
     .await?;
-    assert_eq!(create["path"], "e2e-test/note.md");
-    assert_eq!(create["created"], true);
+    assert!(
+        project_list["total"].as_u64().unwrap_or_default() >= 2,
+        "projects listing should include at least alpha and beta: {project_list}"
+    );
+    let project_list_paths = json_result_paths(&project_list, "items")?;
+    assert!(
+        project_list_paths.contains("projects/alpha.md")
+            && project_list_paths.contains("projects/beta.md"),
+        "projects listing did not include seeded project notes: {project_list}"
+    );
 
-    let read = call_tool_json(&client, "vault_read", json!({"path": "e2e-test/note.md"})).await?;
+    let filtered_project_list = call_tool_json(
+        &client,
+        "vault_list",
+        json!({"path": "projects", "depth": 1, "pattern": "*.md"}),
+    )
+    .await?;
+    let filtered_project_paths = json_result_paths(&filtered_project_list, "items")?;
+    assert!(
+        filtered_project_paths.contains("projects/alpha.md")
+            && filtered_project_paths.contains("projects/beta.md"),
+        "filtered projects listing did not include seeded markdown notes: {filtered_project_list}"
+    );
+
+    let read = call_tool_json(
+        &client,
+        "vault_read",
+        json!({"path": "projects/alpha.md", "numbered": true}),
+    )
+    .await?;
     assert!(
         read["content"]
             .as_str()
             .unwrap_or_default()
-            .contains("Hello world"),
-        "read content did not contain created text: {read}"
+            .contains("Alpha kickoff details."),
+        "read content did not contain seeded alpha text: {read}"
     );
+    let alpha_content_hash = json_string_field(&read, "content_hash")?;
 
     let update = call_tool_json(
         &client,
         "vault_apply_unified_diff",
         json!({
-            "path": "e2e-test/note.md",
-            "diff": "@@ -2,1 +2,1 @@\n-Hello world.\n+Hello updated world.",
+            "path": "projects/alpha.md",
+            "diff": "@@ -7,1 +7,1 @@\n-Alpha kickoff details.\n+Alpha kickoff details with revised milestones.",
+            "expected_hash": alpha_content_hash,
         }),
     )
     .await?;
-    assert_eq!(update["applied"], true);
+    assert_eq!(update["applied"], true, "diff should apply: {update}");
 
-    let reread = call_tool_json(&client, "vault_read", json!({"path": "e2e-test/note.md"})).await?;
+    let reread =
+        call_tool_json(&client, "vault_read", json!({"path": "projects/alpha.md"})).await?;
     assert!(
         reread["content"]
             .as_str()
             .unwrap_or_default()
-            .contains("Hello updated world"),
-        "read content did not contain updated text: {reread}"
+            .contains("Alpha kickoff details with revised milestones."),
+        "read content did not contain updated alpha text: {reread}"
     );
+
+    let batch_read = call_tool_json(
+        &client,
+        "vault_batch_read",
+        json!({
+            "paths": [
+                "projects/alpha.md",
+                "projects/beta.md",
+                "does/not/exist.md"
+            ]
+        }),
+    )
+    .await?;
+    assert_eq!(batch_read["found"], 2);
+    assert_eq!(batch_read["missing"], 1);
+    let alpha_batch_entry = json_array_field(&batch_read, "files")?
+        .iter()
+        .find(|entry| entry["path"] == "projects/alpha.md")
+        .ok_or_else(|| io::Error::other(format!("batch read missed alpha entry: {batch_read}")))?;
+    assert!(
+        alpha_batch_entry["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Alpha kickoff details with revised milestones."),
+        "batch read alpha content did not reflect diff edit: {batch_read}"
+    );
+
+    let frontmatter_update = call_tool_json(
+        &client,
+        "vault_batch_frontmatter_update",
+        json!({
+            "updates": [
+                {"path": "projects/alpha.md", "fields": {"status": "active"}},
+                {"path": "projects/beta.md", "fields": {"status": "active"}}
+            ]
+        }),
+    )
+    .await?;
+    for result in json_array_field(&frontmatter_update, "results")? {
+        assert_eq!(
+            result["updated"], true,
+            "frontmatter update entry should be updated: {frontmatter_update}"
+        );
+    }
+
+    let expected_active_paths = BTreeSet::from([
+        "projects/alpha.md".to_string(),
+        "projects/beta.md".to_string(),
+    ]);
+    let active_paths = wait_for_frontmatter_paths(
+        &client,
+        json!({
+            "field": "status",
+            "value": "active",
+            "path_prefix": "projects/",
+            "max_results": 5
+        }),
+        expected_active_paths.clone(),
+    )
+    .await?;
+    assert_eq!(active_paths, expected_active_paths);
 
     let search = call_tool_json(
         &client,
         "vault_search",
-        json!({"query": "updated world", "max_results": 5}),
+        json!({"query": "revised milestones", "max_results": 5}),
     )
     .await?;
     let search_text = serde_json::to_string(&search)?;
     assert!(
-        search_text.contains("e2e-test/note.md"),
-        "search result did not reference test note: {search_text}"
+        search_text.contains("projects/alpha.md"),
+        "search result did not reference alpha note: {search_text}"
+    );
+
+    let move_result = call_tool_json(
+        &client,
+        "vault_move",
+        json!({"source": "projects/beta.md", "destination": "archive/beta.md"}),
+    )
+    .await?;
+    assert_eq!(move_result["moved"], true);
+
+    let moved_old_read =
+        call_tool_json(&client, "vault_read", json!({"path": "projects/beta.md"})).await?;
+    assert!(
+        moved_old_read.get("error").is_some(),
+        "read of moved source path should return an error payload: {moved_old_read}"
+    );
+
+    let moved_new_read =
+        call_tool_json(&client, "vault_read", json!({"path": "archive/beta.md"})).await?;
+    assert!(
+        moved_new_read["content"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("# Beta"),
+        "read of moved destination path should return beta note content: {moved_new_read}"
     );
 
     let delete = call_tool_json(
         &client,
         "vault_delete",
-        json!({"path": "e2e-test/note.md", "confirm": true}),
+        json!({"path": "projects/alpha.md", "confirm": true}),
     )
     .await?;
     assert_eq!(delete["deleted"], true);
 
     let deleted_read =
-        call_tool_json(&client, "vault_read", json!({"path": "e2e-test/note.md"})).await?;
+        call_tool_json(&client, "vault_read", json!({"path": "projects/alpha.md"})).await?;
     assert!(
         deleted_read.get("error").is_some(),
         "post-delete read should return an error payload: {deleted_read}"
@@ -325,6 +468,32 @@ async fn connect_local_mcp(
     Ok(client_info.serve(transport).await?)
 }
 
+async fn wait_for_frontmatter_paths(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
+    arguments: Value,
+    expected_paths: BTreeSet<String>,
+) -> Result<BTreeSet<String>, Box<dyn std::error::Error>> {
+    let deadline = Instant::now() + Duration::from_secs(12);
+    let mut last_result = Value::Null;
+
+    while Instant::now() < deadline {
+        let result = call_tool_json(client, "vault_search_frontmatter", arguments.clone()).await?;
+        let paths = json_result_paths(&result, "results")?;
+        if paths == expected_paths && result["total"].as_u64() == Some(expected_paths.len() as u64)
+        {
+            return Ok(paths);
+        }
+
+        last_result = result;
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+
+    Err(io::Error::other(format!(
+        "frontmatter search did not return expected paths {expected_paths:?}; last result: {last_result}"
+    ))
+    .into())
+}
+
 async fn call_tool_json(
     client: &rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
     name: &'static str,
@@ -342,6 +511,35 @@ async fn call_tool_json(
         "tool {name} returned MCP error result: {result:?}"
     );
     Ok(tool_result_json(&result)?)
+}
+
+fn json_array_field<'a>(
+    value: &'a Value,
+    field: &str,
+) -> Result<&'a Vec<Value>, Box<dyn std::error::Error>> {
+    value.get(field).and_then(Value::as_array).ok_or_else(|| {
+        io::Error::other(format!("tool result missing array field {field}: {value}")).into()
+    })
+}
+
+fn json_result_paths(
+    value: &Value,
+    field: &str,
+) -> Result<BTreeSet<String>, Box<dyn std::error::Error>> {
+    Ok(json_array_field(value, field)?
+        .iter()
+        .filter_map(|item| item.get("path").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect())
+}
+
+fn json_string_field<'a>(
+    value: &'a Value,
+    field: &str,
+) -> Result<&'a str, Box<dyn std::error::Error>> {
+    value.get(field).and_then(Value::as_str).ok_or_else(|| {
+        io::Error::other(format!("tool result missing string field {field}: {value}")).into()
+    })
 }
 
 fn tool_result_json(result: &CallToolResult) -> Result<Value, Box<dyn std::error::Error>> {

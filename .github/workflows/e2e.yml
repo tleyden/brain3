@@ -4,12 +4,18 @@ on:
   push:
     tags:
       - "v*"
+  pull_request:
+    branches:
+      - main
+    types:
+      - labeled
 
 permissions: read-all
 
 jobs:
   e2e-docker-linux:
     name: E2E smoke - Docker / Linux
+    if: github.event_name == 'push' || github.event.label.name == 'run-e2e-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
