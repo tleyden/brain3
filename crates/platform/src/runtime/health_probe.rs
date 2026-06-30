@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::time::{Duration, Instant};
 
-const PROBE_TOTAL_TIMEOUT: Duration = Duration::from_secs(5);
+const PROBE_TOTAL_TIMEOUT: Duration = Duration::from_secs(30);
 const PROBE_MAX_ATTEMPTS: u32 = 7;
 
 /// Calls `vault_list` directly on the MCP upstream to verify end-to-end connectivity,
@@ -281,11 +281,17 @@ fn error_source_chain(error: &reqwest::Error) -> String {
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::time::Duration;
 
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    use super::probe_mcp_vault_list;
+    use super::{probe_mcp_vault_list, PROBE_TOTAL_TIMEOUT};
+
+    #[test]
+    fn mcp_health_probe_has_headroom_for_large_vault_first_rpc() {
+        assert_eq!(PROBE_TOTAL_TIMEOUT, Duration::from_secs(30));
+    }
 
     #[tokio::test]
     async fn probe_retries_transient_transport_failures_until_success() {
