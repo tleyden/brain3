@@ -216,6 +216,7 @@ async fn e2e_smoke_local_docker() -> Result<(), Box<dyn std::error::Error>> {
     temp.write_env_file()?;
 
     let gateway = Brain3Process::spawn(&temp).await?;
+    assert_container_running_and_vault_visible().await?;
     let client = connect_local_mcp().await?;
 
     let tools = client.list_tools(Default::default()).await?;
@@ -446,6 +447,7 @@ async fn e2e_smoke_local_docker() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     client.cancel().await?;
+    dump_container_diagnostics("before gateway shutdown and residue assertion").await;
     drop(gateway);
     assert_no_container_residue().await?;
     Ok(())
@@ -487,6 +489,10 @@ async fn wait_for_frontmatter_paths(
         last_result = result;
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
+
+    dump_frontmatter_failure_diagnostics(client).await;
+    dump_container_file_diagnostics("/vault/projects/alpha.md").await;
+    dump_container_diagnostics("frontmatter search failure").await;
 
     Err(io::Error::other(format!(
         "frontmatter search did not return expected paths {expected_paths:?}; last result: {last_result}"
@@ -577,4 +583,111 @@ async fn assert_no_container_residue() -> Result<(), Box<dyn std::error::Error>>
     }
 
     Err(format!("managed MCP container residue remained after shutdown: {last_output}").into())
+}
+
+async fn assert_container_running_and_vault_visible() -> Result<(), Box<dyn std::error::Error>> {
+    let running = Command::new("docker")
+        .args(["inspect", "--format", "{{.State.Running}}", CONTAINER_NAME])
+        .output()?;
+    let stdout = String::from_utf8_lossy(&running.stdout).trim().to_string();
+    if !running.status.success() || stdout != "true" {
+        dump_command_output(
+            "docker inspect running state",
+            &running,
+            Some(format!("expected running=true for {CONTAINER_NAME}")),
+        );
+        dump_container_diagnostics("container not running during pre-test validation").await;
+        return Err(format!("MCP container {CONTAINER_NAME} is not running").into());
+    }
+
+    let vault_listing = Command::new("docker")
+        .args(["exec", CONTAINER_NAME, "ls", "-la", "/vault"])
+        .output()?;
+    dump_command_output("docker exec ls -la /vault", &vault_listing, None);
+    if !vault_listing.status.success() {
+        dump_container_diagnostics("vault mount pre-test validation failed").await;
+        return Err("MCP container /vault mount was not visible from inside container".into());
+    }
+
+    Ok(())
+}
+
+async fn dump_frontmatter_failure_diagnostics(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
+) {
+    println!("=== E2E diagnostic: MCP vault_read projects/alpha.md ===");
+    match call_tool_json(client, "vault_read", json!({"path": "projects/alpha.md"})).await {
+        Ok(value) => println!("{value}"),
+        Err(error) => println!("vault_read diagnostic failed: {error}"),
+    }
+}
+
+async fn dump_container_file_diagnostics(path: &str) {
+    let cat = Command::new("docker")
+        .args(["exec", CONTAINER_NAME, "cat", path])
+        .output();
+    match cat {
+        Ok(output) => dump_command_output(&format!("docker exec cat {path}"), &output, None),
+        Err(error) => println!("docker exec cat {path} failed to start: {error}"),
+    }
+
+    let stat = Command::new("docker")
+        .args(["exec", CONTAINER_NAME, "stat", path])
+        .output();
+    match stat {
+        Ok(output) => dump_command_output(&format!("docker exec stat {path}"), &output, None),
+        Err(error) => println!("docker exec stat {path} failed to start: {error}"),
+    }
+}
+
+async fn dump_container_diagnostics(context: &str) {
+    println!("=== E2E diagnostic: container diagnostics ({context}) ===");
+
+    for (label, mut command) in [
+        ("docker logs brain3-mcp-vault-tools", {
+            let mut command = Command::new("docker");
+            command.args(["logs", CONTAINER_NAME]);
+            command
+        }),
+        ("docker inspect brain3-mcp-vault-tools", {
+            let mut command = Command::new("docker");
+            command.args([
+                "inspect",
+                "--format",
+                "name={{.Name}} image={{.Config.Image}} state={{json .State}} driver={{.Driver}} mounts={{json .Mounts}} network_mode={{.HostConfig.NetworkMode}} ports={{json .NetworkSettings.Ports}}",
+                CONTAINER_NAME,
+            ]);
+            command
+        }),
+        ("docker info storage driver", {
+            let mut command = Command::new("docker");
+            command.args(["info", "--format", "Storage Driver: {{.Driver}}"]);
+            command
+        }),
+    ] {
+        match command.output() {
+            Ok(output) => dump_command_output(label, &output, None),
+            Err(error) => println!("{label} failed to start: {error}"),
+        }
+    }
+}
+
+fn dump_command_output(label: &str, output: &std::process::Output, note: Option<String>) {
+    println!("--- {label} ---");
+    if let Some(note) = note {
+        println!("{note}");
+    }
+    println!("status: {}", output.status);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    if stdout.is_empty() {
+        println!("stdout: <empty>");
+    } else {
+        println!("stdout:\n{stdout}");
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if stderr.is_empty() {
+        println!("stderr: <empty>");
+    } else {
+        println!("stderr:\n{stderr}");
+    }
 }

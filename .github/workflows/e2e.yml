@@ -39,3 +39,10 @@ jobs:
       - name: Run E2E smoke tests
         run: uv run scripts/e2e_smoke.py
         timeout-minutes: 15
+
+      - name: Dump MCP container diagnostics
+        if: always()
+        run: |
+          docker logs brain3-mcp-vault-tools || true
+          docker inspect --format 'name={{.Name}} image={{.Config.Image}} state={{json .State}} driver={{.Driver}} mounts={{json .Mounts}} network_mode={{.HostConfig.NetworkMode}} ports={{json .NetworkSettings.Ports}}' brain3-mcp-vault-tools || true
+          docker info | grep -i 'storage driver' || true
