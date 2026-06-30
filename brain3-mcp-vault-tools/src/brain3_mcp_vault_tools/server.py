@@ -15,10 +15,11 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .config import (
-    VAULT_MCP_ALLOW_SELF_IP_HOSTS,
+    ENABLE_SYNC_REINDEX_TOOL,
     UPSTREAM_SHARED_SECRET,
     UPSTREAM_SHARED_SECRET_FILE,
     UPSTREAM_SHARED_SECRET_HEADER,
+    VAULT_MCP_ALLOW_SELF_IP_HOSTS,
     VAULT_MCP_EXTRA_ALLOWED_HOSTS,
     VAULT_MCP_HOST,
     VAULT_MCP_LOG_LEVEL,
@@ -73,7 +74,7 @@ def _resolve_log_level(name: str) -> int:
     return _LOG_LEVELS.get(name.strip().upper(), logging.INFO)
 
 
-frontmatter_index = FrontmatterIndex()
+frontmatter_index = FrontmatterIndex(enable_sync_mode=ENABLE_SYNC_REINDEX_TOOL)
 DEFAULT_ALLOWED_HOSTS = [
     "127.0.0.1:*",
     "localhost:*",
@@ -101,9 +102,7 @@ def _discover_self_ips() -> list[str]:
     try:
         addrinfos = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
     except OSError as exc:
-        logger.warning(
-            "Unable to resolve self IPs from hostname=%s: %s", hostname, exc
-        )
+        logger.warning("Unable to resolve self IPs from hostname=%s: %s", hostname, exc)
         return []
 
     ips: list[str] = []
@@ -121,9 +120,7 @@ def _discover_self_ips() -> list[str]:
 
 
 def _resolve_allowed_hosts() -> tuple[list[str], list[str]]:
-    detected_self_ips = (
-        _discover_self_ips() if VAULT_MCP_ALLOW_SELF_IP_HOSTS else []
-    )
+    detected_self_ips = _discover_self_ips() if VAULT_MCP_ALLOW_SELF_IP_HOSTS else []
     allowed_hosts = (
         DEFAULT_ALLOWED_HOSTS
         + VAULT_MCP_EXTRA_ALLOWED_HOSTS
@@ -280,7 +277,9 @@ class InboundRequestLoggingMiddleware:
                         scope.get("method", "<unknown>"),
                         path,
                         response_status,
-                        b"".join(response_body_chunks).decode("utf-8", errors="replace"),
+                        b"".join(response_body_chunks).decode(
+                            "utf-8", errors="replace"
+                        ),
                     )
             await send(message)
 
@@ -518,6 +517,36 @@ def vault_search_frontmatter(
     return _vault_search_frontmatter(
         inp.field, inp.value, inp.match_type, inp.path_prefix, inp.max_results
     )
+
+
+# Conditional tool: only available when BRAIN3_ENABLE_SYNC_REINDEX_TOOL=true
+if ENABLE_SYNC_REINDEX_TOOL:
+
+    @mcp.tool(
+        name="vault_reindex_frontmatter_sync",
+        description="Synchronously rebuild the frontmatter index by scanning all .md files. "
+        "This tool is mainly for testing when async file watching is disabled. "
+        "Returns stats about the number of files indexed.",
+        annotations={
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    )
+    def vault_reindex_frontmatter_sync() -> str:
+        import json
+
+        stats = frontmatter_index.rebuild()
+        return json.dumps(
+            {
+                "reindexed": True,
+                "file_count": stats["file_count"],
+                "elapsed_seconds": stats["elapsed_seconds"],
+                "sample_keys": stats["sample_keys"],
+            },
+            indent=2,
+        )
 
 
 @mcp.tool(

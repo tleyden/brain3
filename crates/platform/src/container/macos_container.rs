@@ -32,7 +32,10 @@ fn macos_network_entry_is_compatible(entry: &Value) -> bool {
         return false;
     };
 
-    if value_bool(config, &["internal", "Internal", "isInternal", "IsInternal"]) {
+    if value_bool(
+        config,
+        &["internal", "Internal", "isInternal", "IsInternal"],
+    ) {
         return true;
     }
 
@@ -44,16 +47,18 @@ fn macos_network_entry_is_compatible(entry: &Value) -> bool {
     let plugin = config
         .get("pluginInfo")
         .or_else(|| config.get("PluginInfo"))
-        .and_then(|plugin_info| plugin_info.get("plugin").or_else(|| plugin_info.get("Plugin")))
+        .and_then(|plugin_info| {
+            plugin_info
+                .get("plugin")
+                .or_else(|| plugin_info.get("Plugin"))
+        })
         .and_then(Value::as_str)
         .unwrap_or_default();
 
     mode.eq_ignore_ascii_case("hostOnly") && plugin == "container-network-vmnet"
 }
 
-fn parse_macos_network_inspect_state(
-    output: &str,
-) -> Result<InternalNetworkState, ContainerError> {
+fn parse_macos_network_inspect_state(output: &str) -> Result<InternalNetworkState, ContainerError> {
     let value: Value = serde_json::from_str(output).map_err(|error| {
         ContainerError::Other(format!(
             "failed to parse macOS container network inspect output: {error}"

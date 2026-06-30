@@ -22,7 +22,9 @@ use brain3_core::domain::setup::{
 use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
-use brain3_platform::runtime::{bootstrap_configured_runtime, named_tunnel_setup_config};
+use brain3_platform::runtime::{
+    bootstrap_configured_runtime, diagnostics, named_tunnel_setup_config,
+};
 use brain3_platform::setup::app_home::Brain3AppHome;
 use brain3_platform::setup::PlatformSetupSystem;
 
@@ -654,6 +656,9 @@ async fn run_cli_mode(
             "tunnel failed to start; continuing with local gateway only"
         );
     }
+
+    let _diag_listener =
+        diagnostics::spawn_diagnostics_signal_listener(Arc::clone(&runtime.config));
 
     server::run_gateway_server_until(
         host,

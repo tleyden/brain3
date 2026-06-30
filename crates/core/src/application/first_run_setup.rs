@@ -599,6 +599,7 @@ mod tests {
                     ),
                     dev_mount_source: None,
                     mcp_log_level: None,
+                    enable_sync_reindex_tool: false,
                 }),
                 tunnel: Some(crate::domain::model::TunnelConfig::CloudflareQuick {
                     local_port: 9421,
