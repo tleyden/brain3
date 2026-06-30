@@ -158,6 +158,9 @@ fn build_container_config(
     if let Some(ref level) = startup.mcp_log_level {
         env_vars.push(("B3_VAULT_MCP_LOG_LEVEL".into(), level.clone()));
     }
+    if startup.enable_sync_reindex_tool {
+        env_vars.push(("BRAIN3_ENABLE_SYNC_REINDEX_TOOL".into(), "true".into()));
+    }
 
     let mut bind_mounts = vec![BindMount {
         host_path: startup.vault_path.clone(),
@@ -540,6 +543,7 @@ mod tests {
             isolation_strategy: Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp),
             dev_mount_source: None,
             mcp_log_level: None,
+            enable_sync_reindex_tool: false,
         }
     }
 

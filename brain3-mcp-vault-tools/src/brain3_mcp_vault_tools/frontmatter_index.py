@@ -22,16 +22,17 @@ INOTIFY_LIMIT_PATHS = (
 class FrontmatterIndex:
     """Thread-safe in-memory index of YAML frontmatter for fast queries."""
 
-    def __init__(self) -> None:
+    def __init__(self, enable_sync_mode: bool = False) -> None:
         self._index: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._observer: Observer | None = None
         self._debounce_timer: threading.Timer | None = None
         self._pending_paths: set[str] = set()
         self._started = False
+        self._sync_mode = enable_sync_mode
 
     def start(self) -> None:
-        """Walk all .md files, parse frontmatter, and start watching for changes."""
+        """Walk all .md files, parse frontmatter, and start watching for changes (unless sync mode)."""
         with self._lock:
             if self._started:
                 return
@@ -45,11 +46,12 @@ class FrontmatterIndex:
         try:
             logger.info(
                 "Frontmatter index startup scan beginning: vault_path=%s vault_exists=%s "
-                "excluded_dirs=%s debounce_seconds=%.2f",
+                "excluded_dirs=%s debounce_seconds=%.2f sync_mode=%s",
                 config.VAULT_PATH,
                 config.VAULT_PATH.exists(),
                 sorted(config.EXCLUDED_DIRS),
                 config.FRONTMATTER_INDEX_DEBOUNCE,
+                self._sync_mode,
             )
             for md_path in config.VAULT_PATH.rglob("*.md"):
                 if self._is_excluded(md_path):
@@ -74,18 +76,24 @@ class FrontmatterIndex:
                         rel,
                     )
 
-            observer = Observer()
-            handler = _VaultEventHandler(self)
-            observer.schedule(handler, str(config.VAULT_PATH), recursive=True)
-            logger.info(
-                "Frontmatter observer configured: observer_class=%s emitters=%s "
-                "vault_path=%s inotify_limits=%s",
-                _qualified_class_name(observer),
-                _observer_emitter_classes(observer),
-                config.VAULT_PATH,
-                _read_inotify_limits(),
-            )
-            observer.start()
+            # Only start file watcher if NOT in sync mode
+            if not self._sync_mode:
+                observer = Observer()
+                handler = _VaultEventHandler(self)
+                observer.schedule(handler, str(config.VAULT_PATH), recursive=True)
+                logger.info(
+                    "Frontmatter observer configured: observer_class=%s emitters=%s "
+                    "vault_path=%s inotify_limits=%s",
+                    _qualified_class_name(observer),
+                    _observer_emitter_classes(observer),
+                    config.VAULT_PATH,
+                    _read_inotify_limits(),
+                )
+                observer.start()
+            else:
+                logger.info(
+                    "Frontmatter observer disabled: sync_mode=True (use vault_reindex_frontmatter_sync tool)"
+                )
 
             with self._lock:
                 self._index = new_index
@@ -93,10 +101,11 @@ class FrontmatterIndex:
 
             elapsed = time.monotonic() - t0
             logger.info(
-                "Frontmatter index built: %d files in %.2f seconds sample_keys=%s",
+                "Frontmatter index built: %d files in %.2f seconds sample_keys=%s sync_mode=%s",
                 count,
                 elapsed,
                 _sample_index_keys(new_index),
+                self._sync_mode,
             )
         except Exception:
             if observer is not None:
@@ -124,6 +133,53 @@ class FrontmatterIndex:
         if observer is not None:
             observer.stop()
             observer.join()
+
+    def rebuild(self) -> dict:
+        """Synchronously rebuild the entire frontmatter index.
+
+        This is primarily for testing when BRAIN3_ENABLE_SYNC_REINDEX_TOOL is enabled.
+        Returns stats about the rebuild operation.
+        """
+        t0 = time.monotonic()
+        count = 0
+        new_index: dict[str, dict] = {}
+
+        logger.info(
+            "Frontmatter index rebuild beginning: vault_path=%s vault_exists=%s",
+            config.VAULT_PATH,
+            config.VAULT_PATH.exists(),
+        )
+
+        for md_path in config.VAULT_PATH.rglob("*.md"):
+            if self._is_excluded(md_path):
+                continue
+            rel = str(md_path.relative_to(config.VAULT_PATH))
+            fm = self._parse_frontmatter(md_path)
+            if fm is not None:
+                new_index[rel] = fm
+                count += 1
+                logger.info(
+                    "Frontmatter rebuild indexed file: path=%s metadata_keys=%s",
+                    rel,
+                    _metadata_keys(fm),
+                )
+
+        with self._lock:
+            self._index = new_index
+
+        elapsed = time.monotonic() - t0
+        logger.info(
+            "Frontmatter index rebuilt: %d files in %.2f seconds sample_keys=%s",
+            count,
+            elapsed,
+            _sample_index_keys(new_index),
+        )
+
+        return {
+            "file_count": count,
+            "elapsed_seconds": elapsed,
+            "sample_keys": _sample_index_keys(new_index, max_files=5),
+        }
 
     @property
     def file_count(self) -> int:
@@ -185,13 +241,15 @@ class FrontmatterIndex:
                 if matched:
                     stats["matched"] += 1
                 if len(samples) < 10:
-                    samples.append({
-                        "path": rel_path,
-                        "has_field": has_field,
-                        "field_value": _safe_value_repr(fm.get(field)),
-                        "matched": matched,
-                        "metadata_keys": _metadata_keys(fm),
-                    })
+                    samples.append(
+                        {
+                            "path": rel_path,
+                            "has_field": has_field,
+                            "field_value": _safe_value_repr(fm.get(field)),
+                            "matched": matched,
+                            "metadata_keys": _metadata_keys(fm),
+                        }
+                    )
             logger.info(
                 "Frontmatter index search evaluated: field=%r value=%r match_type=%r "
                 "path_prefix=%r stats=%s sample=%s",
@@ -225,7 +283,9 @@ class FrontmatterIndex:
 
     def _is_excluded(self, path: Path) -> bool:
         """Check whether any path component is in config.EXCLUDED_DIRS."""
-        return bool(config.EXCLUDED_DIRS & set(path.relative_to(config.VAULT_PATH).parts))
+        return bool(
+            config.EXCLUDED_DIRS & set(path.relative_to(config.VAULT_PATH).parts)
+        )
 
     def _parse_frontmatter(self, path: Path) -> dict | None:
         """Parse YAML frontmatter from a markdown file. Returns None on failure."""

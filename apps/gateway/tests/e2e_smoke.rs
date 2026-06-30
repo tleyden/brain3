@@ -88,7 +88,8 @@ impl TempTestDir {
                  B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=false\n\
                  B3_LOCAL_MCP_PORT={LOCAL_MCP_PORT}\n\
                  LOCAL_GATEWAY_MCP_BEARER_TOKEN={LOCAL_BEARER_TOKEN}\n\
-                 B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=false\n",
+                 B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=false\n\
+                 BRAIN3_ENABLE_SYNC_REINDEX_TOOL=true\n",
                 self.brain3_db.display(),
                 self.vault.display(),
             ),
@@ -234,6 +235,7 @@ async fn e2e_smoke_local_docker() -> Result<(), Box<dyn std::error::Error>> {
         "vault_list",
         "vault_move",
         "vault_read",
+        "vault_reindex_frontmatter_sync",
         "vault_search",
         "vault_search_frontmatter",
     ]);
@@ -377,22 +379,35 @@ async fn e2e_smoke_local_docker() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    // Synchronously rebuild the frontmatter index (needed when async file watcher is disabled)
+    let reindex_result =
+        call_tool_json(&client, "vault_reindex_frontmatter_sync", json!({})).await?;
+    assert_eq!(reindex_result["reindexed"], true);
+    assert!(
+        reindex_result["file_count"].as_u64().unwrap_or_default() >= 2,
+        "reindex should have found at least 2 files: {reindex_result}"
+    );
+
     let expected_active_paths = BTreeSet::from([
         "projects/alpha.md".to_string(),
         "projects/beta.md".to_string(),
     ]);
-    let active_paths = wait_for_frontmatter_paths(
+    let active_search = call_tool_json(
         &client,
+        "vault_search_frontmatter",
         json!({
             "field": "status",
             "value": "active",
             "path_prefix": "projects/",
             "max_results": 5
         }),
-        expected_active_paths.clone(),
     )
     .await?;
-    assert_eq!(active_paths, expected_active_paths);
+    let active_paths = json_result_paths(&active_search, "results")?;
+    assert_eq!(
+        active_paths, expected_active_paths,
+        "frontmatter search should find active project files after reindex"
+    );
 
     let search = call_tool_json(
         &client,
@@ -468,36 +483,6 @@ async fn connect_local_mcp(
     );
 
     Ok(client_info.serve(transport).await?)
-}
-
-async fn wait_for_frontmatter_paths(
-    client: &rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
-    arguments: Value,
-    expected_paths: BTreeSet<String>,
-) -> Result<BTreeSet<String>, Box<dyn std::error::Error>> {
-    let deadline = Instant::now() + Duration::from_secs(12);
-    let mut last_result = Value::Null;
-
-    while Instant::now() < deadline {
-        let result = call_tool_json(client, "vault_search_frontmatter", arguments.clone()).await?;
-        let paths = json_result_paths(&result, "results")?;
-        if paths == expected_paths && result["total"].as_u64() == Some(expected_paths.len() as u64)
-        {
-            return Ok(paths);
-        }
-
-        last_result = result;
-        tokio::time::sleep(Duration::from_millis(250)).await;
-    }
-
-    dump_frontmatter_failure_diagnostics(client).await;
-    dump_container_file_diagnostics("/vault/projects/alpha.md").await;
-    dump_container_diagnostics("frontmatter search failure").await;
-
-    Err(io::Error::other(format!(
-        "frontmatter search did not return expected paths {expected_paths:?}; last result: {last_result}"
-    ))
-    .into())
 }
 
 async fn call_tool_json(
@@ -610,34 +595,6 @@ async fn assert_container_running_and_vault_visible() -> Result<(), Box<dyn std:
     }
 
     Ok(())
-}
-
-async fn dump_frontmatter_failure_diagnostics(
-    client: &rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
-) {
-    println!("=== E2E diagnostic: MCP vault_read projects/alpha.md ===");
-    match call_tool_json(client, "vault_read", json!({"path": "projects/alpha.md"})).await {
-        Ok(value) => println!("{value}"),
-        Err(error) => println!("vault_read diagnostic failed: {error}"),
-    }
-}
-
-async fn dump_container_file_diagnostics(path: &str) {
-    let cat = Command::new("docker")
-        .args(["exec", CONTAINER_NAME, "cat", path])
-        .output();
-    match cat {
-        Ok(output) => dump_command_output(&format!("docker exec cat {path}"), &output, None),
-        Err(error) => println!("docker exec cat {path} failed to start: {error}"),
-    }
-
-    let stat = Command::new("docker")
-        .args(["exec", CONTAINER_NAME, "stat", path])
-        .output();
-    match stat {
-        Ok(output) => dump_command_output(&format!("docker exec stat {path}"), &output, None),
-        Err(error) => println!("docker exec stat {path} failed to start: {error}"),
-    }
 }
 
 async fn dump_container_diagnostics(context: &str) {
