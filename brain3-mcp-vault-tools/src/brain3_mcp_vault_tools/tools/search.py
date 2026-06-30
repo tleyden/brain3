@@ -54,8 +54,11 @@ def _display_path(path: Path) -> str:
         return str(path)
 
 
-def _resolve_case_insensitive_search_dirs(path_prefix: str | None) -> list[Path]:
-    """Resolve all vault directories matching a path prefix case-insensitively."""
+def _resolve_prefix_search_dirs(path_prefix: str | None) -> list[Path]:
+    """Resolve vault directories whose names start with each component of
+    ``path_prefix`` (case-insensitively). A prefix of ``"plan"`` therefore
+    matches ``plan/``, ``Planning/``, ``plans/``, etc. Results are always
+    contained within the vault root."""
     if not path_prefix:
         return [config.VAULT_PATH]
 
@@ -266,7 +269,7 @@ def vault_search(
 ) -> str:
     """Search for text across vault files."""
     try:
-        search_paths = _resolve_case_insensitive_search_dirs(path_prefix)
+        search_paths = _resolve_prefix_search_dirs(path_prefix)
 
         if not search_paths:
             logger.error(

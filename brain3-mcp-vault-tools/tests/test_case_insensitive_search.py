@@ -20,7 +20,10 @@ MODULE_PREFIXES = (
 
 def import_server_module():
     for module_name in tuple(sys.modules):
-        if module_name in MODULE_PREFIXES:
+        if any(
+            module_name == p or module_name.startswith(p + ".")
+            for p in MODULE_PREFIXES
+        ):
             sys.modules.pop(module_name, None)
     return importlib.import_module("brain3_mcp_vault_tools.server")
 
