@@ -34,6 +34,14 @@ VERSION="${2:-$(git describe --tags --exact-match 2>/dev/null || echo "dev")}"
 TARBALLS_DIR="${3:-.}"
 
 AWS_REGION="${AWS_REGION:-us-east-1}"
+BRAIN3_UPDATE_LATEST="${BRAIN3_UPDATE_LATEST:-true}"
+case "$BRAIN3_UPDATE_LATEST" in
+  true|false) ;;
+  *)
+    echo "Error: BRAIN3_UPDATE_LATEST must be true or false, got: $BRAIN3_UPDATE_LATEST" >&2
+    exit 1
+    ;;
+esac
 
 if ! command -v aws >/dev/null 2>&1; then
   echo "Error: aws CLI not found. Install it from https://docs.aws.amazon.com/cli/latest/userguide/install-cliv2.html" >&2
@@ -58,7 +66,9 @@ upload_required_metadata() {
   fi
 
   upload_file "$src" "releases/$VERSION/$name"
-  upload_file "$src" "releases/latest/$name"
+  if [ "$BRAIN3_UPDATE_LATEST" = "true" ]; then
+    upload_file "$src" "releases/latest/$name"
+  fi
 }
 
 echo "Uploading $BINARY $VERSION to s3://$BUCKET"
@@ -75,7 +85,9 @@ for TARGET in "${TARGETS[@]}"; do
 
   echo "[$TARGET]"
   upload_file "$SRC" "releases/$VERSION/$TARBALL"
-  upload_file "$SRC" "releases/latest/$TARBALL"
+  if [ "$BRAIN3_UPDATE_LATEST" = "true" ]; then
+    upload_file "$SRC" "releases/latest/$TARBALL"
+  fi
 done
 
 echo "[release metadata]"
@@ -88,11 +100,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/install.sh" ]; then
   echo "[install.sh]"
 
-  # latest copy: always points at releases/latest
-  STAMPED_LATEST="$(mktemp)"
-  sed "s|__BUCKET__|$BUCKET|g" "$SCRIPT_DIR/install.sh" > "$STAMPED_LATEST"
-  aws s3 cp "$STAMPED_LATEST" "s3://$BUCKET/releases/latest/install.sh" --region "$AWS_REGION"
-  rm -f "$STAMPED_LATEST"
+  if [ "$BRAIN3_UPDATE_LATEST" = "true" ]; then
+    STAMPED_LATEST="$(mktemp)"
+    sed "s|__BUCKET__|$BUCKET|g" "$SCRIPT_DIR/install.sh" > "$STAMPED_LATEST"
+    aws s3 cp "$STAMPED_LATEST" "s3://$BUCKET/releases/latest/install.sh" --region "$AWS_REGION"
+    rm -f "$STAMPED_LATEST"
+  fi
 
   # versioned copy: points at releases/$VERSION so pinned installs stay pinned
   STAMPED_VERSIONED="$(mktemp)"
@@ -105,4 +118,8 @@ fi
 
 echo ""
 echo "Done. One-line install command:"
-echo "  curl -sSfL https://$BUCKET.s3.amazonaws.com/releases/latest/install.sh | sh"
+if [ "$BRAIN3_UPDATE_LATEST" = "true" ]; then
+  echo "  curl -sSfL https://$BUCKET.s3.amazonaws.com/releases/latest/install.sh | sh"
+else
+  echo "  curl -sSfL https://$BUCKET.s3.amazonaws.com/releases/$VERSION/install.sh | sh"
+fi
