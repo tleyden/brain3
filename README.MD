@@ -125,7 +125,7 @@ The vault path is the only required decision. The other steps have defaults you 
 |-----------|-----------|------------|
 | <img height="16" src="docs/logos/chatgpt.svg" alt="ChatGPT"> ChatGPT | ✅ (untested) | ✅ |
 | <img height="16" src="docs/logos/claude.svg" alt="Claude"> Claude | ✅ (untested) | ✅ |
-| <img height="16" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai | ✅ | ❌ |
+| <img height="16" src="docs/logos/jan.png" alt="Jan.ai"> Jan.ai | ✅ | ❌ (blocked on https://github.com/janhq/jan/issues/6353) |
 | <img height="16" src="docs/logos/goose_logo_light.png" alt="Goose"> Goose | ✅ | ❌ (blocked on https://github.com/aaif-goose/goose/issues/8918) |
 
 In the Brain3 TUI, press `c` to open **MCP Config Settings**.
