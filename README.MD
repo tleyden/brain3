@@ -95,7 +95,7 @@ sudo apt-get install cloudflared
 - Container runtime: [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)
 - Cloudflare Tunnel (optional, for remote MCP): install `cloudflared` manually with `winget`, Chocolatey, or the Cloudflare download page, and make sure it is on `PATH`
 
-Windows release artifacts are published for the `x86_64-pc-windows-msvc` target. First-run cloudflared auto-install is not implemented on Windows yet.
+Windows release artifacts are published for the `x86_64-pc-windows-msvc` target. Windows builds are available but have not been tested yet. First-run cloudflared auto-install is not implemented on Windows yet.
 
 ### Install and run Brain3
 
@@ -113,7 +113,7 @@ tar -xzf brain3-x86_64-pc-windows-msvc.tar.gz
 .\brain3.exe
 ```
 
-On macOS or Linux, now run it:
+Run `brain3`:
 
 ```bash
 brain3
@@ -406,7 +406,7 @@ Brain3 runs an MCP server on your own machine. It supports two access modes:
 - Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.
 - **Host validation rejects unexpected hostnames** (HTTP 421) when a public hostname is configured. NOTE: this only works with Cloudflare tunnels associated with a DNS record, which is the recommended configuration.
 - Constant-time comparison for secret and token value checks (secret *length* is not hidden — see [security audit](SECURITY_AUDIT.md) M-4).
-- `install.sh` verifies downloaded release tarballs against a signed checksum manifest before extraction.
+- The macOS/Linux `install.sh` verifies downloaded release tarballs against a signed checksum manifest before extraction.
 
 ### Miscellaneous
 
@@ -546,7 +546,7 @@ cargo test -p brain3 --test e2e_smoke --features e2e -- --nocapture
 <details>
 <summary><strong>Install a PR build</strong></summary>
 
-PR install scripts are published at `https://brain3.s3.amazonaws.com/pr/<PR_NUMBER>/install.sh` while the PR is open.
+PR build installer scripts are published at `https://brain3.s3.amazonaws.com/pr/<PR_NUMBER>/install.sh` while the PR is open. The script supports macOS and Linux.
 
 ```bash
 curl -sSfL https://brain3.s3.amazonaws.com/pr/123/install.sh | sh
