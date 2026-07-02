@@ -90,13 +90,30 @@ sudo apt-get install cloudflared
 ```
 </details>
 
+#### Windows
+
+- Container runtime: [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)
+- Cloudflare Tunnel (optional, for remote MCP): install `cloudflared` manually with `winget`, Chocolatey, or the Cloudflare download page, and make sure it is on `PATH`
+
+Windows release artifacts are published for the `x86_64-pc-windows-msvc` target. First-run cloudflared auto-install is not implemented on Windows yet.
+
 ### Install and run Brain3
+
+On macOS or Linux, install with:
 
 ```bash
 curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.2.9/install.sh | sh
 ```
 
-Now run it:
+For Windows, download and extract the Windows artifact:
+
+```powershell
+curl.exe -L -o brain3-x86_64-pc-windows-msvc.tar.gz https://brain3.s3.amazonaws.com/releases/latest/brain3-x86_64-pc-windows-msvc.tar.gz
+tar -xzf brain3-x86_64-pc-windows-msvc.tar.gz
+.\brain3.exe
+```
+
+On macOS or Linux, now run it:
 
 ```bash
 brain3

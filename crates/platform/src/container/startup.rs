@@ -136,9 +136,12 @@ fn build_container_config(
     startup: &ContainerStartupConfig,
     installation_id: &str,
 ) -> ContainerConfig {
-    let uid_gid = format!("{}:{}", unsafe { libc::getuid() }, unsafe {
+    #[cfg(unix)]
+    let user = Some(format!("{}:{}", unsafe { libc::getuid() }, unsafe {
         libc::getgid()
-    });
+    }));
+    #[cfg(not(unix))]
+    let user: Option<String> = None;
 
     let mut env_vars = vec![
         ("B3_VAULT_MCP_HOST".into(), "0.0.0.0".into()),
@@ -219,7 +222,7 @@ fn build_container_config(
         env_vars,
         labels: managed_container_labels(installation_id),
         bind_mounts,
-        user: Some(uid_gid),
+        user,
         detach: true,
         remove_on_exit: matches!(startup.runtime, ContainerRuntime::Docker),
         workdir,

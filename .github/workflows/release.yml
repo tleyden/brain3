@@ -11,6 +11,9 @@ jobs:
       contents: read
     name: Build ${{ matrix.display }}
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       matrix:
         include:
@@ -26,6 +29,9 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             display: macOS ARM64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            display: Windows x86_64
 
     steps:
       - uses: actions/checkout@v4
@@ -63,7 +69,15 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
-        run: tar -czf brain3-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release brain3
+        run: |
+          binary_name="brain3"
+          if [[ "${{ matrix.target }}" == *-windows-* ]]; then
+            binary_name="brain3.exe"
+          fi
+
+          tar -czf brain3-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release \
+            "$binary_name"
 
       - uses: actions/upload-artifact@v4
         with:
