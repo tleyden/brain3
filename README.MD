@@ -108,6 +108,15 @@ It should launch an interactive setup wizard.
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
 
+#### What the setup wizard will ask
+
+The vault path is the only required decision. The other steps have defaults you can keep unless your setup needs something different; see the [Configuration Reference](#configuration-reference) for the full list.
+
+- **Vault Path** — enter the absolute path to your Obsidian vault. It must already exist.
+- **Local/Remote Access** — choose Local MCP only, Remote MCP only, or Both.
+- **Auth Setup** — choose the username (`admin`) and client ID (`brain3-oauth2-client`). The password is auto-generated; press `g` to enter a custom one.
+- **Network Security** — review ports, container name, and token lifetimes. Leave these defaults alone unless your setup requires otherwise.
+
 ### Configure your AI 
 
 #### Compatibility Matrix
