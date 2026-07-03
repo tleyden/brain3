@@ -9,7 +9,7 @@ The `audio_mcp_experiment` branch added `save_audio_file` as a container-side MC
 
 So we need a way to run certain MCP tools **natively in the gateway process** (host Rust binary, not the container), while the container remains the default home for everything else. This is the first of what will eventually be several native tools, so the plugin surface should be intentionally minimal but not a dead end.
 
-**Important constraint discovered while reviewing the code:** the container filesystem is *not* shared with the host. The only bind mount today is the vault path (`B3_VAULT_PATH` → `/vault`; see `crates/platform/src/container/startup.rs:152,168`). That means a file downloaded *inside the container* is invisible to the host-native gateway process. So the new tool does its own download directly in the gateway process (which already makes outbound HTTPS calls for OAuth/tunnel setup, so it has network egress) — same request-download approach as the experimental `save_audio_file`, just running in Rust on the host end-to-end. **`save_audio_file` is retired** — the container never had it merged to `main`, so there's no back-compat concern.
+The new tool does its own download directly in the gateway process (which already makes outbound HTTPS calls for OAuth/tunnel setup, so it has network egress): save the audio to a host-side temp dir, transcribe it, then discard the temp file — same request-download approach as the experimental `save_audio_file`, just running in Rust on the host end-to-end. **`save_audio_file` is retired** — the container never had it merged to `main`, so there's no back-compat concern.
 
 ### Decisions (confirmed)
 
@@ -18,23 +18,22 @@ So we need a way to run certain MCP tools **natively in the gateway process** (h
 - **English-only for now.** Only `.en` model variants are offered; no multilingual option in the picker yet. Revisit if non-English users ask.
 - **No `download_url` host allowlist.** Too many valid client-specific hosts to enumerate reliably. Instead, guard on content: validate the downloaded bytes actually decode as audio (via the decode step itself — if `symphonia` can't parse it, reject) and enforce the size cap below. This is a materially weaker mitigation than a host allowlist for SSRF — see Security section, it needs to be called out in the threat model as an accepted gap, not silently dropped.
 - **Max audio file size: configurable, default 50 MB.** New config value (see below).
-- **Platform scope for v1: macOS only, with GPU acceleration (Metal) enabled.** Linux/Windows native-tool support is out of scope for this first cut — see phased plan and doc updates below. This pairs naturally with GPU acceleration since Metal is the macOS-only acceleration path anyway.
-- **Naming:** the port/registry are referred to as "NativeMCP" conversationally, but the existing codebase convention for this exact abbreviation is `Mcp`, not `MCP` (see `McpProxyPort`, `McpProxyRequest`, `McpProxyResponse` in `crates/core/src/ports/mcp_proxy.rs`). To stay consistent, the actual Rust identifiers are `NativeMcp` (trait) and `NativeMcpRegistry` (registry struct) — same concept, codebase-conventional casing.
+- **Platform scope for v1: macOS and Linux are supported and tested; Windows is best-effort only.** macOS gets GPU acceleration via Metal; Linux runs CPU-only (no CUDA in this pass — most users won't have a matching GPU/toolchain, and it's a much bigger lift than Metal). Windows gets a genuine build attempt in CI, but if `whisper-rs`'s C++ toolchain requirement doesn't cooperate there, we fall back to excluding the feature on Windows rather than sinking further effort into it — see the phased plan's spike steps.
+- **Naming:** the port/registry are referred to as "NativeMCP" conversationally, but the existing codebase convention for this exact abbreviation is `Mcp`, not `MCP` (see `McpProxyPort`, `McpProxyRequest`, `McpProxyResponse` in `crates/core/src/ports/mcp_proxy.rs`). To stay consistent, the actual Rust identifiers are `NativeMcpTool` (trait) and `NativeMcpToolRegistry` (registry struct) — same concept, codebase-conventional casing.
 
 ---
 
 ### Goals
 
-- A native MCP tool, `transcribe_audio_file`, that runs entirely inside the gateway process (`apps/gateway`), takes an OpenAI file reference as input, downloads the audio, transcribes it with `whisper-rs` (Metal-accelerated on macOS), and returns the transcript text — synchronously, one MCP `tools/call` in, one result out.
-- A minimal **native tool registry** (`NativeMcpRegistry`) in the gateway that can register 1..N native tools later without redesign, even though today there is exactly one (`transcribe_audio_file`).
-- A single setup-wizard flag, enabled by default, to turn native audio transcription on/off (macOS only for now), plus a model picker (`tiny.en` / `base.en`, more `.en` sizes later) that downloads the chosen ggml model on demand into `~/.brain3/whisper-models/`.
+- A native MCP tool, `transcribe_audio_file`, that runs entirely inside the gateway process (`apps/gateway`), takes an OpenAI file reference as input, downloads the audio, transcribes it with `whisper-rs` (Metal-accelerated on macOS, CPU on Linux, best-effort on Windows), and returns the transcript text — synchronously, one MCP `tools/call` in, one result out.
+- A minimal **native tool registry** (`NativeMcpToolRegistry`) in the gateway that can register 1..N native tools later without redesign, even though today there is exactly one (`transcribe_audio_file`).
+- A single setup-wizard flag, enabled by default on macOS and Linux, to turn native audio transcription on/off, plus a model picker (`tiny.en` / `base.en`, more `.en` sizes later) that downloads the chosen ggml model on demand into `~/.brain3/whisper-models/`.
 - Threat model updated for the two new capabilities this introduces: gateway-initiated internet egress to fetch audio + models, and gateway-side parsing/execution of untrusted binary audio content (previously that always happened inside the sandboxed container, never in the trusted host process).
 
 ### Non-goals (for this plan)
 
 - No generic "run arbitrary native code" plugin marketplace. One hardcoded plugin (`transcribe_audio_file`), wired in explicitly.
 - No async/background job polling for MCP (`tools/call` stays request/response). Long transcriptions just make the caller wait.
-- No Linux/Windows support for native tools in this pass (see open question resolved above — macOS only for v1).
 - No multilingual model support in this pass (English-only `.en` models only).
 
 ---
@@ -45,29 +44,37 @@ Today `ProxyMcpUseCase` (`crates/core/src/application/proxy_mcp.rs`) is a dumb f
 
 We extend this into real routing:
 
-1. **`initialize`, `resources/*`, `prompts/*`, `ping`, everything else** → forwarded to the container unchanged, exactly as today.
-2. **`tools/list`** → forwarded to the container, response parsed, and any enabled native tool's schema is appended to the `tools` array before returning to the client.
-3. **`tools/call`** → if `params.name` matches an enabled native tool, do **not** contact the container at all; dispatch to `NativeMcpRegistry` and synthesize the JSON-RPC response locally. Otherwise forward as today.
+1. **`initialize`** → still forwarded to the container unchanged (the client/container handshake is untouched), but the router also intercepts it on the way through to call each registered native tool's `on_initialize` hook. That hook is a **no-op for now** — we don't have a concrete need yet (e.g. lazy-loading the whisper model on session start instead of on first `tools/call`, or a model-file health check) — but wiring the seam now means we can tap into MCP session initialization later without touching the routing logic again.
+2. **`resources/*`, `prompts/*`, `ping`, everything else** → forwarded to the container unchanged, exactly as today.
+3. **`tools/list`** → forwarded to the container, response parsed, and any enabled native tool's schema is appended to the `tools` array before returning to the client.
+4. **`tools/call`** → if `params.name` matches an enabled native tool, do **not** contact the container at all; dispatch to `NativeMcpToolRegistry` and synthesize the JSON-RPC response locally. Otherwise forward as today.
 
 New pieces:
 
-- **Port** — `crates/core/src/ports/native_mcp.rs`:
+- **Port** — `crates/core/src/ports/native_mcp_tool.rs`:
   ```rust
   #[async_trait]
-  pub trait NativeMcp: Send + Sync {
+  pub trait NativeMcpTool: Send + Sync {
       fn name(&self) -> &str;
       fn description(&self) -> &str;
       fn input_schema(&self) -> serde_json::Value; // JSON Schema, embedded in tools/list
-      async fn call(&self, arguments: serde_json::Value) -> Result<NativeMcpOutput, NativeMcpError>;
+      async fn call(&self, arguments: serde_json::Value) -> Result<NativeMcpToolOutput, NativeMcpToolError>;
+
+      /// Called once per intercepted MCP `initialize` request. No-op default —
+      /// a seam for later (e.g. lazy model load/health-check on session start),
+      /// not needed by the whisper plugin on day one.
+      async fn on_initialize(&self) -> Result<(), NativeMcpToolError> {
+          Ok(())
+      }
   }
   ```
-  `NativeMcpOutput` maps directly to an MCP `CallToolResult` (text content block(s) + `isError`).
+  `NativeMcpToolOutput` maps directly to an MCP `CallToolResult` (text content block(s) + `isError`).
 
-- **Registry** — `crates/core/src/application/native_mcp_registry.rs`: `NativeMcpRegistry { tools: Vec<Arc<dyn NativeMcp>> }` with `find(name)`, `list_schemas()`. Built once at gateway startup from config (which plugins are enabled) — for now, zero or one entries.
+- **Registry** — `crates/core/src/application/native_mcp_tool_registry.rs`: `NativeMcpToolRegistry { tools: Vec<Arc<dyn NativeMcpTool>> }` with `find(name)`, `list_schemas()`, and `initialize_all()` (calls every registered tool's `on_initialize`, currently a no-op fan-out, invoked by the router whenever an `initialize` request passes through). Built once at gateway startup from config (which plugins are enabled) — for now, zero or one entries.
 
-- **Router use case** — new `McpRouterUseCase` (or extend `ProxyMcpUseCase`) in `crates/core/src/application/`, wrapping the existing proxy + `NativeMcpRegistry`, implementing the three-way routing above. `apps/gateway/src/server.rs` wires this in in place of calling `ProxyMcpUseCase` directly.
+- **Router use case** — new `McpRouterUseCase` (or extend `ProxyMcpUseCase`) in `crates/core/src/application/`, wrapping the existing proxy + `NativeMcpToolRegistry`, implementing the three-way routing above. `apps/gateway/src/server.rs` wires this in in place of calling `ProxyMcpUseCase` directly.
 
-- **Adapter (the plugin itself)** — `crates/platform/src/native_mcp/whisper_transcribe.rs`, implementing `NativeMcp`:
+- **Adapter (the plugin itself)** — `crates/platform/src/native_mcp_tools/whisper_transcribe.rs`, implementing `NativeMcpTool`:
   - Input: same shape as Python's `OpenAIFileReferenceInput` (`download_url`, `file_id`, `mime_type`, `file_name`) — a Rust struct with `serde`.
   - `call()`:
     1. Stream-download to a temp file, enforcing the configured max-size cap (default 50 MB) via a running byte counter — abort the download the moment it's exceeded, don't buffer the whole thing first.
@@ -76,7 +83,7 @@ New pieces:
     4. Return transcript text as the tool result; delete the temp file.
   - Model loaded lazily once per gateway process and cached in memory (loading a ggml model per call would be slow); model path comes from config.
 
-- **Dependency**: add `whisper-rs` (with the `metal` feature enabled on macOS builds) and `symphonia` to `crates/platform/Cargo.toml`. `whisper-rs` builds/links `whisper.cpp` (C++) via its `-sys` crate — this adds a C++ toolchain requirement to the gateway build. Given v1 is macOS-only for this feature, gate the dependency and the `native_mcp` module behind `#[cfg(target_os = "macos")]` (or a Cargo feature flag mirrored by target) so Linux/Windows builds are entirely unaffected and don't need a C++ toolchain at all.
+- **Dependency**: add `whisper-rs` and `symphonia` to `crates/platform/Cargo.toml`, built unconditionally on macOS and Linux (both first-class supported platforms for v1). Enable `whisper-rs`'s `metal` feature only on macOS (`#[cfg(target_os = "macos")]`); Linux uses the default CPU backend. `whisper-rs` builds/links `whisper.cpp` (C++) via its `-sys` crate — this adds a C++ toolchain requirement to the gateway build, which needs to be present in macOS and Linux CI. Windows gets a real build attempt too, not a pre-emptive exclusion — only add a `#[cfg(not(target_os = "windows"))]`-style fallback exclusion for the dependency/module if the CI spike (see Phased implementation) shows the C++ toolchain genuinely can't be made to work there.
 
 ---
 
@@ -87,16 +94,16 @@ New pieces:
 - **On-demand download**: during setup, once the user opts into native audio transcription, the wizard presents a model choice (`tiny.en`, `base.en` default) and downloads the corresponding `.bin` file into that directory, showing progress. If the file already exists (re-running setup, or switching back to a previously-downloaded model), skip re-downloading.
 - **Integrity check required**: verify a SHA256 checksum against a hardcoded known-good table per model (whisper.cpp's own download script publishes these) before treating the file as usable. This is a supply-chain surface (fetching a binary blob that then gets loaded by a C++ inference engine) and deserves the same scrutiny as any other dependency fetch.
 - Config:
-  - `B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED` (bool, default `true`, macOS only — see below)
+  - `B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED` (bool, default `true` on macOS/Linux — see below)
   - `B3_WHISPER_MODEL` (e.g. `base.en`)
   - `B3_WHISPER_MAX_AUDIO_BYTES` (integer, default `52428800` i.e. 50 MB)
   - all read via `crates/platform/src/config`.
-- On non-macOS platforms, this flag should not be offered / should be forced off, since the underlying feature isn't built there in v1 (see Doc updates below).
+- On Windows, whether this flag is offered depends on the outcome of the Windows build spike: if the feature compiles there, treat it the same as macOS/Linux (enabled by default); if the spike forces a `cfg`-exclusion, the flag should not be offered / should be forced off there, since the underlying feature isn't built in that case (see Doc updates below).
 
 ### Setup wizard integration
 
-- New screen in `apps/gateway/src/tui/screens.rs` (pattern-matching existing screens), shown after vault/container setup, **gated on `cfg!(target_os = "macos")`**:
-  - "Enable native audio transcription tools? (Y/n)" — default yes, only shown on macOS; skipped entirely on Linux/Windows for v1.
+- New screen in `apps/gateway/src/tui/screens.rs` (pattern-matching existing screens), shown after vault/container setup, gated on whether the native transcription feature was compiled in for the current target (true unconditionally on macOS/Linux; conditional on Windows per the build spike outcome):
+  - "Enable native audio transcription tools? (Y/n)" — default yes.
   - If yes: "Choose a Whisper model:" list (`tiny.en`, `base.en` default), then download with a progress indicator and checksum verification.
 - Re-running `brain3 --setup` should let the user change the model (re-download) or disable the feature, not just set it once.
 
@@ -116,23 +123,30 @@ Per AGENTS.MD, these need to be written into `SECURITY_AUDIT.MD` under **Threat 
 
 ---
 
-### Documentation updates required (macOS-only v1)
+### Documentation updates required (macOS + Linux v1, Windows best-effort)
 
-Since this feature only works on macOS for now, and AGENTS.MD's "Updating new release" section names exactly which files get touched per release, make sure the following are updated to say so explicitly (not silently omit Linux/Windows):
+Since Windows support depends on how the build spike goes, and AGENTS.MD's "Updating new release" section names exactly which files get touched per release, make sure the following are updated to say so explicitly rather than silently omitting the caveat:
 
-- `README.md` — document `transcribe_audio_file`, note it's macOS-only for now (native, Metal-accelerated, no container involvement), and that Linux/Windows support is planned but not yet available.
-- Setup wizard screen text itself (shown only on macOS, per above) should say why it's absent elsewhere if a user asks — consider a one-line note in the Linux/Windows setup flow ("native audio transcription: not yet available on this platform") rather than just silently skipping the screen, so it's discoverable rather than looking like a missing feature.
-- `first_run_setup.rs` / `.env.template` — document the three new `B3_*` vars (enabled flag, model, max bytes) with the same comment-style as existing entries, noting the macOS-only constraint on the enabled flag.
+- `README.md` — document `transcribe_audio_file`, note it's native (no container involvement), Metal-accelerated on macOS and CPU-based on Linux, and supported/tested on both. Note Windows support as best-effort, with the actual status (works / not yet available) reflecting whatever the build spike determined.
+- If the Windows build spike forces a `cfg`-exclusion, the setup wizard should say why the option is absent if a Windows user asks — a one-line note ("native audio transcription: not yet available on this platform") rather than silently skipping the screen, so it's discoverable rather than looking like a missing feature.
+- `first_run_setup.rs` / `.env.template` — document the three new `B3_*` vars (enabled flag, model, max bytes) with the same comment-style as existing entries, noting the enabled-by-default behavior on macOS/Linux and the Windows caveat.
 
 ---
 
 ### Phased implementation
 
-1. Spike: add `whisper-rs` (with `metal` feature) + `symphonia` to `crates/platform`, gated `#[cfg(target_os = "macos")]`, confirm it builds cleanly on macOS CI/local before writing anything else. (Linux/Windows CI should be unaffected since the dependency is cfg-gated out.)
-2. Core: add `NativeMcp` port, `NativeMcpRegistry`, and the new router use case (with unit tests against a fake `NativeMcp`, following the existing `CapturingProxy` test pattern in `proxy_mcp.rs`).
-3. Platform: implement `WhisperTranscribeTool` (download with size cap → decode via symphonia → resample → Metal-accelerated inference → return), retiring `save_audio_file` and its Python-side code/tests.
-4. Config + setup wizard: add the enable flag (macOS-gated), model picker screen (`tiny.en`/`base.en`), on-demand download with checksum verification into `~/.brain3/whisper-models/`.
-5. Wire the router into `apps/gateway/src/server.rs` in place of the direct `ProxyMcpUseCase` call.
-6. Update `SECURITY_AUDIT.MD` Threat Model section with the new trust boundary, egress paths, and the explicitly-accepted SSRF-adjacent gap.
-7. Update `README.md` / `.env.template` / setup wizard copy per the Documentation section above.
-8. `cargo test -p brain3 --no-run` + `cargo test`, plus a manual end-to-end check on macOS: enable the flag, download `base.en`, call `transcribe_audio_file` with a real short audio file, confirm transcript quality and that the container is never contacted for this call (check gateway logs).
+1. Spike: add `whisper-rs` (with the `metal` feature enabled only on macOS) + `symphonia` to `crates/platform`, confirm it builds and links cleanly on **both macOS and Linux** CI/local before writing anything else — these are the two platforms you can personally test, and both are first-class supported targets for v1.
+2. Spike (best-effort, non-blocking): attempt the same build on Windows CI. This does **not** need a working native tool or gateway integration yet; it's purely "does `whisper-rs`'s C++ toolchain compile and link on a Windows runner." If it builds cleanly, keep Windows in scope as best-effort supported. If it's a nightmare (missing toolchains, linking issues, etc.), add a `#[cfg(not(target_os = "windows"))]`-style exclusion for the dependency/module and document Windows as "not yet available" rather than sinking further effort into it. Don't block steps 3+ on this outcome.
+3. Core: add `NativeMcpTool` port, `NativeMcpToolRegistry`, and the new router use case (with unit tests against a fake `NativeMcpTool`, following the existing `CapturingProxy` test pattern in `proxy_mcp.rs`).
+4. Platform: implement `WhisperTranscribeTool` (download with size cap → decode via symphonia → resample → Metal-accelerated inference on macOS / CPU inference on Linux → return).
+5. Remove the legacy `save_audio_file` implementation from the container (`brain3-mcp-vault-tools`) — this is currently only on the `audio_mcp_experiment` branch, not `main`, so no deprecation period is needed, just delete it outright:
+   - `src/brain3_mcp_vault_tools/tools/audio.py` — delete the file entirely.
+   - `tests/test_tool_audio_api.py` — delete the file entirely.
+   - `src/brain3_mcp_vault_tools/server.py` — remove the `save_audio_file` tool registration (`@mcp.tool(name="save_audio_file", ...)` and its wrapper function), the `from .tools.audio import save_audio_file as _save_audio_file` import, and `_log_save_audio_file_request_summary` (plus its call site inside `InboundRequestLoggingMiddleware`) — that logging hook only exists to trace `save_audio_file` calls and has no purpose once the tool is gone.
+   - `src/brain3_mcp_vault_tools/models.py` — remove `OpenAIFileReferenceInput` and the now-unused `AnyUrl` import, unless something else ends up depending on it.
+   - Same cleanup applies gateway-side: delete `log_save_audio_file_request_summary` and its `url_path` helper from `crates/core/src/application/proxy_mcp.rs` (see the Architecture section above — this was a peek-only logging hook for the same experimental tool, not used for routing).
+6. Config + setup wizard: add the enable flag (default on for macOS/Linux, conditional on Windows per the spike outcome), model picker screen (`tiny.en`/`base.en`), on-demand download with checksum verification into `~/.brain3/whisper-models/`.
+7. Wire the router into `apps/gateway/src/server.rs` in place of the direct `ProxyMcpUseCase` call.
+8. Update `SECURITY_AUDIT.MD` Threat Model section with the new trust boundary, egress paths, and the explicitly-accepted SSRF-adjacent gap.
+9. Update `README.md` / `.env.template` / setup wizard copy per the Documentation section above.
+10. `cargo test -p brain3 --no-run` + `cargo test`, plus a manual end-to-end check on **both macOS and Linux** (the two platforms you can test directly): enable the flag, download `base.en`, call `transcribe_audio_file` with a real short audio file, confirm transcript quality and that the container is never contacted for this call (check gateway logs). Windows gets the same check on a best-effort basis if the feature made it in.
