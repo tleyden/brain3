@@ -191,10 +191,17 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
 
         McpProxyResponse {
             status: response.status,
-            headers: response.headers,
+            headers: strip_content_length(response.headers),
             body: new_body,
         }
     }
+}
+
+fn strip_content_length(headers: Vec<(String, String)>) -> Vec<(String, String)> {
+    headers
+        .into_iter()
+        .filter(|(name, _)| !name.eq_ignore_ascii_case("content-length"))
+        .collect()
 }
 
 fn native_tool_response(
@@ -265,7 +272,13 @@ mod tests {
                 .push(request);
             Ok(McpProxyResponse {
                 status: 200,
-                headers: vec![("content-type".into(), "application/json".into())],
+                headers: vec![
+                    ("content-type".into(), "application/json".into()),
+                    (
+                        "content-length".into(),
+                        self.response_body.len().to_string(),
+                    ),
+                ],
                 body: self.response_body.clone(),
             })
         }
@@ -451,6 +464,13 @@ mod tests {
         assert_eq!(tools[1]["name"], "fake_native_tool");
         assert_eq!(tools[1]["description"], "Fake native tool");
         assert_eq!(tools[1]["inputSchema"]["required"][0], "message");
+        assert!(
+            response
+                .headers
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("content-length")),
+            "augmented tools/list responses must not retain the upstream content-length"
+        );
     }
 
     #[tokio::test]

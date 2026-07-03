@@ -469,6 +469,7 @@ async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
             .map(|tool| tool.name.as_ref())
             .collect::<BTreeSet<_>>();
         let expected_tool_names = BTreeSet::from([
+            "transcribe_audio_file",
             "vault_apply_unified_diff",
             "vault_batch_frontmatter_update",
             "vault_batch_read",
