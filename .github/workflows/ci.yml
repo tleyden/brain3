@@ -42,3 +42,20 @@ jobs:
 
       - name: Release signing smoke test
         run: bash scripts/test-release-signing.sh
+
+  windows-native-audio-spike:
+    name: Windows native audio dependency spike
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-native-audio-spike
+
+      - name: Build brain3-platform test targets
+        run: cargo test -p brain3-platform --no-run
