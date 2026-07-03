@@ -10,6 +10,12 @@ use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use oauth2::basic::BasicClient;
+use oauth2::reqwest;
+use oauth2::{
+    AuthType, AuthUrl, AuthorizationCode, ClientId, ClientSecret, CsrfToken, EndpointNotSet,
+    EndpointSet, PkceCodeChallenge, RedirectUrl, TokenResponse, TokenUrl,
+};
 use rmcp::{
     model::{
         CallToolRequestParams, CallToolResult, ClientCapabilities, ClientInfo, ContentBlock,
@@ -28,7 +34,15 @@ const OAUTH_PORT: u16 = 27630;
 const LOCAL_MCP_PORT: u16 = 27640;
 const CONTAINER_NAME: &str = "brain3-mcp-vault-tools";
 const LOCAL_BEARER_TOKEN: &str = "e2e-test-bearer-token";
+const OAUTH_CLIENT_ID: &str = "brain3-oauth2-client";
+const OAUTH_CLIENT_SECRET: &str = "e2e-test-client-secret";
+const OAUTH_USERNAME: &str = "e2e-test-user";
+const OAUTH_PASSWORD: &str = "e2e-test-password";
+const OAUTH_REDIRECT_URI: &str = "https://claude.ai/api/mcp/auth_callback";
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(10);
+
+type E2eOAuthClient =
+    BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
 
 struct TempTestDir {
     root: PathBuf,
@@ -78,6 +92,7 @@ impl TempTestDir {
             &self.env_file,
             format!(
                 "B3_OAUTH2_GATEWAY_PORT={OAUTH_PORT}\n\
+                 B3_OAUTH2_GATEWAY_CLIENT_ID={OAUTH_CLIENT_ID}\n\
                  B3_OAUTH2_GATEWAY_CLIENT_SECRET=e2e-test-client-secret\n\
                  B3_USERNAME=e2e-test-user\n\
                  B3_PASSWORD=e2e-test-password\n\
@@ -178,9 +193,10 @@ impl Brain3Process {
             .env("PATH", temp.path_with_shim())
             .env("B3_HOME", &temp.root)
             .env("B3_OAUTH2_GATEWAY_PORT", OAUTH_PORT.to_string())
-            .env("B3_OAUTH2_GATEWAY_CLIENT_SECRET", "e2e-test-client-secret")
-            .env("B3_USERNAME", "e2e-test-user")
-            .env("B3_PASSWORD", "e2e-test-password")
+            .env("B3_OAUTH2_GATEWAY_CLIENT_ID", OAUTH_CLIENT_ID)
+            .env("B3_OAUTH2_GATEWAY_CLIENT_SECRET", OAUTH_CLIENT_SECRET)
+            .env("B3_USERNAME", OAUTH_USERNAME)
+            .env("B3_PASSWORD", OAUTH_PASSWORD)
             .env("B3_TOKEN_DB_PATH", &temp.brain3_db)
             .env("B3_CF_QUICK_TUNNEL", "false")
             .env("B3_CONTAINER_RUNTIME", "docker")
@@ -318,7 +334,7 @@ impl Drop for Brain3Process {
 }
 
 #[tokio::test]
-async fn e2e_smoke_local_docker() -> Result<(), Box<dyn std::error::Error>> {
+async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
     let temp = TempTestDir::create()?;
     temp.write_env_file()?;
 
@@ -578,6 +594,93 @@ async fn e2e_smoke_local_docker() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[tokio::test]
+async fn e2e_smoke_2_oauth_public_flow() -> Result<(), Box<dyn std::error::Error>> {
+    let temp = TempTestDir::create()?;
+    temp.write_env_file()?;
+
+    {
+        let gateway = Brain3Process::spawn(&temp).await?;
+        let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
+        assert_container_running_and_vault_visible(&gateway).await?;
+
+        let http_client = oauth_http_client()?;
+        let base_url = format!("http://127.0.0.1:{OAUTH_PORT}");
+
+        assert_oauth_metadata(&http_client, &base_url).await?;
+        assert_public_mcp_rejects_missing_and_invalid_bearers(&http_client, &base_url).await?;
+        assert_token_rejects_wrong_client_secret(&http_client, &base_url).await?;
+        assert_authorize_rejects_unregistered_client(&http_client, &base_url).await?;
+
+        let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
+        let csrf = CsrfToken::new_random();
+        assert_authorize_form_renders(&http_client, &base_url, challenge.as_str(), csrf.secret())
+            .await?;
+
+        let (mismatched_challenge, _) = PkceCodeChallenge::new_random_sha256();
+        let mismatched_state = CsrfToken::new_random();
+        let mismatched_code = submit_login_for_authorization_code(
+            &http_client,
+            &base_url,
+            mismatched_challenge.as_str(),
+            mismatched_state.secret(),
+        )
+        .await?;
+        assert_token_rejects_mismatched_pkce_verifier(&base_url, mismatched_code).await?;
+
+        let code = submit_login_for_authorization_code(
+            &http_client,
+            &base_url,
+            challenge.as_str(),
+            csrf.secret(),
+        )
+        .await?;
+
+        let token_response = oauth_client(&base_url)?
+            .exchange_code(AuthorizationCode::new(code))
+            .set_pkce_verifier(verifier)
+            .request_async(&http_client)
+            .await?;
+        assert!(
+            token_response.refresh_token().is_some(),
+            "OAuth token response should include a refresh token"
+        );
+        let access_token = token_response.access_token().secret();
+
+        let client = connect_public_mcp(access_token).await?;
+        let create = call_tool_json(
+            &client,
+            "vault_create_overwrite_file",
+            json!({
+                "path": "oauth/public-flow.md",
+                "content": "# OAuth public flow\nReached through the OAuth-protected public MCP path.\n",
+            }),
+        )
+        .await?;
+        assert_eq!(create["path"], "oauth/public-flow.md");
+        assert_eq!(create["created"], true);
+
+        let read = call_tool_json(
+            &client,
+            "vault_read",
+            json!({"path": "oauth/public-flow.md"}),
+        )
+        .await?;
+        assert!(
+            read["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("OAuth-protected public MCP path"),
+            "public OAuth MCP read did not return the created note: {read}"
+        );
+
+        client.cancel().await?;
+    }
+
+    assert_no_container_residue().await?;
+    Ok(())
+}
+
 async fn connect_local_mcp(
 ) -> Result<rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>, Box<dyn std::error::Error>>
 {
@@ -593,6 +696,244 @@ async fn connect_local_mcp(
     );
 
     Ok(client_info.serve(transport).await?)
+}
+
+async fn connect_public_mcp(
+    access_token: &str,
+) -> Result<rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>, Box<dyn std::error::Error>>
+{
+    let transport = StreamableHttpClientTransport::from_config(
+        StreamableHttpClientTransportConfig::with_uri(format!("http://127.0.0.1:{OAUTH_PORT}/mcp"))
+            .auth_header(access_token),
+    );
+    let client_info = ClientInfo::new(
+        ClientCapabilities::default(),
+        Implementation::new("brain3-e2e-smoke", "0.0.0"),
+    );
+
+    Ok(client_info.serve(transport).await?)
+}
+
+fn oauth_http_client() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
+    Ok(reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?)
+}
+
+fn oauth_client(base_url: &str) -> Result<E2eOAuthClient, Box<dyn std::error::Error>> {
+    Ok(BasicClient::new(ClientId::new(OAUTH_CLIENT_ID.to_string()))
+        .set_client_secret(ClientSecret::new(OAUTH_CLIENT_SECRET.to_string()))
+        .set_auth_uri(AuthUrl::new(format!("{base_url}/oauth/authorize"))?)
+        .set_token_uri(TokenUrl::new(format!("{base_url}/oauth/token"))?)
+        .set_redirect_uri(RedirectUrl::new(OAUTH_REDIRECT_URI.to_string())?)
+        .set_auth_type(AuthType::RequestBody))
+}
+
+async fn assert_oauth_metadata(
+    http_client: &reqwest::Client,
+    base_url: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response = http_client
+        .get(format!("{base_url}/.well-known/oauth-authorization-server"))
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body: Value = serde_json::from_str(&response.text().await?)?;
+    assert_eq!(
+        body["authorization_endpoint"],
+        format!("{base_url}/oauth/authorize")
+    );
+    assert_eq!(body["token_endpoint"], format!("{base_url}/oauth/token"));
+    assert_eq!(body["code_challenge_methods_supported"], json!(["S256"]));
+    assert_eq!(
+        body["token_endpoint_auth_methods_supported"],
+        json!(["client_secret_post"])
+    );
+    Ok(())
+}
+
+async fn assert_authorize_form_renders(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    code_challenge: &str,
+    state: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response = http_client
+        .get(format!("{base_url}/oauth/authorize"))
+        .query(&[
+            ("response_type", "code"),
+            ("client_id", OAUTH_CLIENT_ID),
+            ("redirect_uri", OAUTH_REDIRECT_URI),
+            ("state", state),
+            ("code_challenge", code_challenge),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::OK);
+    let body = response.text().await?;
+    assert!(
+        body.contains("<form") && body.contains("method=\"post\""),
+        "authorize GET should render the login form HTML: {body}"
+    );
+    Ok(())
+}
+
+async fn submit_login_for_authorization_code(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    code_challenge: &str,
+    state: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let response = http_client
+        .post(format!("{base_url}/oauth/authorize"))
+        .form(&[
+            ("response_type", "code"),
+            ("client_id", OAUTH_CLIENT_ID),
+            ("redirect_uri", OAUTH_REDIRECT_URI),
+            ("state", state),
+            ("code_challenge", code_challenge),
+            ("code_challenge_method", "S256"),
+            ("username", OAUTH_USERNAME),
+            ("password", OAUTH_PASSWORD),
+        ])
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::FOUND);
+
+    let location = response
+        .headers()
+        .get(reqwest::header::LOCATION)
+        .and_then(|value| value.to_str().ok())
+        .ok_or("authorize POST did not include Location header")?;
+    let redirect = reqwest::Url::parse(location)?;
+    assert_eq!(
+        redirect.as_str().split('?').next().unwrap_or_default(),
+        OAUTH_REDIRECT_URI
+    );
+    assert_eq!(query_param(&redirect, "state").as_deref(), Some(state));
+    query_param(&redirect, "code").ok_or_else(|| {
+        io::Error::other(format!(
+            "authorize redirect did not include code: {location}"
+        ))
+        .into()
+    })
+}
+
+async fn assert_public_mcp_rejects_missing_and_invalid_bearers(
+    http_client: &reqwest::Client,
+    base_url: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let no_bearer = post_mcp_tools_list(http_client, base_url, None).await?;
+    assert_eq!(no_bearer.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let no_bearer_auth = header_value(&no_bearer, reqwest::header::WWW_AUTHENTICATE)?;
+    assert!(
+        no_bearer_auth.contains(".well-known/oauth-protected-resource/mcp"),
+        "401 should include protected-resource metadata hint: {no_bearer_auth}"
+    );
+
+    let garbage_bearer = post_mcp_tools_list(http_client, base_url, Some("garbage-token")).await?;
+    assert_eq!(garbage_bearer.status(), reqwest::StatusCode::UNAUTHORIZED);
+    Ok(())
+}
+
+async fn post_mcp_tools_list(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    bearer_token: Option<&str>,
+) -> Result<reqwest::Response, Box<dyn std::error::Error>> {
+    let mut request = http_client
+        .post(format!("{base_url}/mcp"))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {}
+        }))?);
+    if let Some(token) = bearer_token {
+        request = request.bearer_auth(token);
+    }
+    Ok(request.send().await?)
+}
+
+async fn assert_token_rejects_wrong_client_secret(
+    http_client: &reqwest::Client,
+    base_url: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let response = http_client
+        .post(format!("{base_url}/oauth/token"))
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", "not-a-real-code"),
+            ("redirect_uri", OAUTH_REDIRECT_URI),
+            ("client_id", OAUTH_CLIENT_ID),
+            ("client_secret", "wrong-secret"),
+            ("code_verifier", "not-a-real-verifier"),
+        ])
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let body: Value = serde_json::from_str(&response.text().await?)?;
+    assert_eq!(body["error"], "invalid_client");
+    Ok(())
+}
+
+async fn assert_authorize_rejects_unregistered_client(
+    http_client: &reqwest::Client,
+    base_url: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (challenge, _) = PkceCodeChallenge::new_random_sha256();
+    let response = http_client
+        .get(format!("{base_url}/oauth/authorize"))
+        .query(&[
+            ("response_type", "code"),
+            ("client_id", "unregistered-client"),
+            ("redirect_uri", OAUTH_REDIRECT_URI),
+            ("code_challenge", challenge.as_str()),
+            ("code_challenge_method", "S256"),
+        ])
+        .send()
+        .await?;
+    assert_eq!(response.status(), reqwest::StatusCode::UNAUTHORIZED);
+    let body: Value = serde_json::from_str(&response.text().await?)?;
+    assert_eq!(body["error"], "invalid_client");
+    Ok(())
+}
+
+async fn assert_token_rejects_mismatched_pkce_verifier(
+    base_url: &str,
+    code: String,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (_, wrong_verifier) = PkceCodeChallenge::new_random_sha256();
+    let http_client = oauth_http_client()?;
+    let token_result = oauth_client(base_url)?
+        .exchange_code(AuthorizationCode::new(code))
+        .set_pkce_verifier(wrong_verifier)
+        .request_async(&http_client)
+        .await;
+    let error = token_result.expect_err("token exchange with wrong PKCE verifier should fail");
+    assert!(
+        error.to_string().contains("invalid_grant"),
+        "wrong PKCE verifier should be rejected as invalid_grant: {error}"
+    );
+    Ok(())
+}
+
+fn query_param(url: &reqwest::Url, name: &str) -> Option<String> {
+    url.query_pairs()
+        .find_map(|(key, value)| (key == name).then(|| value.into_owned()))
+}
+
+fn header_value(
+    response: &reqwest::Response,
+    header: reqwest::header::HeaderName,
+) -> Result<&str, Box<dyn std::error::Error>> {
+    response
+        .headers()
+        .get(header)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| io::Error::other("response missing expected header").into())
 }
 
 async fn call_tool_json(
