@@ -787,76 +787,55 @@ async fn e2e_smoke_3_oauth_quick_tunnel() -> Result<(), Box<dyn std::error::Erro
         let base_url = read_public_tunnel_url(&temp).await?;
         println!("quick tunnel public URL: {base_url}");
 
-        let public_tunnel_reachable = match wait_for_public_tunnel_health(&http_client, &base_url)
-            .await
-        {
-            Ok(()) => true,
-            Err(error)
-                if env::var_os("CI").is_none() && error.to_string().contains("dns error") =>
-            {
-                println!(
-                    "SKIP: e2e_smoke_3_oauth_quick_tunnel could not resolve the generated trycloudflare.com hostname locally: {error}"
-                );
-                false
-            }
-            Err(error) => return Err(error),
-        };
+        wait_for_public_tunnel_health(&http_client, &base_url).await?;
+        assert_public_mcp_rejects_missing_and_invalid_bearers(&http_client, &base_url).await?;
 
-        if public_tunnel_reachable {
-            assert_public_mcp_rejects_missing_and_invalid_bearers(&http_client, &base_url).await?;
+        let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
+        let csrf = CsrfToken::new_random();
+        let code = submit_login_for_authorization_code(
+            &http_client,
+            &base_url,
+            challenge.as_str(),
+            csrf.secret(),
+        )
+        .await?;
 
-            let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
-            let csrf = CsrfToken::new_random();
-            let code = submit_login_for_authorization_code(
-                &http_client,
-                &base_url,
-                challenge.as_str(),
-                csrf.secret(),
-            )
+        let token_response = oauth_client(&base_url)?
+            .exchange_code(AuthorizationCode::new(code))
+            .set_pkce_verifier(verifier)
+            .request_async(&http_client)
             .await?;
+        let access_token = token_response.access_token().secret();
 
-            let token_response = oauth_client(&base_url)?
-                .exchange_code(AuthorizationCode::new(code))
-                .set_pkce_verifier(verifier)
-                .request_async(&http_client)
-                .await?;
-            let access_token = token_response.access_token().secret();
+        let create = post_public_mcp_tool_call_json(
+            &http_client,
+            &base_url,
+            access_token,
+            "vault_create_overwrite_file",
+            json!({
+                "path": "oauth/quick-tunnel.md",
+                "content": "# OAuth quick tunnel\nReached through a Cloudflare quick tunnel.\n",
+            }),
+        )
+        .await?;
+        assert_eq!(create["path"], "oauth/quick-tunnel.md");
+        assert_eq!(create["created"], true);
 
-            let create = post_public_mcp_tool_call_json(
-                &http_client,
-                &base_url,
-                access_token,
-                "vault_create_overwrite_file",
-                json!({
-                    "path": "oauth/quick-tunnel.md",
-                    "content": "# OAuth quick tunnel\nReached through a Cloudflare quick tunnel.\n",
-                }),
-            )
-            .await?;
-            assert_eq!(create["path"], "oauth/quick-tunnel.md");
-            assert_eq!(create["created"], true);
-
-            let read = post_public_mcp_tool_call_json(
-                &http_client,
-                &base_url,
-                access_token,
-                "vault_read",
-                json!({"path": "oauth/quick-tunnel.md"}),
-            )
-            .await?;
-            assert!(
-                read["content"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .contains("Cloudflare quick tunnel"),
-                "quick tunnel MCP read did not return the created note: {read}"
-            );
-        } else {
-            drop(_diagnostics_guard);
-            drop(gateway);
-            assert_no_container_residue().await?;
-            return Ok(());
-        }
+        let read = post_public_mcp_tool_call_json(
+            &http_client,
+            &base_url,
+            access_token,
+            "vault_read",
+            json!({"path": "oauth/quick-tunnel.md"}),
+        )
+        .await?;
+        assert!(
+            read["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Cloudflare quick tunnel"),
+            "quick tunnel MCP read did not return the created note: {read}"
+        );
     }
 
     assert_no_container_residue().await?;
@@ -914,7 +893,7 @@ async fn wait_for_public_tunnel_health(
     http_client: &reqwest::Client,
     base_url: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let deadline = Instant::now() + Duration::from_secs(90);
+    let deadline = Instant::now() + Duration::from_secs(240);
     let mut last_error = String::from("public health endpoint was not probed");
 
     while Instant::now() < deadline {
@@ -932,7 +911,7 @@ async fn wait_for_public_tunnel_health(
     }
 
     Err(format!(
-        "public quick tunnel health did not become reachable within 90s at {base_url}: {last_error}"
+        "public quick tunnel health did not become reachable within 240s at {base_url}: {last_error}"
     )
     .into())
 }
