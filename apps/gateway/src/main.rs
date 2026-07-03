@@ -793,6 +793,7 @@ mod tests {
     static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
     const CONFIG_KEYS: &[&str] = &[
         "HOME",
+        "USERPROFILE",
         "B3_HOME",
         "B3_TOKEN_DB_PATH",
         "B3_OAUTH2_GATEWAY_CLIENT_SECRET",

@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use brain3_core::domain::errors::TunnelError;
 use tokio::process::Command;
 
+use crate::util::user_home_dir;
+
 pub async fn check_cloudflared_installed() -> bool {
     Command::new("which")
         .arg("cloudflared")
@@ -98,8 +100,9 @@ pub async fn create_tunnel(name: &str) -> Result<String, TunnelError> {
 
 /// Returns the path to the credentials JSON file for a tunnel ID, if it exists.
 pub fn find_credentials_file(tunnel_id: &str) -> Option<PathBuf> {
-    let home = std::env::var("HOME").ok()?;
-    let path = PathBuf::from(format!("{home}/.cloudflared/{tunnel_id}.json"));
+    let path = user_home_dir()?
+        .join(".cloudflared")
+        .join(format!("{tunnel_id}.json"));
     if path.exists() {
         Some(path)
     } else {
