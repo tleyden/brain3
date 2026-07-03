@@ -24,6 +24,7 @@
 - For Python tests in `brain3-mcp-vault-tools`, run: `cd brain3-mcp-vault-tools && uv run --with mcp python -m unittest discover -s tests -v`. This discovers and runs all tests in the `tests/` directory. (`pytest` is not installed; `uv run --with mcp python -m unittest` is the correct runner.)
 - E2E smoke tests verify end-to-end behaviour but are slower and run on CI, so by default only run them when the user explicitly asks. However, run them yourself without being asked when the change is big or risky (e.g. touches the gateway server, MCP proxy, container startup, or vault-tools), or when the E2E tests themselves changed.
   - Run with: `uv run scripts/e2e_smoke.py`. Raw equivalent for transparency: `docker build -f ./brain3-mcp-vault-tools/Containerfile -t brain3-mcp-vault-tools:e2e-local ./brain3-mcp-vault-tools` followed by `cargo test -p brain3 --test e2e_smoke --features e2e -- --nocapture`.
+- Never run linux containers for building or verifying.  Any linux testing will happen on the CI platform via GH Actions that run docker.  Ditto for Windows, all testing happens on CI. 
 
 # Rust Development & Hexagonal Architecture: Best Practices
 
