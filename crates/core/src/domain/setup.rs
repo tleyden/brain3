@@ -129,6 +129,7 @@ pub enum SetupStep {
     AccessMode,
     Auth,
     PortsAndSettings,
+    AudioTranscription,
     Summary,
     ConnectionCard,
     RuntimeStatus,

@@ -228,7 +228,7 @@ impl FirstRunSetupUseCase {
 }
 
 fn native_audio_transcription_default() -> bool {
-    cfg!(any(target_os = "macos", target_os = "linux"))
+    false
 }
 
 fn default_container_runtime(
@@ -556,7 +556,7 @@ mod tests {
         assert!(preparation.draft.container_network_isolated);
         assert!(preparation.draft.local_mcp_enabled);
         assert!(!preparation.draft.local_mcp_bearer_token.is_empty());
-        assert!(preparation.draft.native_audio_transcription_enabled);
+        assert!(!preparation.draft.native_audio_transcription_enabled);
         assert_eq!(preparation.draft.whisper_model, "base.en");
         assert_eq!(preparation.draft.whisper_max_audio_bytes, 52_428_800);
     }

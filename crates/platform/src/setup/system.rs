@@ -43,6 +43,20 @@ const WHISPER_MODEL_SPECS: &[WhisperModelSpec] = &[
         sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
         size_bytes: 147_964_211,
     },
+    WhisperModelSpec {
+        model: "small.en",
+        filename: "ggml-small.en.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.en.bin",
+        sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
+        size_bytes: 487_614_201,
+    },
+    WhisperModelSpec {
+        model: "medium.en",
+        filename: "ggml-medium.en.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.en.bin",
+        sha256: "cc37e93478338ec7700281a7ac30a10128929eb8f427dda2e865faa8f6da4356",
+        size_bytes: 1_533_774_781,
+    },
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

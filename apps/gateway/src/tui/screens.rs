@@ -14,8 +14,8 @@ use crate::server::GatewayServerStatus;
 
 use super::runtime_logs::RuntimeLogsState;
 use super::state::{
-    install_action_label, AccessModeField, AuthField, DependencyDoctorFocus, FirstRunTuiState,
-    PortsField, RuntimeView, SummaryField,
+    install_action_label, whisper_model_label, AccessModeField, AudioTranscriptionField, AuthField,
+    DependencyDoctorFocus, FirstRunTuiState, PortsField, RuntimeView, SummaryField,
 };
 
 const SHUTDOWN_LONG_RUNNING_TICKS: u64 = 150;
@@ -73,6 +73,7 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Access",
         "Auth",
         "Network Security",
+        "Audio Transcription",
         "Start",
         "Running",
     ];
@@ -122,6 +123,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::AccessMode => "Local/Remote Access",
         SetupStep::Auth => "Auth Setup",
         SetupStep::PortsAndSettings => "Network Security",
+        SetupStep::AudioTranscription => "Audio Transcription",
         SetupStep::Summary => "Summary",
         SetupStep::ConnectionCard => "MCP Config Settings",
         SetupStep::RuntimeStatus => "Runtime Status",
@@ -149,6 +151,9 @@ fn progress_caption(step: SetupStep) -> &'static str {
         SetupStep::PortsAndSettings => {
             "Review network ports, container identity, and security defaults."
         }
+        SetupStep::AudioTranscription => {
+            "Enable native audio transcription and choose a Whisper model."
+        }
         SetupStep::Summary => "Confirm what Brain3 will write before startup begins.",
         SetupStep::ConnectionCard | SetupStep::RuntimeStatus => {
             "Brain3 is configured. Use the connection details or monitor runtime status."
@@ -165,8 +170,9 @@ fn wizard_stage_index(step: SetupStep) -> usize {
         SetupStep::AccessMode => 3,
         SetupStep::Auth => 4,
         SetupStep::PortsAndSettings => 5,
-        SetupStep::Summary => 6,
-        SetupStep::ConnectionCard | SetupStep::RuntimeStatus | SetupStep::ShuttingDown => 7,
+        SetupStep::AudioTranscription => 6,
+        SetupStep::Summary => 7,
+        SetupStep::ConnectionCard | SetupStep::RuntimeStatus | SetupStep::ShuttingDown => 8,
     }
 }
 
@@ -178,6 +184,7 @@ fn body_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::AccessMode => access_mode_lines(state),
         SetupStep::Auth => auth_lines(state),
         SetupStep::PortsAndSettings => ports_and_settings_lines(state),
+        SetupStep::AudioTranscription => audio_transcription_lines(state),
         SetupStep::Summary => summary_lines(state),
         SetupStep::ConnectionCard => connection_card_lines(state),
         SetupStep::RuntimeStatus => runtime_lines(state),
@@ -612,31 +619,36 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ));
     }
 
-    lines.push(blank_line());
-    lines.push(field_badge_line(
-        "Native audio transcription",
-        if state.draft.native_audio_transcription_enabled {
-            badge_span("Enabled", Color::Green)
-        } else {
-            badge_span("Disabled", Color::Yellow)
-        },
-        state.ports_focus == PortsField::NativeAudioTranscription,
-    ));
-    lines.push(field_badge_line(
-        "Whisper model",
-        badge_span(state.draft.whisper_model.as_str(), Color::Cyan),
-        state.ports_focus == PortsField::WhisperModel,
-    ));
-    lines.push(field_line(
-        "Whisper max audio bytes",
-        &state.whisper_max_audio_bytes_input,
-        state.ports_focus == PortsField::WhisperMaxAudioBytes,
-    ));
-    lines.push(muted_line(
-        "The selected model is downloaded and checksum-verified before startup.",
-    ));
-
     lines
+}
+
+fn audio_transcription_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
+    vec![
+        muted_line("Audio Transcription is an MCP tool that runs natively in this process."),
+        muted_line(
+            "Drag an audio file into your AI assistant and it gets transcribed automatically.",
+        ),
+        muted_line("No external transcription service is required. See README.md for details."),
+        blank_line(),
+        field_badge_line(
+            "Native audio transcription",
+            if state.draft.native_audio_transcription_enabled {
+                badge_span("Enabled", Color::Green)
+            } else {
+                badge_span("Disabled", Color::Yellow)
+            },
+            state.audio_transcription_focus == AudioTranscriptionField::NativeAudioTranscription,
+        ),
+        field_badge_line(
+            "Whisper model",
+            badge_span(
+                &whisper_model_label(&state.draft.whisper_model),
+                Color::Cyan,
+            ),
+            state.audio_transcription_focus == AudioTranscriptionField::WhisperModel,
+        ),
+        muted_line("The selected model is downloaded and checksum-verified before startup."),
+    ]
 }
 
 fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
@@ -795,13 +807,11 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ),
         field_badge_line(
             "Whisper model",
-            badge_span(state.draft.whisper_model.as_str(), Color::Cyan),
+            badge_span(
+                &whisper_model_label(&state.draft.whisper_model),
+                Color::Cyan,
+            ),
             f == SummaryField::WhisperModel,
-        ),
-        field_line(
-            "Whisper max audio bytes",
-            &state.whisper_max_audio_bytes_input,
-            f == SummaryField::WhisperMaxAudioBytes,
         ),
     ]);
 
@@ -1111,6 +1121,12 @@ fn action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         SetupStep::PortsAndSettings => continue_action_lines(vec![
             ("[Tab/Up/Down]", "Move"),
             ("[Type]", "Edit field"),
+            ("[t]", "Toggle setting"),
+            ("[Esc]", "Back"),
+            ("[q]", "Quit"),
+        ]),
+        SetupStep::AudioTranscription => continue_action_lines(vec![
+            ("[Tab/Up/Down]", "Move"),
             ("[t]", "Toggle setting"),
             ("[Esc]", "Back"),
             ("[q]", "Quit"),
@@ -1660,6 +1676,9 @@ mod tests {
         assert!(!text.contains("Refresh token lifetime (secs)"));
         assert!(!text.contains("PKCE required"));
         assert!(!text.contains("Enforce hostname check"));
+        assert!(!text.contains("Native audio transcription"));
+        assert!(!text.contains("Whisper model"));
+        assert!(!text.contains("Whisper max audio bytes"));
     }
 
     #[test]
@@ -1676,6 +1695,32 @@ mod tests {
         assert!(text.contains("Local MCP port"));
         assert!(text.contains("Container name"));
         assert!(text.contains("Container network name"));
+    }
+
+    #[test]
+    fn audio_transcription_screen_shows_feature_fields_and_model_size() {
+        let mut state = sample_state();
+        state.step = SetupStep::AudioTranscription;
+
+        let header = screen_title(state.step);
+        let progress = progress_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let details = audio_transcription_lines(&state)
+            .into_iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert_eq!(header, "Audio Transcription");
+        assert!(progress.contains("Step 7 of 9"));
+        assert!(details.contains("Native audio transcription"));
+        assert!(details.contains("Whisper model"));
+        assert!(details.contains("base.en (142 MB)"));
+        assert!(details.contains("README.md"));
+        assert!(!details.contains("Whisper max audio bytes"));
     }
 
     #[test]
@@ -1696,6 +1741,9 @@ mod tests {
         assert_eq!(header, "Network Security");
         assert!(progress.contains("Network Security"));
         assert!(details.contains("Network Security") || details.contains("network security"));
+        assert!(!details.contains("Native audio transcription"));
+        assert!(!details.contains("Whisper model"));
+        assert!(!details.contains("Whisper max audio bytes"));
     }
 
     #[test]

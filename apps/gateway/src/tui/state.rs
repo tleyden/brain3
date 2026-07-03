@@ -39,9 +39,12 @@ pub enum PortsField {
     EnforceHostnameCheck,
     ContainerNetworkIsolation,
     ContainerNetworkName,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioTranscriptionField {
     NativeAudioTranscription,
     WhisperModel,
-    WhisperMaxAudioBytes,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -76,7 +79,6 @@ pub enum SummaryField {
     ContainerNetworkName,
     NativeAudioTranscription,
     WhisperModel,
-    WhisperMaxAudioBytes,
 }
 
 pub struct FirstRunTuiState {
@@ -103,6 +105,7 @@ pub struct FirstRunTuiState {
     pub auth_focus: AuthField,
     pub access_mode_focus: AccessModeField,
     pub ports_focus: PortsField,
+    pub audio_transcription_focus: AudioTranscriptionField,
     pub gateway_port_input: String,
     pub local_mcp_port_input: String,
     pub container_host_port_input: String,
@@ -111,7 +114,6 @@ pub struct FirstRunTuiState {
     pub access_token_lifetime_secs_input: String,
     pub refresh_token_lifetime_secs_input: String,
     pub container_network_name_input: String,
-    pub whisper_max_audio_bytes_input: String,
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
     pub summary_focus: SummaryField,
@@ -140,7 +142,6 @@ impl FirstRunTuiState {
         let access_token_lifetime_secs_input = draft.access_token_lifetime_secs.to_string();
         let refresh_token_lifetime_secs_input = draft.refresh_token_lifetime_secs.to_string();
         let container_network_name_input = draft.container_network_name.clone();
-        let whisper_max_audio_bytes_input = draft.whisper_max_audio_bytes.to_string();
 
         Self {
             host,
@@ -166,6 +167,7 @@ impl FirstRunTuiState {
             auth_focus: AuthField::Username,
             access_mode_focus: AccessModeField::Both,
             ports_focus: PortsField::GatewayPort,
+            audio_transcription_focus: AudioTranscriptionField::NativeAudioTranscription,
             gateway_port_input,
             local_mcp_port_input,
             container_host_port_input,
@@ -174,7 +176,6 @@ impl FirstRunTuiState {
             access_token_lifetime_secs_input,
             refresh_token_lifetime_secs_input,
             container_network_name_input,
-            whisper_max_audio_bytes_input,
             dependency_focus,
             dependency_action_index: 0,
             summary_focus: SummaryField::VaultPath,
@@ -248,9 +249,6 @@ impl FirstRunTuiState {
             self.draft.refresh_token_lifetime_secs = seconds;
         }
         self.draft.container_network_name = self.container_network_name_input.trim().to_string();
-        if let Ok(bytes) = self.whisper_max_audio_bytes_input.trim().parse::<u64>() {
-            self.draft.whisper_max_audio_bytes = bytes;
-        }
 
         FinalizeSetupRequest {
             draft: self.draft.clone(),
@@ -365,12 +363,34 @@ impl FirstRunTuiState {
             PortsField::ContainerNetworkIsolation => {
                 self.draft.container_network_isolated = !self.draft.container_network_isolated;
             }
-            PortsField::NativeAudioTranscription => {
+            _ => {}
+        }
+    }
+
+    pub fn next_audio_transcription_focus(&mut self) {
+        self.audio_transcription_focus = match self.audio_transcription_focus {
+            AudioTranscriptionField::NativeAudioTranscription => {
+                AudioTranscriptionField::WhisperModel
+            }
+            AudioTranscriptionField::WhisperModel => {
+                AudioTranscriptionField::NativeAudioTranscription
+            }
+        };
+    }
+
+    pub fn previous_audio_transcription_focus(&mut self) {
+        self.next_audio_transcription_focus();
+    }
+
+    pub fn toggle_audio_transcription_field(&mut self) {
+        match self.audio_transcription_focus {
+            AudioTranscriptionField::NativeAudioTranscription => {
                 self.draft.native_audio_transcription_enabled =
                     !self.draft.native_audio_transcription_enabled;
             }
-            PortsField::WhisperModel => toggle_whisper_model(&mut self.draft.whisper_model),
-            _ => {}
+            AudioTranscriptionField::WhisperModel => {
+                cycle_whisper_model(&mut self.draft.whisper_model, true)
+            }
         }
     }
 
@@ -409,7 +429,6 @@ impl FirstRunTuiState {
                 | PortsField::AccessTokenLifetimeSecs
                 | PortsField::RefreshTokenLifetimeSecs
                 | PortsField::ContainerNetworkName
-                | PortsField::WhisperMaxAudioBytes
         )
     }
 
@@ -422,7 +441,6 @@ impl FirstRunTuiState {
                 | PortsField::ContainerMcpPort
                 | PortsField::AccessTokenLifetimeSecs
                 | PortsField::RefreshTokenLifetimeSecs
-                | PortsField::WhisperMaxAudioBytes
         )
     }
 
@@ -473,7 +491,6 @@ impl FirstRunTuiState {
                 | SummaryField::AccessTokenLifetimeSecs
                 | SummaryField::RefreshTokenLifetimeSecs
                 | SummaryField::ContainerNetworkName
-                | SummaryField::WhisperMaxAudioBytes
         )
     }
 
@@ -486,7 +503,6 @@ impl FirstRunTuiState {
                 | SummaryField::ContainerMcpPort
                 | SummaryField::AccessTokenLifetimeSecs
                 | SummaryField::RefreshTokenLifetimeSecs
-                | SummaryField::WhisperMaxAudioBytes
         )
     }
 
@@ -506,7 +522,6 @@ impl FirstRunTuiState {
                 self.refresh_token_lifetime_secs_input.push(ch)
             }
             SummaryField::ContainerNetworkName => self.container_network_name_input.push(ch),
-            SummaryField::WhisperMaxAudioBytes => self.whisper_max_audio_bytes_input.push(ch),
             _ => {}
         }
     }
@@ -549,9 +564,6 @@ impl FirstRunTuiState {
             SummaryField::ContainerNetworkName => {
                 self.container_network_name_input.pop();
             }
-            SummaryField::WhisperMaxAudioBytes => {
-                self.whisper_max_audio_bytes_input.pop();
-            }
             _ => {}
         }
     }
@@ -577,7 +589,7 @@ impl FirstRunTuiState {
                 self.draft.native_audio_transcription_enabled =
                     !self.draft.native_audio_transcription_enabled;
             }
-            SummaryField::WhisperModel => toggle_whisper_model(&mut self.draft.whisper_model),
+            SummaryField::WhisperModel => cycle_whisper_model(&mut self.draft.whisper_model, true),
             _ => {}
         }
     }
@@ -645,7 +657,8 @@ impl FirstRunTuiState {
                 AccessModeDraft::LocalOnly => SetupStep::AccessMode,
                 AccessModeDraft::RemoteOnly | AccessModeDraft::Both => SetupStep::Auth,
             }),
-            SetupStep::Summary => Some(SetupStep::PortsAndSettings),
+            SetupStep::AudioTranscription => Some(SetupStep::PortsAndSettings),
+            SetupStep::Summary => Some(SetupStep::AudioTranscription),
             SetupStep::ConnectionCard => None,
             SetupStep::RuntimeStatus => self
                 .connection_card
@@ -813,10 +826,6 @@ fn ports_focus_order(
             }
         }
     }
-    order.push(PortsField::NativeAudioTranscription);
-    order.push(PortsField::WhisperModel);
-    order.push(PortsField::WhisperMaxAudioBytes);
-
     order
 }
 
@@ -865,16 +874,40 @@ fn summary_focus_order(
     }
     order.push(SummaryField::NativeAudioTranscription);
     order.push(SummaryField::WhisperModel);
-    order.push(SummaryField::WhisperMaxAudioBytes);
 
     order
 }
 
-fn toggle_whisper_model(model: &mut String) {
-    if model == "base.en" {
-        *model = "tiny.en".into();
+const WHISPER_MODEL_CHOICES: &[(&str, &str)] = &[
+    ("tiny.en", "75 MB"),
+    ("base.en", "142 MB"),
+    ("small.en", "466 MB"),
+    ("medium.en", "1.5 GB"),
+];
+
+fn cycle_whisper_model(model: &mut String, forward: bool) {
+    let current_index = WHISPER_MODEL_CHOICES
+        .iter()
+        .position(|(choice, _)| *choice == model.as_str())
+        .unwrap_or(0);
+    let next_index = if forward {
+        (current_index + 1) % WHISPER_MODEL_CHOICES.len()
+    } else if current_index == 0 {
+        WHISPER_MODEL_CHOICES.len() - 1
     } else {
-        *model = "base.en".into();
+        current_index - 1
+    };
+    *model = WHISPER_MODEL_CHOICES[next_index].0.to_string();
+}
+
+pub fn whisper_model_label(model: &str) -> String {
+    if let Some((_, size)) = WHISPER_MODEL_CHOICES
+        .iter()
+        .find(|(choice, _)| *choice == model)
+    {
+        format!("{model} ({size})")
+    } else {
+        model.to_string()
     }
 }
 
@@ -896,7 +929,7 @@ mod tests {
         state.draft.access_mode = AccessModeDraft::LocalOnly;
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..9 {
+        for _ in 0..8 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -913,7 +946,6 @@ mod tests {
                 SummaryField::ContainerNetworkName,
                 SummaryField::NativeAudioTranscription,
                 SummaryField::WhisperModel,
-                SummaryField::WhisperMaxAudioBytes,
             ]
         );
 
@@ -925,9 +957,6 @@ mod tests {
     fn local_only_previous_summary_focus_wraps_over_visible_fields_only() {
         let mut state = sample_state();
         state.draft.access_mode = AccessModeDraft::LocalOnly;
-
-        state.previous_summary_focus();
-        assert_eq!(state.summary_focus, SummaryField::WhisperMaxAudioBytes);
 
         state.previous_summary_focus();
         assert_eq!(state.summary_focus, SummaryField::WhisperModel);
@@ -991,7 +1020,7 @@ mod tests {
         let mut state = sample_state();
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..17 {
+        for _ in 0..16 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -1016,7 +1045,6 @@ mod tests {
                 SummaryField::ContainerNetworkName,
                 SummaryField::NativeAudioTranscription,
                 SummaryField::WhisperModel,
-                SummaryField::WhisperMaxAudioBytes,
             ]
         );
     }
@@ -1027,7 +1055,7 @@ mod tests {
         state.generate_password = false;
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..18 {
+        for _ in 0..17 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -1053,7 +1081,6 @@ mod tests {
                 SummaryField::ContainerNetworkName,
                 SummaryField::NativeAudioTranscription,
                 SummaryField::WhisperModel,
-                SummaryField::WhisperMaxAudioBytes,
             ]
         );
 
@@ -1070,7 +1097,54 @@ mod tests {
 
         state.next_ports_focus(&access_mode);
 
-        assert_eq!(state.ports_focus, PortsField::NativeAudioTranscription);
+        assert_eq!(state.ports_focus, PortsField::GatewayPort);
+    }
+
+    #[test]
+    fn audio_transcription_focus_wraps_over_audio_fields_only() {
+        let mut state = sample_state();
+
+        assert_eq!(
+            state.audio_transcription_focus,
+            AudioTranscriptionField::NativeAudioTranscription
+        );
+
+        state.next_audio_transcription_focus();
+        assert_eq!(
+            state.audio_transcription_focus,
+            AudioTranscriptionField::WhisperModel
+        );
+
+        state.next_audio_transcription_focus();
+        assert_eq!(
+            state.audio_transcription_focus,
+            AudioTranscriptionField::NativeAudioTranscription
+        );
+
+        state.previous_audio_transcription_focus();
+        assert_eq!(
+            state.audio_transcription_focus,
+            AudioTranscriptionField::WhisperModel
+        );
+    }
+
+    #[test]
+    fn audio_transcription_model_cycles_through_supported_choices() {
+        let mut state = sample_state();
+        state.audio_transcription_focus = AudioTranscriptionField::WhisperModel;
+        state.draft.whisper_model = "tiny.en".into();
+
+        state.toggle_audio_transcription_field();
+        assert_eq!(state.draft.whisper_model, "base.en");
+
+        state.toggle_audio_transcription_field();
+        assert_eq!(state.draft.whisper_model, "small.en");
+
+        state.toggle_audio_transcription_field();
+        assert_eq!(state.draft.whisper_model, "medium.en");
+
+        state.toggle_audio_transcription_field();
+        assert_eq!(state.draft.whisper_model, "tiny.en");
     }
 
     #[test]

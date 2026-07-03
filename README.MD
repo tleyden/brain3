@@ -132,7 +132,8 @@ The vault path is the only required decision. The other steps have defaults you 
 - **Vault Path** — enter the absolute path to your Obsidian vault. It must already exist.
 - **Local/Remote Access** — choose Local MCP only, Remote MCP only, or Both.
 - **Auth Setup** — choose the username (`admin`) and client ID (`brain3-oauth2-client`). The password is auto-generated; press `g` to enter a custom one.
-- **Network Security** — review ports, container name, token lifetimes, and native audio transcription. If enabled, Brain3 downloads and checksum-verifies the selected Whisper model (`base.en` by default).
+- **Network Security** — review ports, container name, token lifetimes, PKCE, hostname checks, and container networking.
+- **Audio Transcription** — enable the native `transcribe_audio_file` MCP tool and choose the Whisper model Brain3 should download and checksum-verify.
 
 ### Configure your AI 
 
@@ -460,9 +461,9 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_USERNAME` | *(required)* | Login username for the Brain3 sign-in page |
 | `B3_PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
 | `B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
-| `B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED` | `true` on macOS/Linux, `false` on Windows | Enable the native `transcribe_audio_file` MCP tool. The tool runs in the gateway process, not the MCP container. |
-| `B3_WHISPER_MODEL` | `base.en` | Whisper ggml model to use. Supported setup choices are `tiny.en` and `base.en`; files are stored in `~/.brain3/whisper-models/`. |
-| `B3_WHISPER_MAX_AUDIO_BYTES` | `52428800` | Maximum audio download size accepted by `transcribe_audio_file`. |
+| `B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED` | `false` | Enable the native `transcribe_audio_file` MCP tool. The tool runs in the gateway process, not the MCP container. |
+| `B3_WHISPER_MODEL` | `base.en` | Whisper ggml model to use. Supported setup choices are `tiny.en`, `base.en`, `small.en`, and `medium.en`; files are stored in `~/.brain3/whisper-models/`. |
+| `B3_WHISPER_MAX_AUDIO_BYTES` | `52428800` | Maximum audio download size accepted by `transcribe_audio_file`. This is supported as a `.env` setting and is not edited in the setup wizard. |
 | `B3_CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
 | `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cf-setup` to provision it |
 | `B3_CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `B3_CF_TUNNEL_NAME`) |

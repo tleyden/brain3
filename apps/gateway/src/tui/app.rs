@@ -326,14 +326,8 @@ async fn event_loop(
                         ) {
                             tracing::debug!(msg, "lifetime validation failed");
                             state.error_message = Some(msg);
-                        } else if let Err(msg) = validate_positive_u64_input(
-                            &state.whisper_max_audio_bytes_input,
-                            "Whisper max audio bytes",
-                        ) {
-                            tracing::debug!(msg, "whisper max audio bytes validation failed");
-                            state.error_message = Some(msg);
                         } else {
-                            state.step = SetupStep::Summary;
+                            state.step = SetupStep::AudioTranscription;
                         }
                     } else if let Err(msg) =
                         validate_port_input(&state.container_host_port_input, "Container host port")
@@ -345,14 +339,8 @@ async fn event_loop(
                     {
                         tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
-                    } else if let Err(msg) = validate_positive_u64_input(
-                        &state.whisper_max_audio_bytes_input,
-                        "Whisper max audio bytes",
-                    ) {
-                        tracing::debug!(msg, "whisper max audio bytes validation failed");
-                        state.error_message = Some(msg);
                     } else {
-                        state.step = SetupStep::Summary;
+                        state.step = SetupStep::AudioTranscription;
                     }
                 }
                 KeyCode::Tab | KeyCode::Down => {
@@ -395,9 +383,6 @@ async fn event_loop(
                         PortsField::ContainerNetworkName => {
                             state.container_network_name_input.pop();
                         }
-                        PortsField::WhisperMaxAudioBytes => {
-                            state.whisper_max_audio_bytes_input.pop();
-                        }
                         _ => {}
                     }
                 }
@@ -420,18 +405,35 @@ async fn event_loop(
                         PortsField::ContainerNetworkName => {
                             state.container_network_name_input.push(ch)
                         }
-                        PortsField::WhisperMaxAudioBytes => {
-                            state.whisper_max_audio_bytes_input.push(ch)
-                        }
                         _ => {}
                     }
+                }
+                _ => {}
+            },
+            SetupStep::AudioTranscription => match key.code {
+                KeyCode::Esc => {
+                    state.clear_messages();
+                    state.step = SetupStep::PortsAndSettings;
+                }
+                KeyCode::Enter => {
+                    state.clear_messages();
+                    state.step = SetupStep::Summary;
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    state.next_audio_transcription_focus();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    state.previous_audio_transcription_focus();
+                }
+                KeyCode::Char('t') => {
+                    state.toggle_audio_transcription_field();
                 }
                 _ => {}
             },
             SetupStep::Summary => match key.code {
                 KeyCode::Esc => {
                     state.clear_messages();
-                    state.step = SetupStep::PortsAndSettings;
+                    state.step = SetupStep::AudioTranscription;
                 }
                 KeyCode::Enter => {
                     finalize_and_start(state, use_case, runtime_overrides.clone(), startup_policy)
