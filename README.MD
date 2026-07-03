@@ -102,7 +102,7 @@ Windows release artifacts are published for the `x86_64-pc-windows-msvc` target.
 On macOS or Linux, install with:
 
 ```bash
-curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.2.9/install.sh | sh
+curl -sSfL https://brain3.s3.amazonaws.com/releases/v0.2.10/install.sh | sh
 ```
 
 For Windows, download and extract the Windows artifact:
