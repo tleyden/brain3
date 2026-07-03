@@ -40,9 +40,36 @@ const OAUTH_USERNAME: &str = "e2e-test-user";
 const OAUTH_PASSWORD: &str = "e2e-test-password";
 const OAUTH_REDIRECT_URI: &str = "https://claude.ai/api/mcp/auth_callback";
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(10);
+const NETWORKED_E2E_TIMEOUT: Duration = Duration::from_secs(15);
 
 type E2eOAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
+
+#[derive(Clone, Copy)]
+enum TunnelMode {
+    Disabled,
+    CloudflareQuick,
+}
+
+impl TunnelMode {
+    fn quick_tunnel_env_value(self) -> &'static str {
+        match self {
+            Self::Disabled => "false",
+            Self::CloudflareQuick => "true",
+        }
+    }
+
+    fn enforce_hostname_check_env_value(self) -> &'static str {
+        match self {
+            Self::Disabled => "false",
+            Self::CloudflareQuick => "true",
+        }
+    }
+
+    fn uses_cloudflared_shim(self) -> bool {
+        matches!(self, Self::Disabled)
+    }
+}
 
 struct TempTestDir {
     root: PathBuf,
@@ -50,10 +77,11 @@ struct TempTestDir {
     env_file: PathBuf,
     brain3_db: PathBuf,
     cloudflared_shim_dir: PathBuf,
+    tunnel_mode: TunnelMode,
 }
 
 impl TempTestDir {
-    fn create() -> io::Result<Self> {
+    fn create(tunnel_mode: TunnelMode) -> io::Result<Self> {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system clock should be after unix epoch")
@@ -70,8 +98,11 @@ impl TempTestDir {
             root,
             vault,
             cloudflared_shim_dir,
+            tunnel_mode,
         };
-        temp.write_cloudflared_shim()?;
+        if tunnel_mode.uses_cloudflared_shim() {
+            temp.write_cloudflared_shim()?;
+        }
         Ok(temp)
     }
 
@@ -97,7 +128,7 @@ impl TempTestDir {
                  B3_USERNAME=e2e-test-user\n\
                  B3_PASSWORD=e2e-test-password\n\
                  B3_TOKEN_DB_PATH={}\n\
-                 B3_CF_QUICK_TUNNEL=false\n\
+                 B3_CF_QUICK_TUNNEL={}\n\
                  B3_CONTAINER_RUNTIME=docker\n\
                  B3_VAULT_PATH={}\n\
                  B3_CONTAINER_IMAGE_REPO=brain3-mcp-vault-tools\n\
@@ -106,10 +137,12 @@ impl TempTestDir {
                  B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=false\n\
                  B3_LOCAL_MCP_PORT={LOCAL_MCP_PORT}\n\
                  LOCAL_GATEWAY_MCP_BEARER_TOKEN={LOCAL_BEARER_TOKEN}\n\
-                 B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK=false\n\
+                 B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK={}\n\
                  BRAIN3_ENABLE_SYNC_REINDEX_TOOL=true\n",
                 self.brain3_db.display(),
+                self.tunnel_mode.quick_tunnel_env_value(),
                 self.vault.display(),
+                self.tunnel_mode.enforce_hostname_check_env_value(),
             ),
         )
     }
@@ -180,9 +213,13 @@ struct Brain3Process {
 }
 
 impl Brain3Process {
-    async fn spawn(temp: &TempTestDir) -> Result<Self, Box<dyn std::error::Error>> {
+    async fn spawn(
+        temp: &TempTestDir,
+        tunnel_mode: TunnelMode,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let binary = env!("CARGO_BIN_EXE_brain3");
-        let mut child = Command::new(binary)
+        let mut command = Command::new(binary);
+        command
             .arg("--cli")
             .arg("--env-file")
             .arg(&temp.env_file)
@@ -190,7 +227,6 @@ impl Brain3Process {
             .arg(&temp.root)
             .arg("--log-level")
             .arg("debug")
-            .env("PATH", temp.path_with_shim())
             .env("B3_HOME", &temp.root)
             .env("B3_OAUTH2_GATEWAY_PORT", OAUTH_PORT.to_string())
             .env("B3_OAUTH2_GATEWAY_CLIENT_ID", OAUTH_CLIENT_ID)
@@ -198,7 +234,7 @@ impl Brain3Process {
             .env("B3_USERNAME", OAUTH_USERNAME)
             .env("B3_PASSWORD", OAUTH_PASSWORD)
             .env("B3_TOKEN_DB_PATH", &temp.brain3_db)
-            .env("B3_CF_QUICK_TUNNEL", "false")
+            .env("B3_CF_QUICK_TUNNEL", tunnel_mode.quick_tunnel_env_value())
             .env("B3_CONTAINER_RUNTIME", "docker")
             .env("B3_VAULT_PATH", &temp.vault)
             .env("B3_CONTAINER_IMAGE_REPO", "brain3-mcp-vault-tools")
@@ -207,10 +243,18 @@ impl Brain3Process {
             .env("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", "false")
             .env("B3_LOCAL_MCP_PORT", LOCAL_MCP_PORT.to_string())
             .env("LOCAL_GATEWAY_MCP_BEARER_TOKEN", LOCAL_BEARER_TOKEN)
-            .env("B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK", "false")
+            .env(
+                "B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK",
+                tunnel_mode.enforce_hostname_check_env_value(),
+            )
             .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()?;
+            .stderr(Stdio::inherit());
+
+        if tunnel_mode.uses_cloudflared_shim() {
+            command.env("PATH", temp.path_with_shim());
+        }
+
+        let mut child = command.spawn()?;
 
         let stdout = child
             .stdout
@@ -274,6 +318,49 @@ impl Brain3Process {
     }
 }
 
+fn real_cloudflared_on_path() -> bool {
+    Command::new("cloudflared")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
+async fn read_public_tunnel_url(temp: &TempTestDir) -> Result<String, Box<dyn std::error::Error>> {
+    let log_path = temp.root.join("brain3.log");
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    while Instant::now() < deadline {
+        match fs::read_to_string(&log_path) {
+            Ok(log) => {
+                if let Some(url) = log.lines().find_map(extract_trycloudflare_url) {
+                    return Ok(url);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    Err(format!(
+        "did not find trycloudflare.com URL in log file within 5s: {}",
+        log_path.display()
+    )
+    .into())
+}
+
+fn extract_trycloudflare_url(line: &str) -> Option<String> {
+    let start = line.find("https://")?;
+    let rest = &line[start..];
+    let end = rest
+        .find(|c: char| c.is_whitespace() || c == '|')
+        .unwrap_or(rest.len());
+    let url = &rest[..end];
+    url.contains(".trycloudflare.com").then(|| url.to_string())
+}
+
 struct DiagnosticsDumpGuard<'a> {
     gateway: &'a Brain3Process,
 }
@@ -335,11 +422,11 @@ impl Drop for Brain3Process {
 
 #[tokio::test]
 async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempTestDir::create()?;
+    let temp = TempTestDir::create(TunnelMode::Disabled)?;
     temp.write_env_file()?;
 
     {
-        let gateway = Brain3Process::spawn(&temp).await?;
+        let gateway = Brain3Process::spawn(&temp, TunnelMode::Disabled).await?;
         let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
         assert_container_running_and_vault_visible(&gateway).await?;
         let client = connect_local_mcp().await?;
@@ -596,11 +683,11 @@ async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::test]
 async fn e2e_smoke_2_oauth_public_flow() -> Result<(), Box<dyn std::error::Error>> {
-    let temp = TempTestDir::create()?;
+    let temp = TempTestDir::create(TunnelMode::Disabled)?;
     temp.write_env_file()?;
 
     {
-        let gateway = Brain3Process::spawn(&temp).await?;
+        let gateway = Brain3Process::spawn(&temp, TunnelMode::Disabled).await?;
         let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
         assert_container_running_and_vault_visible(&gateway).await?;
 
@@ -647,7 +734,7 @@ async fn e2e_smoke_2_oauth_public_flow() -> Result<(), Box<dyn std::error::Error
         );
         let access_token = token_response.access_token().secret();
 
-        let client = connect_public_mcp(access_token).await?;
+        let client = connect_public_mcp(&base_url, access_token).await?;
         let create = call_tool_json(
             &client,
             "vault_create_overwrite_file",
@@ -681,6 +768,80 @@ async fn e2e_smoke_2_oauth_public_flow() -> Result<(), Box<dyn std::error::Error
     Ok(())
 }
 
+#[tokio::test]
+async fn e2e_smoke_3_oauth_quick_tunnel() -> Result<(), Box<dyn std::error::Error>> {
+    if !real_cloudflared_on_path() {
+        println!("SKIP: e2e_smoke_3_oauth_quick_tunnel requires cloudflared on PATH");
+        return Ok(());
+    }
+
+    let temp = TempTestDir::create(TunnelMode::CloudflareQuick)?;
+    temp.write_env_file()?;
+
+    {
+        let gateway = Brain3Process::spawn(&temp, TunnelMode::CloudflareQuick).await?;
+        let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
+        assert_container_running_and_vault_visible(&gateway).await?;
+
+        let http_client = oauth_http_client()?;
+        let base_url = read_public_tunnel_url(&temp).await?;
+        println!("quick tunnel public URL: {base_url}");
+
+        wait_for_public_tunnel_health(&http_client, &base_url).await?;
+        assert_public_mcp_rejects_missing_and_invalid_bearers(&http_client, &base_url).await?;
+
+        let (challenge, verifier) = PkceCodeChallenge::new_random_sha256();
+        let csrf = CsrfToken::new_random();
+        let code = submit_login_for_authorization_code(
+            &http_client,
+            &base_url,
+            challenge.as_str(),
+            csrf.secret(),
+        )
+        .await?;
+
+        let token_response = oauth_client(&base_url)?
+            .exchange_code(AuthorizationCode::new(code))
+            .set_pkce_verifier(verifier)
+            .request_async(&http_client)
+            .await?;
+        let access_token = token_response.access_token().secret();
+
+        let create = post_public_mcp_tool_call_json(
+            &http_client,
+            &base_url,
+            access_token,
+            "vault_create_overwrite_file",
+            json!({
+                "path": "oauth/quick-tunnel.md",
+                "content": "# OAuth quick tunnel\nReached through a Cloudflare quick tunnel.\n",
+            }),
+        )
+        .await?;
+        assert_eq!(create["path"], "oauth/quick-tunnel.md");
+        assert_eq!(create["created"], true);
+
+        let read = post_public_mcp_tool_call_json(
+            &http_client,
+            &base_url,
+            access_token,
+            "vault_read",
+            json!({"path": "oauth/quick-tunnel.md"}),
+        )
+        .await?;
+        assert!(
+            read["content"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("Cloudflare quick tunnel"),
+            "quick tunnel MCP read did not return the created note: {read}"
+        );
+    }
+
+    assert_no_container_residue().await?;
+    Ok(())
+}
+
 async fn connect_local_mcp(
 ) -> Result<rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>, Box<dyn std::error::Error>>
 {
@@ -699,11 +860,12 @@ async fn connect_local_mcp(
 }
 
 async fn connect_public_mcp(
+    base_url: &str,
     access_token: &str,
 ) -> Result<rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>, Box<dyn std::error::Error>>
 {
     let transport = StreamableHttpClientTransport::from_config(
-        StreamableHttpClientTransportConfig::with_uri(format!("http://127.0.0.1:{OAUTH_PORT}/mcp"))
+        StreamableHttpClientTransportConfig::with_uri(format!("{base_url}/mcp"))
             .auth_header(access_token),
     );
     let client_info = ClientInfo::new(
@@ -711,13 +873,47 @@ async fn connect_public_mcp(
         Implementation::new("brain3-e2e-smoke", "0.0.0"),
     );
 
-    Ok(client_info.serve(transport).await?)
+    Ok(
+        tokio::time::timeout(NETWORKED_E2E_TIMEOUT, client_info.serve(transport))
+            .await
+            .map_err(|_| {
+                io::Error::new(io::ErrorKind::TimedOut, "timed out connecting public MCP")
+            })??,
+    )
 }
 
 fn oauth_http_client() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
     Ok(reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        .timeout(NETWORKED_E2E_TIMEOUT)
         .build()?)
+}
+
+async fn wait_for_public_tunnel_health(
+    http_client: &reqwest::Client,
+    base_url: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let deadline = Instant::now() + Duration::from_secs(240);
+    let mut last_error = String::from("public health endpoint was not probed");
+
+    while Instant::now() < deadline {
+        match http_client
+            .get(format!("{base_url}/health"))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+        {
+            Ok(response) if response.status() == reqwest::StatusCode::OK => return Ok(()),
+            Ok(response) => last_error = format!("status {}", response.status()),
+            Err(error) => last_error = format!("{error:?}"),
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    Err(format!(
+        "public quick tunnel health did not become reachable within 240s at {base_url}: {last_error}"
+    )
+    .into())
 }
 
 fn oauth_client(base_url: &str) -> Result<E2eOAuthClient, Box<dyn std::error::Error>> {
@@ -857,6 +1053,48 @@ async fn post_mcp_tools_list(
     Ok(request.send().await?)
 }
 
+async fn post_public_mcp_tool_call_json(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    bearer_token: &str,
+    name: &'static str,
+    arguments: Value,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let response = http_client
+        .post(format!("{base_url}/mcp"))
+        .bearer_auth(bearer_token)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(
+            reqwest::header::ACCEPT,
+            "application/json, text/event-stream",
+        )
+        .body(serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": arguments,
+            }
+        }))?)
+        .send()
+        .await?;
+
+    let status = response.status();
+    let body = response.text().await?;
+    assert!(
+        status.is_success(),
+        "public MCP tool call {name} returned HTTP {status}: {body}"
+    );
+
+    let value: Value = serde_json::from_str(&body)?;
+    assert!(
+        value.get("error").is_none(),
+        "public MCP tool call {name} returned JSON-RPC error: {value}"
+    );
+    tool_result_value_json(&value)
+}
+
 async fn assert_token_rejects_wrong_client_secret(
     http_client: &reqwest::Client,
     base_url: &str,
@@ -945,9 +1183,10 @@ async fn call_tool_json(
         .as_object()
         .cloned()
         .ok_or("tool arguments must be a JSON object")?;
-    let result = client
-        .call_tool(CallToolRequestParams::new(name).with_arguments(arguments))
-        .await?;
+    let result = client.call_tool(CallToolRequestParams::new(name).with_arguments(arguments));
+    let result = tokio::time::timeout(NETWORKED_E2E_TIMEOUT, result)
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "timed out calling MCP tool"))??;
     assert!(
         result.is_error != Some(true),
         "tool {name} returned MCP error result: {result:?}"
@@ -993,6 +1232,24 @@ fn tool_result_json(result: &CallToolResult) -> Result<Value, Box<dyn std::error
             _ => None,
         })
         .ok_or("tool result did not include text content")?;
+    Ok(serde_json::from_str(text)?)
+}
+
+fn tool_result_value_json(value: &Value) -> Result<Value, Box<dyn std::error::Error>> {
+    let text = value
+        .get("result")
+        .and_then(|result| result.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|content| {
+            content.iter().find_map(|block| {
+                (block.get("type").and_then(Value::as_str) == Some("text"))
+                    .then(|| block.get("text").and_then(Value::as_str))
+                    .flatten()
+            })
+        })
+        .ok_or_else(|| {
+            io::Error::other(format!("tool result did not include text content: {value}"))
+        })?;
     Ok(serde_json::from_str(text)?)
 }
 

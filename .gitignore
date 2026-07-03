@@ -6,6 +6,10 @@
 /target/
 **/*.rs.bk
 
+# Python
+__pycache__/
+*.py[cod]
+
 .brain3_test_vault
 .cloudflared
 .demo_vault
