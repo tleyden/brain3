@@ -922,6 +922,23 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
     lines.push(blank_line());
 
+    if state.finalize_rx.is_some() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} ", spinner_char(state.tick_count)),
+                accent_style(),
+            ),
+            Span::styled(
+                state
+                    .info_message
+                    .clone()
+                    .unwrap_or_else(|| "Saving configuration...".into()),
+                accent_style(),
+            ),
+        ]));
+        return lines;
+    }
+
     if state.startup_rx.is_some() {
         lines.push(Line::from(vec![
             Span::styled(
@@ -942,6 +959,18 @@ fn runtime_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             "Tunnel",
             startup_badge(&runtime.tunnel_status),
         ));
+        let transcription = &runtime.config.native_audio_transcription;
+        lines.push(key_badge_line(
+            "Native audio transcription",
+            if transcription.enabled {
+                badge_span("Enabled", Color::Green)
+            } else {
+                badge_span("Disabled", Color::Yellow)
+            },
+        ));
+        if transcription.enabled {
+            lines.push(key_value_line("Whisper model", transcription.model.clone()));
+        }
 
         if let Some(container) = runtime.config.container.as_ref() {
             lines.push(key_value_line(
@@ -1064,7 +1093,8 @@ fn status_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     }
 
     if let Some(info) = &state.info_message {
-        let has_active_task = state.startup_rx.is_some() || state.probe_rx.is_some();
+        let has_active_task =
+            state.finalize_rx.is_some() || state.startup_rx.is_some() || state.probe_rx.is_some();
         return vec![Line::from(if has_active_task {
             vec![
                 Span::styled(
@@ -1169,12 +1199,16 @@ fn runtime_action_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             if matches!(state.previous_step(), Some(SetupStep::ConnectionCard)) {
                 hints.push(("[c]", "MCP config settings"));
             }
-            if state.startup_rx.is_none() && state.probe_rx.is_none() && state.runtime.is_some() {
+            if state.finalize_rx.is_none()
+                && state.startup_rx.is_none()
+                && state.probe_rx.is_none()
+                && state.runtime.is_some()
+            {
                 hints.push(("[r]", "Refresh"));
             }
             hints.push(("[q]", "Quit"));
 
-            let message = if state.startup_rx.is_some() {
+            let message = if state.finalize_rx.is_some() || state.startup_rx.is_some() {
                 "Brain3 is starting..."
             } else if state
                 .runtime
@@ -1571,6 +1605,7 @@ mod tests {
         SetupStep, TunnelModeDraft,
     };
     use brain3_platform::runtime::{RuntimeBootstrap, StartupStatus};
+    use tokio::sync::oneshot;
 
     use super::*;
 
@@ -1869,6 +1904,107 @@ mod tests {
 
         assert!(text.contains("Press c to view MCP connection details."));
         assert!(!text.contains("switch back"));
+    }
+
+    #[test]
+    fn runtime_screen_shows_downloading_whisper_model_status() {
+        let mut state = sample_state();
+        let (_tx, rx) = oneshot::channel();
+        state.finalize_rx = Some(rx);
+        state.step = SetupStep::RuntimeStatus;
+        state.info_message = Some("Downloading Whisper model...".into());
+
+        let rendered = render_runtime_lines_to_string(&state);
+
+        assert!(rendered.contains("Downloading Whisper model..."));
+    }
+
+    #[test]
+    fn runtime_screen_shows_native_audio_transcription_enabled() {
+        let state = runtime_state_with_native_audio(true, "base.en");
+
+        let rendered = render_runtime_lines_to_string(&state);
+
+        assert!(rendered.contains("Native audio transcription:  Enabled"));
+    }
+
+    #[test]
+    fn runtime_screen_shows_native_audio_transcription_disabled() {
+        let state = runtime_state_with_native_audio(false, "base.en");
+
+        let rendered = render_runtime_lines_to_string(&state);
+
+        assert!(rendered.contains("Native audio transcription:  Disabled"));
+    }
+
+    fn render_runtime_lines_to_string(state: &FirstRunTuiState) -> String {
+        runtime_lines(state)
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| span.content.as_ref())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn runtime_state_with_native_audio(enabled: bool, model: &str) -> FirstRunTuiState {
+        let mut state = sample_state();
+        state.step = SetupStep::RuntimeStatus;
+        state.runtime = Some(RuntimeBootstrap::new(
+            Arc::new(gateway_config_with_native_audio(enabled, model)),
+            "secret".into(),
+            RuntimeLaunchPlan {
+                paths: state.preparation.paths.clone(),
+                env_file: state.preparation.paths.env_file.clone(),
+                log_file: PathBuf::from("/tmp/brain3-home/brain3.log"),
+            },
+            Some("https://brain3.example.com".into()),
+            StartupStatus::Ready,
+            StartupStatus::Ready,
+            false,
+        ));
+        state
+    }
+
+    fn gateway_config_with_native_audio(enabled: bool, model: &str) -> GatewayConfig {
+        GatewayConfig {
+            port: 8421,
+            host: "127.0.0.1".into(),
+            token_db_path: PathBuf::from("/tmp/brain3-home/brain3.db"),
+            oauth: OAuthConfig {
+                client_id: "brain3-oauth2-client".into(),
+                client_secret: "secret".into(),
+                access_token_lifetime_secs: 3600,
+                refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                pkce_required: true,
+                username: "admin".into(),
+                password: "password".into(),
+            },
+            mcp_reverse_proxy: MCPReverseProxyConfig {
+                mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                upstream_secret: "secret".into(),
+            },
+            hostname_validation: HostnameValidationConfig {
+                expected_host: None,
+                enforce: true,
+            },
+            access_mode: AccessMode::Both,
+            local_mcp: None,
+            container: None,
+            tunnel: None,
+            native_audio_transcription:
+                brain3_core::domain::model::NativeAudioTranscriptionConfig {
+                    enabled,
+                    model: model.into(),
+                    model_path: PathBuf::from(format!(
+                        "/tmp/brain3-home/whisper-models/ggml-{model}.bin"
+                    )),
+                    max_audio_bytes: 52_428_800,
+                },
+        }
     }
 
     fn sample_state() -> FirstRunTuiState {

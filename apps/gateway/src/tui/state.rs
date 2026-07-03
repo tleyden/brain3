@@ -2,13 +2,14 @@ use std::path::PathBuf;
 
 use brain3_core::domain::setup::{
     AccessModeDraft, ConnectionCard, DependencyAvailability, FinalizeSetupRequest, InstallAction,
-    SetupDraftConfig, SetupPreparation, SetupStep, SetupSummary,
+    RuntimeStartupPolicy, SetupDraftConfig, SetupPreparation, SetupStep, SetupSummary,
 };
 use tokio::sync::oneshot;
 
 use brain3_platform::runtime::RuntimeBootstrap;
 
 use crate::server::{ConfiguredGatewaySession, GatewayServerHandle, GatewayServerStatus};
+use crate::RuntimeOverrides;
 
 use super::runtime_logs::RuntimeLogs;
 
@@ -117,6 +118,9 @@ pub struct FirstRunTuiState {
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
     pub summary_focus: SummaryField,
+    pub finalize_rx: Option<
+        oneshot::Receiver<anyhow::Result<(SetupSummary, RuntimeOverrides, RuntimeStartupPolicy)>>,
+    >,
     pub startup_rx: Option<oneshot::Receiver<anyhow::Result<ConfiguredGatewaySession>>>,
     pub probe_rx: Option<oneshot::Receiver<Result<(), String>>>,
     pub tick_count: u64,
@@ -179,6 +183,7 @@ impl FirstRunTuiState {
             dependency_focus,
             dependency_action_index: 0,
             summary_focus: SummaryField::VaultPath,
+            finalize_rx: None,
             startup_rx: None,
             probe_rx: None,
             tick_count: 0,

@@ -15,6 +15,7 @@ use crate::ports::setup_system::SetupSystemPort;
 
 pub const CURRENT_RELEASE: &str = "v0.2.10";
 
+#[derive(Clone)]
 pub struct FirstRunSetupUseCase {
     port: Arc<dyn SetupSystemPort>,
     defaults: SetupDefaults,
