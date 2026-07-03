@@ -3,8 +3,8 @@
 use std::collections::BTreeSet;
 use std::env;
 use std::fs;
-use std::io::{self, BufRead, BufReader};
-use std::path::PathBuf;
+use std::io::{self, BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread::{self, JoinHandle};
@@ -27,6 +27,7 @@ use rmcp::{
     ServiceExt,
 };
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
@@ -42,6 +43,12 @@ const OAUTH_PASSWORD: &str = "e2e-test-password";
 const OAUTH_REDIRECT_URI: &str = "https://claude.ai/api/mcp/auth_callback";
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(10);
 const NETWORKED_E2E_TIMEOUT: Duration = Duration::from_secs(15);
+const WHISPER_MODEL_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+const DEFAULT_WHISPER_MODEL_URL: &str =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
+const DEFAULT_WHISPER_MODEL_SHA256: &str =
+    "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002";
+const DEFAULT_WHISPER_MODEL_SIZE_BYTES: u64 = 147_964_211;
 
 type E2eOAuthClient =
     BasicClient<EndpointSet, EndpointNotSet, EndpointNotSet, EndpointNotSet, EndpointSet>;
@@ -707,33 +714,17 @@ async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
 
 #[tokio::test]
 async fn e2e_smoke_4_local_mcp_transcribes_tts_audio() -> Result<(), Box<dyn std::error::Error>> {
-    let Some(model_path) = env::var_os("B3_E2E_WHISPER_MODEL_PATH")
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-    else {
-        println!(
-            "SKIP: e2e_smoke_4_local_mcp_transcribes_tts_audio requires B3_E2E_WHISPER_MODEL_PATH"
-        );
-        return Ok(());
-    };
-    if !model_path.is_file() {
-        return Err(format!(
-            "B3_E2E_WHISPER_MODEL_PATH does not point to a file: {}",
-            model_path.display()
-        )
-        .into());
-    }
+    let temp = TempTestDir::create(TunnelMode::Disabled)?;
+    ensure_default_whisper_model(&temp).await?;
 
     let test_audio = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../testdata/test_tts.wav")
         .canonicalize()?;
     let download_url = serve_test_audio_once(test_audio).await?;
 
-    let temp = TempTestDir::create(TunnelMode::Disabled)?;
     temp.write_env_file_with_extra(&[
         ("B3_ACCESS_MODE", "local".to_string()),
         ("B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED", "true".to_string()),
-        ("B3_WHISPER_MODEL_PATH", model_path.display().to_string()),
         ("B3_WHISPER_MAX_AUDIO_BYTES", "10485760".to_string()),
     ])?;
 
@@ -988,6 +979,127 @@ async fn serve_test_audio_once(path: PathBuf) -> Result<String, Box<dyn std::err
         let _ = stream.shutdown().await;
     });
     Ok(format!("http://{addr}/test_tts.wav"))
+}
+
+async fn ensure_default_whisper_model(
+    temp: &TempTestDir,
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let model_dir = temp.root.join("whisper-models");
+    let model_path = model_dir.join("ggml-base.en.bin");
+    fs::create_dir_all(&model_dir)?;
+
+    if model_path.is_file() {
+        verify_default_whisper_model(&model_path)?;
+        return Ok(model_path);
+    }
+
+    let partial_path = model_dir.join("ggml-base.en.bin.download");
+    let _ = fs::remove_file(&partial_path);
+
+    println!(
+        "downloading default Whisper model to {}",
+        model_path.display()
+    );
+    let client = whisper_model_http_client()?;
+    let mut response = client.get(DEFAULT_WHISPER_MODEL_URL).send().await?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "failed to download default Whisper model: HTTP {}",
+            response.status()
+        )
+        .into());
+    }
+
+    let expected_size = response
+        .content_length()
+        .filter(|size| *size > 0)
+        .unwrap_or(DEFAULT_WHISPER_MODEL_SIZE_BYTES);
+    if expected_size != DEFAULT_WHISPER_MODEL_SIZE_BYTES {
+        return Err(format!(
+            "default Whisper model size changed: expected {DEFAULT_WHISPER_MODEL_SIZE_BYTES}, got {expected_size}"
+        )
+        .into());
+    }
+
+    let mut file = fs::File::create(&partial_path)?;
+    let mut hasher = Sha256::new();
+    let mut downloaded = 0_u64;
+
+    while let Some(chunk) = response.chunk().await? {
+        downloaded = downloaded
+            .checked_add(chunk.len() as u64)
+            .ok_or("default Whisper model download byte count overflowed")?;
+        if downloaded > DEFAULT_WHISPER_MODEL_SIZE_BYTES {
+            return Err(format!(
+                "default Whisper model exceeded expected size: {downloaded} > {DEFAULT_WHISPER_MODEL_SIZE_BYTES}"
+            )
+            .into());
+        }
+        hasher.update(&chunk);
+        std::io::Write::write_all(&mut file, &chunk)?;
+    }
+    std::io::Write::flush(&mut file)?;
+
+    if downloaded != DEFAULT_WHISPER_MODEL_SIZE_BYTES {
+        return Err(format!(
+            "default Whisper model download size mismatch: expected {DEFAULT_WHISPER_MODEL_SIZE_BYTES}, got {downloaded}"
+        )
+        .into());
+    }
+
+    let actual_hash = format!("{:x}", hasher.finalize());
+    if actual_hash != DEFAULT_WHISPER_MODEL_SHA256 {
+        return Err(format!(
+            "default Whisper model SHA-256 mismatch: expected {DEFAULT_WHISPER_MODEL_SHA256}, got {actual_hash}"
+        )
+        .into());
+    }
+
+    fs::rename(&partial_path, &model_path)?;
+    Ok(model_path)
+}
+
+fn verify_default_whisper_model(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut bytes = 0_u64;
+
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        bytes = bytes
+            .checked_add(read as u64)
+            .ok_or("default Whisper model byte count overflowed")?;
+        hasher.update(&buffer[..read]);
+    }
+
+    if bytes != DEFAULT_WHISPER_MODEL_SIZE_BYTES {
+        return Err(format!(
+            "existing default Whisper model size mismatch at {}: expected {DEFAULT_WHISPER_MODEL_SIZE_BYTES}, got {bytes}",
+            path.display()
+        )
+        .into());
+    }
+
+    let actual_hash = format!("{:x}", hasher.finalize());
+    if actual_hash != DEFAULT_WHISPER_MODEL_SHA256 {
+        return Err(format!(
+            "existing default Whisper model SHA-256 mismatch at {}: expected {DEFAULT_WHISPER_MODEL_SHA256}, got {actual_hash}",
+            path.display()
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
+fn whisper_model_http_client() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
+    Ok(reqwest::Client::builder()
+        .timeout(WHISPER_MODEL_DOWNLOAD_TIMEOUT)
+        .build()?)
 }
 
 fn oauth_http_client() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
