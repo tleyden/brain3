@@ -125,6 +125,8 @@ It should launch an interactive setup wizard.
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
 
+For an existing install, run `brain3 --setup` to review and change current settings, including enabling audio transcription on installs created before that option existed.
+
 #### What the setup wizard will ask
 
 The vault path is the only required decision. The other steps have defaults you can keep unless your setup needs something different; see the [Configuration Reference](#configuration-reference) for the full list.
@@ -348,7 +350,7 @@ Brain3's normal first-run setup configures the app and defaults to a Cloudflare 
 5. Run the named tunnel provisioning wizard:
 
 ```bash
-brain3 --cf-setup
+brain3 --cloudflare-setup
 ```
 
 6. The wizard verifies `cloudflared`, handles login if needed, creates or reuses the named tunnel, writes the config file, and configures the DNS route.
@@ -465,7 +467,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_WHISPER_MODEL` | `base.en` | Whisper ggml model to use. Supported setup choices are `tiny.en`, `base.en`, `small.en`, and `medium.en`; files are stored in `~/.brain3/whisper-models/`. |
 | `B3_WHISPER_MAX_AUDIO_BYTES` | `52428800` | Maximum audio download size accepted by `transcribe_audio_file`. This is supported as a `.env` setting and is not edited in the setup wizard. |
 | `B3_CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
-| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cf-setup` to provision it |
+| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cloudflare-setup` to provision it |
 | `B3_CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `B3_CF_TUNNEL_NAME`) |
 | `B3_CF_TUNNEL_CONFIG_FILE` | `.cloudflared/<tunnel-name>.yml` | Optional path to the `cloudflared` config file written during named tunnel provisioning |
 | `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
@@ -540,7 +542,7 @@ cargo build --release
 ./target/release/brain3
 ```
 
-Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) for the full flow.
+Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. Run `brain3 --setup` to review or change existing settings later, including native audio transcription. See [Quick Start](#quick-start) for the full flow.
 
 </details>
 

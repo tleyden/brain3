@@ -259,10 +259,7 @@ fn env_bool(name: &str, default: bool) -> bool {
 fn load_native_audio_transcription_config(
     home_override: Option<&Path>,
 ) -> Result<NativeAudioTranscriptionConfig, ConfigError> {
-    let enabled = env_bool(
-        "B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED",
-        cfg!(any(target_os = "macos", target_os = "linux")),
-    );
+    let enabled = env_bool("B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED", false);
     let model = env::var("B3_WHISPER_MODEL")
         .ok()
         .map(|value| value.trim().to_string())
@@ -684,6 +681,21 @@ mod tests {
         let env_path = dir.join(".env");
         fs::write(&env_path, contents).unwrap();
         env_path
+    }
+
+    #[test]
+    fn native_audio_transcription_defaults_disabled_when_env_key_is_absent() {
+        with_clean_config_env(|| {
+            let app_home = env::temp_dir().join("brain3-config-test-native-audio-default");
+
+            let config = load_native_audio_transcription_config(Some(&app_home))
+                .expect("native audio config should load with defaults");
+
+            assert!(
+                !config.enabled,
+                "absent B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED must not opt existing installs in"
+            );
+        });
     }
 
     #[cfg(target_os = "macos")]

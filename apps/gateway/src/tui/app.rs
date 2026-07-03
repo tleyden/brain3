@@ -39,6 +39,9 @@ pub enum GatewayTuiLaunch {
         launch_plan: RuntimeLaunchPlan,
         startup_options: ConfiguredStartupOptions,
     },
+    Reconfigure {
+        launch_plan: RuntimeLaunchPlan,
+    },
 }
 
 pub async fn run_gateway_tui(
@@ -102,6 +105,23 @@ pub async fn run_gateway_tui(
                 state,
                 startup_options.startup_policy,
                 Some(startup_options.orphan_gc_rerun_command),
+            )
+        }
+        GatewayTuiLaunch::Reconfigure { launch_plan } => {
+            let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
+            let mut preparation = use_case
+                .prepare_from_existing_config(config.as_ref())
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            preparation.paths.env_file = launch_plan.env_file.clone();
+            tracing::debug!(
+                env_file = %launch_plan.env_file.display(),
+                "reconfigure launch: opening Summary confirmation step"
+            );
+            (
+                FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation),
+                RuntimeStartupPolicy::setup_or_reconfigure(),
+                None,
             )
         }
     };

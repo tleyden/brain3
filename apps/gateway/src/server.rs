@@ -428,6 +428,16 @@ fn native_mcp_tools_from_config(config: &GatewayConfig) -> Result<Vec<Arc<dyn Na
         return Ok(Vec::new());
     }
 
+    if !transcription.model_path.exists() {
+        tracing::warn!(
+            model = %transcription.model,
+            model_path = %transcription.model_path.display(),
+            "native audio transcription enabled but whisper model file is missing; \
+             run `brain3 --setup` to download or reconfigure the model"
+        );
+        return Ok(Vec::new());
+    }
+
     tracing::info!(
         model = %transcription.model,
         model_path = %transcription.model_path.display(),
@@ -460,6 +470,67 @@ fn local_url_from_addr(addr: SocketAddr) -> String {
                 IpAddr::V6(*v6.ip())
             };
             format!("http://[{}]:{}", ip, v6.port())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use brain3_core::domain::model::{
+        AccessMode, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
+        NativeAudioTranscriptionConfig, OAuthConfig,
+    };
+
+    use super::*;
+
+    #[test]
+    fn native_mcp_tools_skip_enabled_transcription_when_model_file_is_missing() {
+        let config = gateway_config_with_native_audio(NativeAudioTranscriptionConfig {
+            enabled: true,
+            model: "base.en".into(),
+            model_path: PathBuf::from("/tmp/brain3-test-missing-whisper-model/ggml-base.en.bin"),
+            max_audio_bytes: 50 * 1024 * 1024,
+        });
+
+        let tools = native_mcp_tools_from_config(&config).expect("tool loading should succeed");
+
+        assert!(
+            tools.is_empty(),
+            "missing whisper model file should prevent advertising transcribe_audio_file"
+        );
+    }
+
+    fn gateway_config_with_native_audio(
+        native_audio_transcription: NativeAudioTranscriptionConfig,
+    ) -> GatewayConfig {
+        GatewayConfig {
+            port: 8421,
+            host: "127.0.0.1".into(),
+            token_db_path: PathBuf::from("/tmp/brain3-test.db"),
+            oauth: OAuthConfig {
+                client_id: "brain3-oauth2-client".into(),
+                client_secret: "secret".into(),
+                access_token_lifetime_secs: 3600,
+                refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                pkce_required: true,
+                username: "admin".into(),
+                password: "password".into(),
+            },
+            mcp_reverse_proxy: MCPReverseProxyConfig {
+                mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                upstream_secret: "secret".into(),
+            },
+            hostname_validation: HostnameValidationConfig {
+                expected_host: None,
+                enforce: true,
+            },
+            access_mode: AccessMode::Both,
+            local_mcp: None,
+            container: None,
+            tunnel: None,
+            native_audio_transcription,
         }
     }
 }

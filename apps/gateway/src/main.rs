@@ -68,18 +68,25 @@ struct Args {
     #[arg(long)]
     env_file: Option<PathBuf>,
 
-    #[arg(long, conflicts_with_all = ["cli", "cf_setup"])]
+    #[arg(long, conflicts_with_all = ["cli", "cloudflare_setup", "setup"])]
     tui: bool,
 
-    #[arg(long, conflicts_with_all = ["tui", "cf_setup"])]
+    #[arg(long, conflicts_with_all = ["tui", "cloudflare_setup", "setup"])]
     cli: bool,
 
     #[arg(
-        long = "cf-setup",
-        conflicts_with_all = ["tui", "cli"],
+        long = "cloudflare-setup",
+        conflicts_with_all = ["tui", "cli", "setup"],
         help = "Run the interactive setup wizard for Cloudflare named tunnel provisioning"
     )]
-    cf_setup: bool,
+    cloudflare_setup: bool,
+
+    #[arg(
+        long,
+        conflicts_with_all = ["tui", "cli", "cloudflare_setup"],
+        help = "Review and change existing Brain3 setup, including native audio transcription"
+    )]
+    setup: bool,
 
     #[arg(long, help = "Override the Brain3 home directory (default: ~/.brain3)")]
     brain3_home: Option<PathBuf>,
@@ -140,6 +147,7 @@ enum LaunchMode {
     Tui,
     Cli,
     Setup,
+    Reconfigure,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +167,7 @@ struct ResolvedEnvFile {
 enum LaunchDispatch {
     TuiFirstRun,
     TuiConfigured { launch_plan: RuntimeLaunchPlan },
+    TuiReconfigure { launch_plan: RuntimeLaunchPlan },
     Cli { launch_plan: RuntimeLaunchPlan },
     Setup { env_file: PathBuf },
 }
@@ -171,7 +180,9 @@ async fn shutdown_signal() {
 }
 
 fn choose_launch_mode(args: &Args) -> LaunchMode {
-    if args.cf_setup {
+    if args.setup {
+        LaunchMode::Reconfigure
+    } else if args.cloudflare_setup {
         LaunchMode::Setup
     } else if args.cli {
         LaunchMode::Cli
@@ -204,10 +215,10 @@ fn resolve_config_env_file(args: &Args) -> Result<ResolvedEnvFile> {
 
 fn setup_requires_named_tunnel() -> Result<()> {
     eprintln!(
-        "\nBrain3 --cf-setup only applies to Cloudflare named tunnel provisioning.\n\
+        "\nBrain3 --cloudflare-setup only applies to Cloudflare named tunnel provisioning.\n\
          \nRun this in an interactive terminal to use the normal setup/status flow:\n  brain3 --tui\n"
     );
-    anyhow::bail!("--cf-setup requires B3_CF_TUNNEL_NAME and B3_CF_DOMAIN to be set");
+    anyhow::bail!("--cloudflare-setup requires B3_CF_TUNNEL_NAME and B3_CF_DOMAIN to be set");
 }
 
 fn runtime_launch_plan(resolved_env: &ResolvedEnvFile, log_file: PathBuf) -> RuntimeLaunchPlan {
@@ -231,6 +242,13 @@ fn plan_launch(
     env_exists: bool,
     log_file: PathBuf,
 ) -> Result<LaunchDispatch> {
+    if !env_exists && mode == LaunchMode::Reconfigure {
+        return reconfigure_requires_existing_config(
+            &resolved_env.app_home,
+            &resolved_env.env_file,
+        );
+    }
+
     if !env_exists {
         return match resolved_env.source {
             EnvFileSource::Custom => missing_custom_env_file(&resolved_env.env_file),
@@ -242,6 +260,7 @@ fn plan_launch(
                 LaunchMode::Setup => {
                     setup_requires_existing_config(&resolved_env.app_home, &resolved_env.env_file)
                 }
+                LaunchMode::Reconfigure => unreachable!("handled above"),
             },
         };
     }
@@ -254,6 +273,7 @@ fn plan_launch(
         LaunchMode::Setup => LaunchDispatch::Setup {
             env_file: resolved_env.env_file.clone(),
         },
+        LaunchMode::Reconfigure => LaunchDispatch::TuiReconfigure { launch_plan },
     })
 }
 
@@ -359,7 +379,8 @@ fn brain3_command_parts(args: &Args, mode: LaunchMode) -> Vec<String> {
     match mode {
         LaunchMode::Tui => parts.push("--tui".into()),
         LaunchMode::Cli => parts.push("--cli".into()),
-        LaunchMode::Setup => parts.push("--cf-setup".into()),
+        LaunchMode::Setup => parts.push("--cloudflare-setup".into()),
+        LaunchMode::Reconfigure => parts.push("--setup".into()),
     }
 
     if args.host != DEFAULT_HOST {
@@ -509,6 +530,26 @@ fn named_tunnel_setup_requires_tui(args: &Args, resolved_env: &ResolvedEnvFile) 
     anyhow::bail!("named-tunnel setup requires an interactive terminal; run: {tui_command}");
 }
 
+fn noninteractive_reconfigure_requires_tui(
+    args: &Args,
+    resolved_env: &ResolvedEnvFile,
+) -> Result<()> {
+    let setup_command = brain3_command(args, LaunchMode::Reconfigure);
+    eprintln!(
+        "\nBrain3 --setup needs the interactive setup wizard.\n\
+         \n  Env file: {}\n\
+         \nRun this in an interactive terminal:\n  {}\n",
+        resolved_env.env_file.display(),
+        setup_command
+    );
+    tracing::warn!(
+        env_file = %resolved_env.env_file.display(),
+        command = %setup_command,
+        "reconfigure launch refused because the terminal is non-interactive"
+    );
+    anyhow::bail!("--setup requires an interactive terminal; run: {setup_command}");
+}
+
 fn cli_requires_interactive_setup(
     app_home: &Brain3AppHome,
     env_file: &Path,
@@ -534,7 +575,7 @@ fn setup_requires_existing_config(
     env_file: &Path,
 ) -> Result<LaunchDispatch> {
     eprintln!(
-        "\nBrain3 --cf-setup only provisions a Cloudflare named tunnel after Brain3 is configured.\n\
+        "\nBrain3 --cloudflare-setup only provisions a Cloudflare named tunnel after Brain3 is configured.\n\
          \n  App home: {}\n\
          \n  Expected config: {}\n\
          \nRun this in an interactive terminal to create or manage configuration:\n  brain3 --tui\n",
@@ -546,7 +587,47 @@ fn setup_requires_existing_config(
         env_file = %env_file.display(),
         "setup mode refused because config is missing"
     );
-    anyhow::bail!("--cf-setup requires existing configuration");
+    anyhow::bail!("--cloudflare-setup requires existing configuration");
+}
+
+fn reconfigure_requires_existing_config(
+    app_home: &Brain3AppHome,
+    env_file: &Path,
+) -> Result<LaunchDispatch> {
+    eprintln!(
+        "\nBrain3 --setup changes an existing configuration, but no config file was found yet.\n\
+         \n  App home: {}\n\
+         \n  Expected config: {}\n\
+         \nRun this in an interactive terminal to create configuration first:\n  brain3\n",
+        app_home.root_dir.display(),
+        env_file.display()
+    );
+    tracing::warn!(
+        app_home = %app_home.root_dir.display(),
+        env_file = %env_file.display(),
+        "reconfigure mode refused because config is missing"
+    );
+    anyhow::bail!("--setup requires existing configuration");
+}
+
+fn maybe_log_native_audio_setup_nudge(env_file: &Path) {
+    match std::fs::read_to_string(env_file) {
+        Ok(contents) if !contents.contains("B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED=") => {
+            tracing::info!(
+                env_file = %env_file.display(),
+                "native audio transcription is available but not yet configured on this install; \
+                 run `brain3 --setup` to enable it"
+            );
+        }
+        Ok(_) => {}
+        Err(error) => {
+            tracing::debug!(
+                env_file = %env_file.display(),
+                error = %error,
+                "could not inspect config file for native audio transcription setup nudge"
+            );
+        }
+    }
 }
 
 fn ensure_cli_ready(dependencies: &DependencyStatus) -> Result<()> {
@@ -671,6 +752,52 @@ async fn run_cli_mode(
     Ok(())
 }
 
+async fn run_named_tunnel_setup_if_needed(
+    context: &str,
+    config: &GatewayConfig,
+    interactive_terminal: bool,
+    args: &Args,
+    resolved_env: &ResolvedEnvFile,
+) -> Result<bool> {
+    match &config.tunnel {
+        Some(brain3_core::domain::model::TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            config_file,
+            ..
+        }) => {
+            tracing::debug!(
+                context,
+                tunnel_name = %tunnel_name,
+                config_file = %config_file.display(),
+                config_file_exists = %config_file.exists(),
+                "CloudflareNamed tunnel; cloudflare-setup screen shown only when config_file is missing"
+            );
+        }
+        Some(_) => tracing::debug!(
+            context,
+            "non-CloudflareNamed tunnel; cloudflare-setup not applicable"
+        ),
+        None => tracing::debug!(
+            context,
+            "no tunnel configured; cloudflare-setup not applicable"
+        ),
+    }
+
+    let Some(tunnel_config) = named_tunnel_setup_config(config) else {
+        return Ok(false);
+    };
+
+    tracing::debug!(
+        context,
+        "cloudflared config file missing; launching cloudflare-setup TUI"
+    );
+    if !interactive_terminal {
+        return named_tunnel_setup_requires_tui(args, resolved_env).map(|_| true);
+    }
+    setup_tui::run(tunnel_config).await?;
+    Ok(true)
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
@@ -687,6 +814,7 @@ async fn main() -> Result<()> {
         dispatch = match &dispatch {
             LaunchDispatch::TuiFirstRun => "TuiFirstRun",
             LaunchDispatch::TuiConfigured { .. } => "TuiConfigured",
+            LaunchDispatch::TuiReconfigure { .. } => "TuiReconfigure",
             LaunchDispatch::Cli { .. } => "Cli",
             LaunchDispatch::Setup { .. } => "Setup",
         },
@@ -710,34 +838,17 @@ async fn main() -> Result<()> {
         }
         LaunchDispatch::TuiConfigured { launch_plan } => {
             let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
-            match &config.tunnel {
-                Some(brain3_core::domain::model::TunnelConfig::CloudflareNamed {
-                    tunnel_name,
-                    config_file,
-                    ..
-                }) => {
-                    tracing::debug!(
-                        tunnel_name = %tunnel_name,
-                        config_file = %config_file.display(),
-                        config_file_exists = %config_file.exists(),
-                        "TuiConfigured: CloudflareNamed tunnel — cf-setup screen shown only when config_file is missing"
-                    );
-                }
-                Some(_) => tracing::debug!(
-                    "TuiConfigured: non-CloudflareNamed tunnel; cf-setup not applicable"
-                ),
-                None => {
-                    tracing::debug!("TuiConfigured: no tunnel configured; cf-setup not applicable")
-                }
-            }
-            if let Some(tunnel_config) = named_tunnel_setup_config(&config) {
-                tracing::debug!(
-                    "TuiConfigured: cloudflared config file missing → launching cf-setup TUI"
-                );
-                if !interactive_terminal {
-                    return named_tunnel_setup_requires_tui(&args, &resolved_env);
-                }
-                return setup_tui::run(tunnel_config).await;
+            maybe_log_native_audio_setup_nudge(&launch_plan.env_file);
+            if run_named_tunnel_setup_if_needed(
+                "TuiConfigured",
+                &config,
+                interactive_terminal,
+                &args,
+                &resolved_env,
+            )
+            .await?
+            {
+                return Ok(());
             }
             tracing::debug!(
                 "TuiConfigured: cloudflared config file present (or no named tunnel) → \
@@ -754,6 +865,36 @@ async fn main() -> Result<()> {
                     launch_plan,
                     startup_options,
                 },
+                setup_defaults(),
+                runtime_overrides.clone(),
+                args.brain3_home.clone(),
+            )
+            .await
+        }
+        LaunchDispatch::TuiReconfigure { launch_plan } => {
+            let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
+            if run_named_tunnel_setup_if_needed(
+                "TuiReconfigure",
+                &config,
+                interactive_terminal,
+                &args,
+                &resolved_env,
+            )
+            .await?
+            {
+                return Ok(());
+            }
+            tracing::debug!(
+                "TuiReconfigure: cloudflared config file present (or no named tunnel) → \
+                 launching main TUI at Summary confirmation step"
+            );
+            if !interactive_terminal {
+                return noninteractive_reconfigure_requires_tui(&args, &resolved_env);
+            }
+            tui::run_gateway_tui(
+                &args.host,
+                logging.log_file.clone(),
+                GatewayTuiLaunch::Reconfigure { launch_plan },
                 setup_defaults(),
                 runtime_overrides.clone(),
                 args.brain3_home.clone(),
@@ -856,13 +997,17 @@ mod tests {
 
     #[test]
     fn setup_conflicts_with_launch_modes() {
-        assert!(Args::try_parse_from(["brain3", "--cf-setup", "--tui"]).is_err());
-        assert!(Args::try_parse_from(["brain3", "--cf-setup", "--cli"]).is_err());
+        assert!(Args::try_parse_from(["brain3", "--cloudflare-setup", "--tui"]).is_err());
+        assert!(Args::try_parse_from(["brain3", "--cloudflare-setup", "--cli"]).is_err());
+        assert!(Args::try_parse_from(["brain3", "--cloudflare-setup", "--setup"]).is_err());
+        assert!(Args::try_parse_from(["brain3", "--setup", "--tui"]).is_err());
+        assert!(Args::try_parse_from(["brain3", "--setup", "--cli"]).is_err());
     }
 
     #[test]
-    fn old_setup_flag_is_rejected() {
-        assert!(Args::try_parse_from(["brain3", "--setup"]).is_err());
+    fn setup_flag_selects_reconfigure_mode() {
+        let args = Args::try_parse_from(["brain3", "--setup"]).expect("setup args should parse");
+        assert_eq!(choose_launch_mode(&args), LaunchMode::Reconfigure);
     }
 
     #[test]
@@ -993,6 +1138,49 @@ mod tests {
 
         assert!(
             err.to_string().contains("/tmp/custom.env"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[test]
+    fn launch_dispatch_uses_reconfigure_for_setup_with_existing_env() {
+        let app_home = Brain3AppHome::from_root(PathBuf::from("/tmp/brain3-home"));
+        let resolved = ResolvedEnvFile {
+            app_home: app_home.clone(),
+            env_file: app_home.env_file.clone(),
+            source: EnvFileSource::Default,
+        };
+        let log_file = PathBuf::from("/tmp/brain3-home/brain3.log");
+
+        assert_eq!(
+            plan_launch(LaunchMode::Reconfigure, &resolved, true, log_file.clone(),)
+                .expect("setup reconfigure dispatch should succeed"),
+            LaunchDispatch::TuiReconfigure {
+                launch_plan: runtime_launch_plan(&resolved, log_file)
+            }
+        );
+    }
+
+    #[test]
+    fn launch_dispatch_reconfigure_requires_existing_default_env() {
+        let app_home = Brain3AppHome::from_root(PathBuf::from("/tmp/brain3-home"));
+        let resolved = ResolvedEnvFile {
+            app_home: app_home.clone(),
+            env_file: app_home.env_file.clone(),
+            source: EnvFileSource::Default,
+        };
+
+        let err = plan_launch(
+            LaunchMode::Reconfigure,
+            &resolved,
+            false,
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+        )
+        .expect_err("missing env should reject setup reconfigure");
+
+        assert!(
+            err.to_string()
+                .contains("--setup requires existing configuration"),
             "unexpected error: {err:#}"
         );
     }
