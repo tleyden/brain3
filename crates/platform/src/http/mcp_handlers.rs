@@ -84,6 +84,22 @@ async fn validate_access_token<P: McpProxyPort + 'static>(
         }
     };
 
+    // RCA DIAGNOSTIC (temporary): a well-formed bearer token carries no embedded
+    // whitespace. If it does, the client sent a doubled auth scheme such as
+    // "Bearer Bearer <token>", so `parse_bearer_token` strips only the first
+    // "Bearer " and hands "Bearer <token>" to recover_token — which will never
+    // match the stored token. This log confirms that failure mode.
+    if token.split_whitespace().count() > 1 {
+        tracing::warn!(
+            received_token_hint = %elide_secret(token),
+            leading_word = token.split_whitespace().next().unwrap_or(""),
+            method = %method,
+            path = %uri,
+            host = host,
+            "MCP proxy RCA DIAGNOSTIC: extracted bearer token contains embedded whitespace — client sent a doubled auth scheme (e.g. 'Bearer Bearer <token>')"
+        );
+    }
+
     let grant = {
         let issuer = state.issuer.lock().await;
         match issuer.recover_token(token) {
