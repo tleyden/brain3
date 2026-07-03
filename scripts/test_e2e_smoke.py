@@ -56,7 +56,7 @@ class E2ESmokeScriptTests(unittest.TestCase):
             ],
         )
 
-    def test_default_run_executes_local_then_oauth_tests(self):
+    def test_default_run_executes_local_then_oauth_then_quick_tunnel_tests(self):
         module = load_script()
         calls = []
 
@@ -67,12 +67,14 @@ class E2ESmokeScriptTests(unittest.TestCase):
         exit_code = module.run([], run_command=fake_run)
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(len(calls), 3)
+        self.assertEqual(len(calls), 4)
         self.assertEqual(calls[0][0][0:2], ["docker", "build"])
         self.assertEqual(calls[1][0][-1], "e2e_smoke_1_local_docker")
         self.assertEqual(calls[2][0][-1], "e2e_smoke_2_oauth_public_flow")
+        self.assertEqual(calls[3][0][-1], "e2e_smoke_3_oauth_quick_tunnel")
         self.assertNotIn("--fail-fast", calls[1][0])
         self.assertNotIn("--fail-fast", calls[2][0])
+        self.assertNotIn("--fail-fast", calls[3][0])
 
     def test_default_run_aborts_before_oauth_when_local_test_fails(self):
         module = load_script()

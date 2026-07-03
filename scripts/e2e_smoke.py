@@ -16,6 +16,7 @@ IMAGE_TAG = "brain3-mcp-vault-tools:e2e-local"
 DEFAULT_E2E_TESTS = [
     "e2e_smoke_1_local_docker",
     "e2e_smoke_2_oauth_public_flow",
+    "e2e_smoke_3_oauth_quick_tunnel",
 ]
 
 
