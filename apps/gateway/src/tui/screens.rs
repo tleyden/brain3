@@ -612,6 +612,30 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         ));
     }
 
+    lines.push(blank_line());
+    lines.push(field_badge_line(
+        "Native audio transcription",
+        if state.draft.native_audio_transcription_enabled {
+            badge_span("Enabled", Color::Green)
+        } else {
+            badge_span("Disabled", Color::Yellow)
+        },
+        state.ports_focus == PortsField::NativeAudioTranscription,
+    ));
+    lines.push(field_badge_line(
+        "Whisper model",
+        badge_span(state.draft.whisper_model.as_str(), Color::Cyan),
+        state.ports_focus == PortsField::WhisperModel,
+    ));
+    lines.push(field_line(
+        "Whisper max audio bytes",
+        &state.whisper_max_audio_bytes_input,
+        state.ports_focus == PortsField::WhisperMaxAudioBytes,
+    ));
+    lines.push(muted_line(
+        "The selected model is downloaded and checksum-verified before startup.",
+    ));
+
     lines
 }
 
@@ -758,6 +782,28 @@ fn summary_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
             f == SummaryField::ContainerNetworkName,
         ));
     }
+
+    lines.extend([
+        field_badge_line(
+            "Native audio transcription",
+            if state.draft.native_audio_transcription_enabled {
+                badge_span("Enabled", Color::Green)
+            } else {
+                badge_span("Disabled", Color::Yellow)
+            },
+            f == SummaryField::NativeAudioTranscription,
+        ),
+        field_badge_line(
+            "Whisper model",
+            badge_span(state.draft.whisper_model.as_str(), Color::Cyan),
+            f == SummaryField::WhisperModel,
+        ),
+        field_line(
+            "Whisper max audio bytes",
+            &state.whisper_max_audio_bytes_input,
+            f == SummaryField::WhisperMaxAudioBytes,
+        ),
+    ]);
 
     lines.extend([
         key_value_line(
@@ -1811,6 +1857,9 @@ mod tests {
                     pkce_required: true,
                     enforce_hostname_check: true,
                     direct_public_origin_hostname: None,
+                    native_audio_transcription_enabled: true,
+                    whisper_model: "base.en".into(),
+                    whisper_max_audio_bytes: 52_428_800,
                 },
                 dependencies: DependencyStatus {
                     operating_system: SetupOperatingSystem::MacOS,
@@ -1872,6 +1921,15 @@ mod tests {
                     enable_sync_reindex_tool: false,
                 }),
                 tunnel: None,
+                native_audio_transcription:
+                    brain3_core::domain::model::NativeAudioTranscriptionConfig {
+                        enabled: false,
+                        model: "base.en".into(),
+                        model_path: PathBuf::from(
+                            "/tmp/brain3-home/whisper-models/ggml-base.en.bin",
+                        ),
+                        max_audio_bytes: 52_428_800,
+                    },
             }),
             "secret".into(),
             RuntimeLaunchPlan {
@@ -1934,6 +1992,15 @@ mod tests {
                 }),
                 container: None,
                 tunnel: None,
+                native_audio_transcription:
+                    brain3_core::domain::model::NativeAudioTranscriptionConfig {
+                        enabled: false,
+                        model: "base.en".into(),
+                        model_path: PathBuf::from(
+                            "/tmp/brain3-home/whisper-models/ggml-base.en.bin",
+                        ),
+                        max_audio_bytes: 52_428_800,
+                    },
             }),
             "secret".into(),
             RuntimeLaunchPlan {

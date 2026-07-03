@@ -132,7 +132,7 @@ mod tests {
 
     use brain3_core::domain::model::{
         AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig,
-        MCPReverseProxyConfig, OAuthConfig,
+        MCPReverseProxyConfig, NativeAudioTranscriptionConfig, OAuthConfig,
     };
     use brain3_core::domain::setup::{RuntimeLaunchPlan, SetupPaths};
 
@@ -178,6 +178,12 @@ mod tests {
                 enable_sync_reindex_tool: false,
             }),
             tunnel: None,
+            native_audio_transcription: NativeAudioTranscriptionConfig {
+                enabled: false,
+                model: "base.en".into(),
+                model_path: PathBuf::from("/tmp/brain3-home/whisper-models/ggml-base.en.bin"),
+                max_audio_bytes: 52_428_800,
+            },
         });
         let launch_plan = RuntimeLaunchPlan {
             paths: SetupPaths::new(

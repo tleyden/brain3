@@ -1,4 +1,5 @@
 use std::env;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
@@ -9,11 +10,40 @@ use brain3_core::domain::setup::{
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
 use rand::RngExt;
+use sha2::{Digest, Sha256};
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 use super::app_home::Brain3AppHome;
 use super::env_writer::render_env_file;
+
+const WHISPER_MODEL_DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
+
+struct WhisperModelSpec {
+    model: &'static str,
+    filename: &'static str,
+    url: &'static str,
+    sha256: &'static str,
+    size_bytes: u64,
+}
+
+const WHISPER_MODEL_SPECS: &[WhisperModelSpec] = &[
+    WhisperModelSpec {
+        model: "tiny.en",
+        filename: "ggml-tiny.en.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.en.bin",
+        sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
+        size_bytes: 77_704_715,
+    },
+    WhisperModelSpec {
+        model: "base.en",
+        filename: "ggml-base.en.bin",
+        url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin",
+        sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+        size_bytes: 147_964_211,
+    },
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlatformEnvironment {
@@ -206,6 +236,38 @@ impl SetupSystemPort for PlatformSetupSystem {
         Ok(())
     }
 
+    async fn ensure_whisper_model(
+        &self,
+        paths: &SetupPaths,
+        model: &str,
+    ) -> Result<PathBuf, SetupError> {
+        let spec = whisper_model_spec(model)?;
+        let model_dir = paths.app_home.join("whisper-models");
+        let model_path = model_dir.join(spec.filename);
+
+        fs::create_dir_all(&model_dir)
+            .await
+            .map_err(|e| SetupError::Io(format!("create {}: {e}", model_dir.display())))?;
+
+        if model_path.is_file() {
+            verify_whisper_model_file(&model_path, spec).map_err(|error| {
+                SetupError::Invalid(format!(
+                    "existing Whisper model verification failed at {}: {error}",
+                    model_path.display()
+                ))
+            })?;
+            tracing::info!(
+                model = spec.model,
+                path = %model_path.display(),
+                "Whisper model already downloaded and verified"
+            );
+            return Ok(model_path);
+        }
+
+        download_whisper_model(&model_path, spec).await?;
+        Ok(model_path)
+    }
+
     async fn write_env_file(&self, path: &Path, contents: &str) -> Result<(), SetupError> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)
@@ -303,6 +365,152 @@ impl SetupSystemPort for PlatformSetupSystem {
             ))),
         }
     }
+}
+
+fn whisper_model_spec(model: &str) -> Result<&'static WhisperModelSpec, SetupError> {
+    WHISPER_MODEL_SPECS
+        .iter()
+        .find(|spec| spec.model == model)
+        .ok_or_else(|| {
+            SetupError::Invalid(format!(
+                "unsupported Whisper model '{model}'; choose tiny.en or base.en"
+            ))
+        })
+}
+
+async fn download_whisper_model(
+    model_path: &Path,
+    spec: &WhisperModelSpec,
+) -> Result<(), SetupError> {
+    let partial_path = model_path.with_extension("bin.download");
+    let _ = fs::remove_file(&partial_path).await;
+
+    tracing::info!(
+        model = spec.model,
+        url = spec.url,
+        path = %model_path.display(),
+        expected_bytes = spec.size_bytes,
+        "downloading Whisper model"
+    );
+
+    let client = reqwest::Client::builder()
+        .timeout(WHISPER_MODEL_DOWNLOAD_TIMEOUT)
+        .build()
+        .map_err(|e| SetupError::Io(format!("create Whisper model HTTP client: {e}")))?;
+    let mut response = client
+        .get(spec.url)
+        .send()
+        .await
+        .map_err(|e| SetupError::Io(format!("download Whisper model {}: {e}", spec.model)))?;
+
+    if !response.status().is_success() {
+        return Err(SetupError::Io(format!(
+            "download Whisper model {}: HTTP {}",
+            spec.model,
+            response.status()
+        )));
+    }
+
+    if let Some(content_length) = response.content_length() {
+        if content_length != spec.size_bytes {
+            return Err(SetupError::Invalid(format!(
+                "Whisper model {} size changed before download: expected {}, got {}",
+                spec.model, spec.size_bytes, content_length
+            )));
+        }
+    }
+
+    let mut file = fs::File::create(&partial_path)
+        .await
+        .map_err(|e| SetupError::Io(format!("create {}: {e}", partial_path.display())))?;
+    let mut hasher = Sha256::new();
+    let mut downloaded = 0_u64;
+
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| SetupError::Io(format!("read Whisper model {}: {e}", spec.model)))?
+    {
+        downloaded = downloaded
+            .checked_add(chunk.len() as u64)
+            .ok_or_else(|| SetupError::Invalid("Whisper model byte count overflowed".into()))?;
+        if downloaded > spec.size_bytes {
+            return Err(SetupError::Invalid(format!(
+                "Whisper model {} exceeded expected size: {} > {}",
+                spec.model, downloaded, spec.size_bytes
+            )));
+        }
+        hasher.update(&chunk);
+        file.write_all(&chunk)
+            .await
+            .map_err(|e| SetupError::Io(format!("write {}: {e}", partial_path.display())))?;
+    }
+    file.flush()
+        .await
+        .map_err(|e| SetupError::Io(format!("flush {}: {e}", partial_path.display())))?;
+
+    verify_whisper_model_hash(downloaded, &hasher.finalize(), spec)?;
+    fs::rename(&partial_path, model_path).await.map_err(|e| {
+        SetupError::Io(format!(
+            "move {} to {}: {e}",
+            partial_path.display(),
+            model_path.display()
+        ))
+    })?;
+
+    tracing::info!(
+        model = spec.model,
+        path = %model_path.display(),
+        bytes = downloaded,
+        "Whisper model downloaded and verified"
+    );
+    Ok(())
+}
+
+fn verify_whisper_model_file(path: &Path, spec: &WhisperModelSpec) -> Result<(), String> {
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut bytes = 0_u64;
+
+    loop {
+        let read = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if read == 0 {
+            break;
+        }
+        bytes = bytes
+            .checked_add(read as u64)
+            .ok_or_else(|| "Whisper model byte count overflowed".to_string())?;
+        hasher.update(&buffer[..read]);
+    }
+
+    verify_whisper_model_hash(bytes, &hasher.finalize(), spec).map_err(|error| error.to_string())
+}
+
+fn verify_whisper_model_hash(
+    bytes: u64,
+    actual_hash: &[u8],
+    spec: &WhisperModelSpec,
+) -> Result<(), SetupError> {
+    if bytes != spec.size_bytes {
+        return Err(SetupError::Invalid(format!(
+            "Whisper model {} size mismatch: expected {}, got {}",
+            spec.model, spec.size_bytes, bytes
+        )));
+    }
+
+    let actual_hash = actual_hash
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if actual_hash != spec.sha256 {
+        return Err(SetupError::Invalid(format!(
+            "Whisper model {} SHA-256 mismatch: expected {}, got {}",
+            spec.model, spec.sha256, actual_hash
+        )));
+    }
+
+    Ok(())
 }
 
 fn detect_operating_system() -> SetupOperatingSystem {

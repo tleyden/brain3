@@ -2,13 +2,11 @@
 
 import hmac
 import ipaddress
-import json
 import logging
 import socket
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
-from urllib.parse import urlparse
 
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -36,7 +34,6 @@ from .models import (
     VaultCreateOverwriteFileInput,
     VaultDeleteInput,
     VaultListInput,
-    OpenAIFileReferenceInput,
     VaultMoveInput,
     VaultReadInput,
     VaultSearchFrontmatterInput,
@@ -45,7 +42,6 @@ from .models import (
 from .tools.manage import vault_delete as _vault_delete
 from .tools.manage import vault_list as _vault_list
 from .tools.manage import vault_move as _vault_move
-from .tools.audio import save_audio_file as _save_audio_file
 from .tools.patch import vault_apply_unified_diff as _vault_apply_unified_diff
 from .tools.read import vault_batch_read as _vault_batch_read
 from .tools.read import vault_read as _vault_read
@@ -183,47 +179,6 @@ def _load_upstream_shared_secret() -> str:
     return secret
 
 
-def _log_save_audio_file_request_summary(stage: str, body: bytes) -> None:
-    try:
-        payload = json.loads(body)
-    except (UnicodeDecodeError, json.JSONDecodeError):
-        return
-
-    if payload.get("method") != "tools/call":
-        return
-
-    params = payload.get("params")
-    if not isinstance(params, dict) or params.get("name") != "save_audio_file":
-        return
-
-    arguments = params.get("arguments")
-    if not isinstance(arguments, dict):
-        return
-
-    audio_file = arguments.get("audio_file")
-    if not isinstance(audio_file, dict):
-        return
-
-    download_url = audio_file.get("download_url")
-    parsed_url = (
-        urlparse(download_url)
-        if isinstance(download_url, str) and download_url
-        else None
-    )
-
-    logger.info(
-        "save_audio_file request summary stage=%s request_id=%s body_bytes=%d file_id=%r mime_type=%r file_name=%r download_host=%r download_path=%r",
-        stage,
-        payload.get("id"),
-        len(body),
-        audio_file.get("file_id"),
-        audio_file.get("mime_type"),
-        audio_file.get("file_name"),
-        parsed_url.netloc if parsed_url else None,
-        parsed_url.path if parsed_url else None,
-    )
-
-
 class UpstreamSharedSecretMiddleware:
     def __init__(
         self, app: ASGIApp, *, shared_secret: str, header_name: str, protected_path: str
@@ -299,7 +254,6 @@ class InboundRequestLoggingMiddleware:
                 request_body_chunks.append(message.get("body", b""))
                 if not message.get("more_body", False):
                     full_body = b"".join(request_body_chunks)
-                    _log_save_audio_file_request_summary("python_ingress", full_body)
                     if trace_enabled:
                         logger.log(
                             TRACE,
@@ -657,23 +611,6 @@ def vault_move(source: str, destination: str, create_dirs: bool = True) -> str:
 def vault_delete(path: str, confirm: bool = False) -> str:
     inp = VaultDeleteInput(path=path, confirm=confirm)
     return _vault_delete(inp.path, inp.confirm)
-
-
-@mcp.tool(
-    name="save_audio_file",
-    description="Experimental: receive an uploaded audio file as an OpenAI file param, download it to a temp directory, and return the file path and size stats.",
-    annotations={
-        "readOnlyHint": False,
-        "destructiveHint": False,
-        "idempotentHint": False,
-        "openWorldHint": False,
-    },
-    meta={
-        "openai/fileParams": ["audio_file"],
-    },
-)
-def save_audio_file(audio_file: OpenAIFileReferenceInput) -> str:
-    return _save_audio_file(audio_file)
 
 
 def main() -> None:

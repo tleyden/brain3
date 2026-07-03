@@ -326,6 +326,12 @@ async fn event_loop(
                         ) {
                             tracing::debug!(msg, "lifetime validation failed");
                             state.error_message = Some(msg);
+                        } else if let Err(msg) = validate_positive_u64_input(
+                            &state.whisper_max_audio_bytes_input,
+                            "Whisper max audio bytes",
+                        ) {
+                            tracing::debug!(msg, "whisper max audio bytes validation failed");
+                            state.error_message = Some(msg);
                         } else {
                             state.step = SetupStep::Summary;
                         }
@@ -338,6 +344,12 @@ async fn event_loop(
                         validate_port_input(&state.container_mcp_port_input, "Container MCP port")
                     {
                         tracing::debug!(msg, "port validation failed");
+                        state.error_message = Some(msg);
+                    } else if let Err(msg) = validate_positive_u64_input(
+                        &state.whisper_max_audio_bytes_input,
+                        "Whisper max audio bytes",
+                    ) {
+                        tracing::debug!(msg, "whisper max audio bytes validation failed");
                         state.error_message = Some(msg);
                     } else {
                         state.step = SetupStep::Summary;
@@ -383,6 +395,9 @@ async fn event_loop(
                         PortsField::ContainerNetworkName => {
                             state.container_network_name_input.pop();
                         }
+                        PortsField::WhisperMaxAudioBytes => {
+                            state.whisper_max_audio_bytes_input.pop();
+                        }
                         _ => {}
                     }
                 }
@@ -404,6 +419,9 @@ async fn event_loop(
                         }
                         PortsField::ContainerNetworkName => {
                             state.container_network_name_input.push(ch)
+                        }
+                        PortsField::WhisperMaxAudioBytes => {
+                            state.whisper_max_audio_bytes_input.push(ch)
                         }
                         _ => {}
                     }
@@ -986,6 +1004,15 @@ mod tests {
                         local_mcp: None,
                         container: None,
                         tunnel: None,
+                        native_audio_transcription:
+                            brain3_core::domain::model::NativeAudioTranscriptionConfig {
+                                enabled: false,
+                                model: "base.en".into(),
+                                model_path: PathBuf::from(
+                                    "/tmp/brain3-home/whisper-models/ggml-base.en.bin",
+                                ),
+                                max_audio_bytes: 52_428_800,
+                            },
                     }),
                     "secret".into(),
                     brain3_core::domain::setup::RuntimeLaunchPlan {
@@ -1075,6 +1102,15 @@ mod tests {
                             enable_sync_reindex_tool: false,
                         }),
                         tunnel: None,
+                        native_audio_transcription:
+                            brain3_core::domain::model::NativeAudioTranscriptionConfig {
+                                enabled: false,
+                                model: "base.en".into(),
+                                model_path: PathBuf::from(
+                                    "/tmp/brain3-home/whisper-models/ggml-base.en.bin",
+                                ),
+                                max_audio_bytes: 52_428_800,
+                            },
                     }),
                     "secret".into(),
                     brain3_core::domain::setup::RuntimeLaunchPlan {
@@ -1175,6 +1211,9 @@ mod tests {
                 pkce_required: true,
                 enforce_hostname_check: true,
                 direct_public_origin_hostname: None,
+                native_audio_transcription_enabled: true,
+                whisper_model: "base.en".into(),
+                whisper_max_audio_bytes: 52_428_800,
             },
             dependencies: DependencyStatus {
                 operating_system: SetupOperatingSystem::MacOS,

@@ -1,8 +1,6 @@
 use std::collections::HashSet;
 use std::sync::{Arc, LazyLock};
 
-use serde_json::Value;
-
 use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
 use crate::domain::redact::elide_secret;
@@ -135,8 +133,6 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             body = %String::from_utf8_lossy(&body[..body.len().min(1024)]),
             "MCP proxy: request body"
         );
-        log_save_audio_file_request_summary("gateway_ingress", &body);
-
         let mut final_headers = filtered_headers;
         final_headers.push((
             "x-brain3-upstream-secret".into(),
@@ -202,59 +198,6 @@ fn header_value<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a s
 fn url_authority(url: &str) -> Option<&str> {
     url.split_once("://")
         .map(|(_, rest)| rest.split('/').next().unwrap_or(rest))
-}
-
-fn log_save_audio_file_request_summary(stage: &str, body: &[u8]) {
-    let Ok(json) = serde_json::from_slice::<Value>(body) else {
-        return;
-    };
-
-    let Some("tools/call") = json.get("method").and_then(Value::as_str) else {
-        return;
-    };
-    let params = json.get("params").and_then(Value::as_object);
-    let Some(params) = params else {
-        return;
-    };
-    let Some("save_audio_file") = params.get("name").and_then(Value::as_str) else {
-        return;
-    };
-    let arguments = params.get("arguments").and_then(Value::as_object);
-    let Some(arguments) = arguments else {
-        return;
-    };
-
-    let audio_file = arguments.get("audio_file").and_then(Value::as_object);
-    let Some(audio_file) = audio_file else {
-        return;
-    };
-
-    let download_url = audio_file.get("download_url").and_then(Value::as_str);
-    let download_authority = download_url.and_then(url_authority);
-    let download_path = download_url.and_then(url_path);
-    let request_id = json.get("id");
-
-    tracing::info!(
-        stage = stage,
-        request_id = ?request_id,
-        body_bytes = body.len(),
-        file_id = ?audio_file.get("file_id").and_then(|value| value.as_str()),
-        mime_type = ?audio_file.get("mime_type").and_then(|value| value.as_str()),
-        file_name = ?audio_file.get("file_name").and_then(|value| value.as_str()),
-        download_authority = ?download_authority,
-        download_path = ?download_path,
-        "MCP proxy: save_audio_file request summary"
-    );
-}
-
-fn url_path(url: &str) -> Option<&str> {
-    url.split_once("://").map(|(_, rest)| {
-        let with_slash = match rest.find('/') {
-            Some(index) => &rest[index..],
-            None => "/",
-        };
-        with_slash.split('?').next().unwrap_or(with_slash)
-    })
 }
 
 #[cfg(test)]

@@ -14,6 +14,8 @@ pub const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 pub const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 pub const DEFAULT_GENERATED_SECRET_BYTES: usize = 32;
 pub const DEFAULT_GENERATED_PASSWORD_LENGTH: usize = 24;
+pub const DEFAULT_WHISPER_MODEL: &str = "base.en";
+pub const DEFAULT_WHISPER_MAX_AUDIO_BYTES: u64 = 50 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SetupDefaults {
@@ -77,6 +79,9 @@ pub struct SetupDraftConfig {
     pub pkce_required: bool,
     pub enforce_hostname_check: bool,
     pub direct_public_origin_hostname: Option<String>,
+    pub native_audio_transcription_enabled: bool,
+    pub whisper_model: String,
+    pub whisper_max_audio_bytes: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

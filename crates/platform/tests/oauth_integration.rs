@@ -16,7 +16,7 @@ use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::errors::ProxyError;
 use brain3_core::domain::model::{
     AccessMode, GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig,
-    OAuthConfig,
+    NativeAudioTranscriptionConfig, OAuthConfig,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
 
@@ -185,6 +185,12 @@ impl TestHarness {
             local_mcp: self.local_mcp,
             container: None,
             tunnel: None,
+            native_audio_transcription: NativeAudioTranscriptionConfig {
+                enabled: false,
+                model: "base.en".into(),
+                model_path: "/tmp/brain3-whisper-models/ggml-base.en.bin".into(),
+                max_audio_bytes: 52_428_800,
+            },
         });
 
         let state = AppState {
@@ -245,6 +251,12 @@ impl TestHarness {
             local_mcp: Some(local_mcp),
             container: None,
             tunnel: None,
+            native_audio_transcription: NativeAudioTranscriptionConfig {
+                enabled: false,
+                model: "base.en".into(),
+                model_path: "/tmp/brain3-whisper-models/ggml-base.en.bin".into(),
+                max_audio_bytes: 52_428_800,
+            },
         });
 
         let state = AppState {

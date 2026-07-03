@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .config import (
     CONTEXT_LINES,
@@ -291,32 +291,3 @@ class VaultBatchFrontmatterUpdateInput(BaseModel):
             if "fields" not in item or not isinstance(item["fields"], dict):
                 raise ValueError(f"updates[{i}] must contain a 'fields' key with a dict value")
         return v
-
-
-class OpenAIFileReferenceInput(BaseModel):
-    """OpenAI file param reference passed through ChatGPT MCP tool calls."""
-
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-
-    download_url: AnyUrl = Field(
-        ...,
-        description="Temporary authorized download URL for the uploaded file",
-    )
-    file_id: str = Field(
-        ...,
-        description="OpenAI file identifier",
-        min_length=1,
-        max_length=200,
-    )
-    mime_type: str | None = Field(
-        default=None,
-        description="Optional MIME type for the uploaded file",
-        min_length=1,
-        max_length=200,
-    )
-    file_name: str | None = Field(
-        default=None,
-        description="Optional original filename for the uploaded file",
-        min_length=1,
-        max_length=500,
-    )

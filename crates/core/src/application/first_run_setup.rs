@@ -8,7 +8,8 @@ use crate::domain::setup::{
     DEFAULT_CLIENT_ID, DEFAULT_CONTAINER_HOST_PORT, DEFAULT_CONTAINER_MCP_PORT,
     DEFAULT_CONTAINER_NAME, DEFAULT_CONTAINER_NETWORK_NAME, DEFAULT_GATEWAY_PORT,
     DEFAULT_GENERATED_PASSWORD_LENGTH, DEFAULT_GENERATED_SECRET_BYTES, DEFAULT_LOCAL_MCP_PORT,
-    DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME,
+    DEFAULT_REFRESH_TOKEN_LIFETIME_SECS, DEFAULT_USERNAME, DEFAULT_WHISPER_MAX_AUDIO_BYTES,
+    DEFAULT_WHISPER_MODEL,
 };
 use crate::ports::setup_system::SetupSystemPort;
 
@@ -56,6 +57,9 @@ impl FirstRunSetupUseCase {
             pkce_required: true,
             enforce_hostname_check: true,
             direct_public_origin_hostname: None,
+            native_audio_transcription_enabled: native_audio_transcription_default(),
+            whisper_model: DEFAULT_WHISPER_MODEL.to_string(),
+            whisper_max_audio_bytes: DEFAULT_WHISPER_MAX_AUDIO_BYTES,
         };
 
         Ok(SetupPreparation {
@@ -136,6 +140,11 @@ impl FirstRunSetupUseCase {
 
         let env_contents = self.port.render_env_file(&draft, &paths)?;
         self.port.ensure_app_home_dirs(&paths).await?;
+        if draft.native_audio_transcription_enabled {
+            self.port
+                .ensure_whisper_model(&paths, &draft.whisper_model)
+                .await?;
+        }
         self.port
             .write_env_file(&paths.env_file, &env_contents)
             .await?;
@@ -211,8 +220,15 @@ impl FirstRunSetupUseCase {
             pkce_required: config.oauth.pkce_required,
             enforce_hostname_check: config.hostname_validation.enforce,
             direct_public_origin_hostname: None,
+            native_audio_transcription_enabled: config.native_audio_transcription.enabled,
+            whisper_model: config.native_audio_transcription.model.clone(),
+            whisper_max_audio_bytes: config.native_audio_transcription.max_audio_bytes,
         }
     }
+}
+
+fn native_audio_transcription_default() -> bool {
+    cfg!(any(target_os = "macos", target_os = "linux"))
 }
 
 fn default_container_runtime(
@@ -318,6 +334,7 @@ mod tests {
     struct MockState {
         rendered_env: Option<String>,
         written_env: Option<String>,
+        ensured_whisper_models: Vec<String>,
         generated_secret_count: usize,
         generated_password_count: usize,
     }
@@ -402,6 +419,23 @@ mod tests {
             Ok(())
         }
 
+        async fn ensure_whisper_model(
+            &self,
+            _paths: &SetupPaths,
+            model: &str,
+        ) -> Result<PathBuf, SetupError> {
+            self.state
+                .lock()
+                .unwrap()
+                .ensured_whisper_models
+                .push(model.to_string());
+            Ok(self
+                .paths
+                .app_home
+                .join("whisper-models")
+                .join(format!("ggml-{model}.bin")))
+        }
+
         async fn write_env_file(&self, _path: &Path, contents: &str) -> Result<(), SetupError> {
             self.state.lock().unwrap().written_env = Some(contents.to_string());
             Ok(())
@@ -451,6 +485,9 @@ mod tests {
             pkce_required: true,
             enforce_hostname_check: true,
             direct_public_origin_hostname: None,
+            native_audio_transcription_enabled: true,
+            whisper_model: DEFAULT_WHISPER_MODEL.to_string(),
+            whisper_max_audio_bytes: DEFAULT_WHISPER_MAX_AUDIO_BYTES,
         }
     }
 
@@ -519,6 +556,9 @@ mod tests {
         assert!(preparation.draft.container_network_isolated);
         assert!(preparation.draft.local_mcp_enabled);
         assert!(!preparation.draft.local_mcp_bearer_token.is_empty());
+        assert!(preparation.draft.native_audio_transcription_enabled);
+        assert_eq!(preparation.draft.whisper_model, "base.en");
+        assert_eq!(preparation.draft.whisper_max_audio_bytes, 52_428_800);
     }
 
     #[tokio::test]
@@ -604,6 +644,12 @@ mod tests {
                 tunnel: Some(crate::domain::model::TunnelConfig::CloudflareQuick {
                     local_port: 9421,
                 }),
+                native_audio_transcription: crate::domain::model::NativeAudioTranscriptionConfig {
+                    enabled: false,
+                    model: "tiny.en".into(),
+                    model_path: PathBuf::from("/tmp/brain3-home/whisper-models/ggml-tiny.en.bin"),
+                    max_audio_bytes: 12_345,
+                },
             })
             .await
             .expect("prepare_from_existing_config should succeed");
@@ -624,6 +670,9 @@ mod tests {
         assert_eq!(preparation.draft.local_mcp_bearer_token, "local-bearer");
         assert!(!preparation.draft.pkce_required);
         assert!(!preparation.draft.enforce_hostname_check);
+        assert!(!preparation.draft.native_audio_transcription_enabled);
+        assert_eq!(preparation.draft.whisper_model, "tiny.en");
+        assert_eq!(preparation.draft.whisper_max_audio_bytes, 12_345);
     }
 
     #[tokio::test]
@@ -644,6 +693,55 @@ mod tests {
         assert_eq!(result.draft.password, "generated-password-1");
         assert_eq!(port.snapshot().generated_secret_count, 1);
         assert_eq!(port.snapshot().generated_password_count, 1);
+    }
+
+    #[tokio::test]
+    async fn finalize_downloads_selected_whisper_model_when_transcription_enabled() {
+        let vault_path = PathBuf::from("/Users/test/vault");
+        let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
+        let use_case = FirstRunSetupUseCase::new(port.clone(), sample_defaults());
+
+        let summary = use_case
+            .finalize(FinalizeSetupRequest {
+                draft: SetupDraftConfig {
+                    native_audio_transcription_enabled: true,
+                    whisper_model: "tiny.en".into(),
+                    password: "chosen-password".into(),
+                    client_secret: "chosen-secret".into(),
+                    ..sample_draft(vault_path)
+                },
+                generate_password: false,
+            })
+            .await
+            .expect("finalize should succeed");
+
+        assert_eq!(summary.draft.whisper_model, "tiny.en");
+        assert_eq!(
+            port.snapshot().ensured_whisper_models,
+            vec!["tiny.en".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn finalize_skips_whisper_model_download_when_transcription_disabled() {
+        let vault_path = PathBuf::from("/Users/test/vault");
+        let port = Arc::new(MockSetupSystemPort::new(vec![vault_path.clone()]));
+        let use_case = FirstRunSetupUseCase::new(port.clone(), sample_defaults());
+
+        use_case
+            .finalize(FinalizeSetupRequest {
+                draft: SetupDraftConfig {
+                    native_audio_transcription_enabled: false,
+                    password: "chosen-password".into(),
+                    client_secret: "chosen-secret".into(),
+                    ..sample_draft(vault_path)
+                },
+                generate_password: false,
+            })
+            .await
+            .expect("finalize should succeed");
+
+        assert!(port.snapshot().ensured_whisper_models.is_empty());
     }
 
     #[tokio::test]

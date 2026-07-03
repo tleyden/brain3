@@ -109,6 +109,15 @@ fn build_overrides(
         "B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK",
         draft.enforce_hostname_check.to_string(),
     );
+    values.insert(
+        "B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED",
+        draft.native_audio_transcription_enabled.to_string(),
+    );
+    values.insert("B3_WHISPER_MODEL", draft.whisper_model.clone());
+    values.insert(
+        "B3_WHISPER_MAX_AUDIO_BYTES",
+        draft.whisper_max_audio_bytes.to_string(),
+    );
 
     match &draft.tunnel_mode {
         TunnelModeDraft::Disabled => {

@@ -53,6 +53,9 @@ fn render_env_file_applies_setup_defaults_and_quotes_values() {
         pkce_required: true,
         enforce_hostname_check: true,
         direct_public_origin_hostname: None,
+        native_audio_transcription_enabled: false,
+        whisper_model: "base.en".into(),
+        whisper_max_audio_bytes: 52_428_800,
     };
 
     let rendered = render_env_file(&draft, &paths).expect("env should render");
@@ -109,6 +112,9 @@ fn render_env_file_disables_quick_tunnel_for_disabled_mode() {
         pkce_required: true,
         enforce_hostname_check: true,
         direct_public_origin_hostname: None,
+        native_audio_transcription_enabled: false,
+        whisper_model: "base.en".into(),
+        whisper_max_audio_bytes: 52_428_800,
     };
 
     let rendered = render_env_file(&draft, &paths).expect("env should render");

@@ -5,8 +5,8 @@ use brain3_core::application::first_run_setup::CURRENT_RELEASE;
 use brain3_core::domain::errors::ConfigError;
 use brain3_core::domain::model::{
     AccessMode, ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig,
-    GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig, OAuthConfig,
-    TunnelConfig,
+    GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig,
+    NativeAudioTranscriptionConfig, OAuthConfig, TunnelConfig,
 };
 use brain3_core::ports::config::ConfigPort;
 use rand::RngExt;
@@ -98,6 +98,8 @@ impl ConfigPort for EnvFileConfigAdapter {
         let upstream_secret = load_upstream_shared_secret();
         let local_mcp = load_local_mcp_config()?;
         let container = load_container_startup_config(&upstream_secret)?;
+        let native_audio_transcription =
+            load_native_audio_transcription_config(self.token_db_home_override.as_deref())?;
 
         let default_upstream_url = match &container {
             Some(c) => format!("http://127.0.0.1:{}", c.host_port),
@@ -145,6 +147,7 @@ impl ConfigPort for EnvFileConfigAdapter {
             local_mcp,
             container,
             tunnel,
+            native_audio_transcription,
         })
     }
 }
@@ -185,6 +188,22 @@ fn resolve_token_db_path(token_db_home_override: Option<&Path>) -> Result<PathBu
     })?;
 
     Ok(home.join(".brain3").join("brain3.db"))
+}
+
+fn resolve_app_home_root(home_override: Option<&Path>) -> Result<PathBuf, ConfigError> {
+    if let Some(root) = home_override {
+        return Ok(root.to_path_buf());
+    }
+
+    if let Some(root) = env::var_os("B3_HOME").filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(root));
+    }
+
+    let home = user_home_dir().ok_or_else(|| {
+        ConfigError::Missing("neither HOME nor USERPROFILE is set; cannot resolve B3_HOME".into())
+    })?;
+
+    Ok(home.join(".brain3"))
 }
 
 fn require_nonempty(name: &str, errors: &mut Vec<String>) -> String {
@@ -234,6 +253,57 @@ fn env_bool(name: &str, default: bool) -> bool {
     match env::var(name) {
         Ok(val) => !["0", "false", "no", "off"].contains(&val.trim().to_lowercase().as_str()),
         Err(_) => default,
+    }
+}
+
+fn load_native_audio_transcription_config(
+    home_override: Option<&Path>,
+) -> Result<NativeAudioTranscriptionConfig, ConfigError> {
+    let enabled = env_bool(
+        "B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED",
+        cfg!(any(target_os = "macos", target_os = "linux")),
+    );
+    let model = env::var("B3_WHISPER_MODEL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "base.en".to_string());
+    let model_path = if let Some(path) =
+        env::var_os("B3_WHISPER_MODEL_PATH").filter(|value| !value.is_empty())
+    {
+        PathBuf::from(path)
+    } else {
+        let filename = whisper_model_filename(&model);
+        resolve_app_home_root(home_override)?
+            .join("whisper-models")
+            .join(filename)
+    };
+    let max_audio_bytes = env::var("B3_WHISPER_MAX_AUDIO_BYTES")
+        .ok()
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .map_err(|e| ConfigError::Invalid(format!("B3_WHISPER_MAX_AUDIO_BYTES: {e}")))?
+        .unwrap_or(50 * 1024 * 1024);
+
+    if max_audio_bytes == 0 {
+        return Err(ConfigError::Invalid(
+            "B3_WHISPER_MAX_AUDIO_BYTES must be greater than 0".into(),
+        ));
+    }
+
+    Ok(NativeAudioTranscriptionConfig {
+        enabled,
+        model,
+        model_path,
+        max_audio_bytes,
+    })
+}
+
+fn whisper_model_filename(model: &str) -> String {
+    if model.starts_with("ggml-") && model.ends_with(".bin") {
+        model.to_string()
+    } else {
+        format!("ggml-{model}.bin")
     }
 }
 
@@ -573,6 +643,10 @@ mod tests {
         "B3_CF_TUNNEL_NAME",
         "B3_CF_DOMAIN",
         "B3_CF_TUNNEL_CONFIG_FILE",
+        "B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED",
+        "B3_WHISPER_MODEL",
+        "B3_WHISPER_MODEL_PATH",
+        "B3_WHISPER_MAX_AUDIO_BYTES",
     ];
 
     fn with_clean_config_env<T>(f: impl FnOnce() -> T) -> T {
