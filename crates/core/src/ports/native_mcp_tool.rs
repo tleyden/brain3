@@ -41,6 +41,10 @@ pub trait NativeMcpTool: Send + Sync {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> Value;
+    fn meta(&self) -> Option<Value> {
+        None
+    }
+
     async fn call(&self, arguments: Value) -> Result<NativeMcpToolOutput, NativeMcpToolError>;
 
     async fn on_initialize(&self) -> Result<(), NativeMcpToolError> {

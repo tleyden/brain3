@@ -21,11 +21,18 @@ impl NativeMcpToolRegistry {
         self.tools
             .iter()
             .map(|tool| {
-                json!({
+                let mut schema = json!({
                     "name": tool.name(),
                     "description": tool.description(),
                     "inputSchema": tool.input_schema(),
-                })
+                });
+                if let Some(meta) = tool.meta() {
+                    schema
+                        .as_object_mut()
+                        .expect("native tool schema should be a JSON object")
+                        .insert("_meta".into(), meta);
+                }
+                schema
             })
             .collect()
     }

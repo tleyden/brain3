@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use brain3_core::ports::native_mcp_tool::{NativeMcpTool, NativeMcpToolError, NativeMcpToolOutput};
 use serde::Deserialize;
@@ -18,6 +18,8 @@ use tokio::io::AsyncWriteExt;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhisperTranscribeConfig {
@@ -41,8 +43,24 @@ impl WhisperTranscribeTool {
         config: WhisperTranscribeConfig,
         transcriber: Arc<dyn AudioTranscriber>,
     ) -> Self {
+        Self::with_transcriber_and_timeouts(
+            config,
+            transcriber,
+            HTTP_CONNECT_TIMEOUT,
+            HTTP_TOTAL_TIMEOUT,
+        )
+    }
+
+    fn with_transcriber_and_timeouts(
+        config: WhisperTranscribeConfig,
+        transcriber: Arc<dyn AudioTranscriber>,
+        connect_timeout: Duration,
+        total_timeout: Duration,
+    ) -> Self {
         let http_client = reqwest::Client::builder()
             .no_proxy()
+            .connect_timeout(connect_timeout)
+            .timeout(total_timeout)
             .build()
             .expect("failed to build reqwest client for native transcription tool");
         Self {
@@ -220,6 +238,10 @@ impl NativeMcpTool for WhisperTranscribeTool {
             },
             "required": ["audio_file"]
         })
+    }
+
+    fn meta(&self) -> Option<Value> {
+        Some(json!({ "openai/fileParams": ["audio_file"] }))
     }
 
     async fn call(&self, arguments: Value) -> Result<NativeMcpToolOutput, NativeMcpToolError> {
@@ -506,6 +528,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use axum::{body::Body, http::StatusCode, response::Response, routing::get, Router};
+    use brain3_core::application::native_mcp_tool_registry::NativeMcpToolRegistry;
     use brain3_core::ports::native_mcp_tool::NativeMcpTool;
     use serde_json::json;
     use tokio::net::TcpListener;
@@ -592,6 +615,43 @@ mod tests {
             .is_empty());
     }
 
+    #[tokio::test]
+    async fn call_times_out_stalled_downloads() {
+        let download_url = serve_stalled_response().await;
+        let fake = Arc::new(FakeTranscriber::default());
+        let tool = WhisperTranscribeTool::with_transcriber_and_timeouts(
+            WhisperTranscribeConfig {
+                model_path: "/tmp/model.bin".into(),
+                max_audio_bytes: 1_000_000,
+            },
+            fake.clone(),
+            Duration::from_millis(50),
+            Duration::from_millis(200),
+        );
+
+        let start = Instant::now();
+        let error = tokio::time::timeout(
+            Duration::from_secs(2),
+            tool.call(json!({
+                "audio_file": {
+                    "download_url": download_url,
+                    "file_id": "file_stalled"
+                }
+            })),
+        )
+        .await
+        .expect("tool call should finish within the test deadline")
+        .expect_err("stalled download should fail");
+
+        assert!(start.elapsed() < Duration::from_secs(2));
+        assert!(error.to_string().contains("audio download failed"));
+        assert!(fake
+            .calls
+            .lock()
+            .expect("fake transcriber lock should succeed")
+            .is_empty());
+    }
+
     #[test]
     fn input_schema_declares_openai_audio_file_reference() {
         let fake = Arc::new(FakeTranscriber::default());
@@ -613,6 +673,29 @@ mod tests {
         );
     }
 
+    #[test]
+    fn registry_schema_advertises_openai_file_metadata() {
+        let fake = Arc::new(FakeTranscriber::default());
+        let tool: Arc<dyn NativeMcpTool> = Arc::new(WhisperTranscribeTool::with_transcriber(
+            WhisperTranscribeConfig {
+                model_path: "/tmp/model.bin".into(),
+                max_audio_bytes: 64,
+            },
+            fake,
+        ));
+        let registry = NativeMcpToolRegistry::new(vec![tool]);
+
+        let schemas = registry.list_schemas();
+
+        assert_eq!(schemas.len(), 1);
+        assert_eq!(
+            schemas[0]["_meta"],
+            json!({
+                "openai/fileParams": ["audio_file"]
+            })
+        );
+    }
+
     async fn serve_once(body: Vec<u8>) -> String {
         let app = Router::new().route(
             "/audio",
@@ -621,6 +704,32 @@ mod tests {
                     .status(StatusCode::OK)
                     .header("content-type", "audio/wav")
                     .body(Body::from(body))
+                    .expect("response should build")
+            }),
+        );
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("test server should bind");
+        let addr = listener
+            .local_addr()
+            .expect("local addr should be available");
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("test server should serve");
+        });
+        format!("http://{addr}/audio")
+    }
+
+    async fn serve_stalled_response() -> String {
+        let app = Router::new().route(
+            "/audio",
+            get(|| async move {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("content-type", "audio/wav")
+                    .body(Body::empty())
                     .expect("response should build")
             }),
         );
