@@ -8,14 +8,15 @@ use brain3_core::domain::model::{
     GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig, OAuthConfig,
     TunnelConfig,
 };
+use brain3_core::ports::config::ConfigPort;
 use rand::RngExt;
 
 use crate::setup::app_home::Brain3AppHome;
+use crate::util::user_home_dir;
 
 const DEFAULT_ACCESS_TOKEN_LIFETIME_SECS: u64 = 3600;
 const DEFAULT_REFRESH_TOKEN_LIFETIME_SECS: u64 = 90 * 24 * 60 * 60;
 const DEFAULT_LOCAL_MCP_PORT: u16 = 2764;
-use brain3_core::ports::config::ConfigPort;
 
 pub struct EnvFileConfigAdapter {
     env_path: Option<PathBuf>,
@@ -176,16 +177,14 @@ fn resolve_token_db_path(token_db_home_override: Option<&Path>) -> Result<PathBu
         return Ok(PathBuf::from(root).join("brain3.db"));
     }
 
-    let home = env::var_os("HOME")
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            ConfigError::Missing(
-                "HOME environment variable is not set; cannot resolve default token database path"
-                    .into(),
-            )
-        })?;
+    let home = user_home_dir().ok_or_else(|| {
+        ConfigError::Missing(
+            "neither HOME nor USERPROFILE is set; cannot resolve default token database path"
+                .into(),
+        )
+    })?;
 
-    Ok(PathBuf::from(home).join(".brain3").join("brain3.db"))
+    Ok(home.join(".brain3").join("brain3.db"))
 }
 
 fn require_nonempty(name: &str, errors: &mut Vec<String>) -> String {
@@ -568,6 +567,7 @@ mod tests {
         "B3_ACCESS_MODE",
         "B3_LOCAL_MCP_PORT",
         "LOCAL_GATEWAY_MCP_BEARER_TOKEN",
+        "USERPROFILE",
         "B3_HOME",
         "B3_CF_QUICK_TUNNEL",
         "B3_CF_TUNNEL_NAME",

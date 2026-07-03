@@ -298,7 +298,7 @@ dependencies = [
 
 [[package]]
 name = "brain3"
-version = "0.2.9"
+version = "0.2.10-rc1"
 dependencies = [
  "anyhow",
  "axum",
@@ -353,6 +353,7 @@ dependencies = [
  "tower-http 0.7.0",
  "tracing",
  "urlencoding",
+ "which",
 ]
 
 [[package]]
@@ -4116,6 +4117,15 @@ dependencies = [
  "lazy_static",
  "serde",
  "wezterm-dynamic",
+]
+
+[[package]]
+name = "which"
+version = "8.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "48d7cd18d4acb58fb3cdfe9ea54e6cd96a4e7d4cc45c56338b236e82dad47248"
+dependencies = [
+ "libc",
 ]
 
 [[package]]

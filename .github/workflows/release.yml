@@ -6,11 +6,52 @@ on:
       - "v*"
 
 jobs:
+  release_meta:
+    name: Validate Release Tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      prerelease: ${{ steps.classify.outputs.prerelease }}
+      update_latest: ${{ steps.classify.outputs.update_latest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate release tag matches apps/gateway version
+        run: |
+          APP_VERSION=$(awk -F '"' '/^version = / {print $2; exit}' apps/gateway/Cargo.toml)
+          if [ -z "${APP_VERSION}" ]; then
+            echo "Could not determine version from apps/gateway/Cargo.toml" >&2
+            exit 1
+          fi
+          if [ "v${APP_VERSION}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match apps/gateway version v${APP_VERSION}" >&2
+            exit 1
+          fi
+
+      - name: Classify release tag
+        id: classify
+        run: |
+          if [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "update_latest=true" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-.+ ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "update_latest=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Unsupported release tag format: ${GITHUB_REF_NAME}" >&2
+            exit 1
+          fi
+
   build:
     permissions:
       contents: read
     name: Build ${{ matrix.display }}
+    needs: release_meta
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
       matrix:
         include:
@@ -26,21 +67,12 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
             display: macOS ARM64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            display: Windows x86_64
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Validate release tag matches apps/gateway version
-        run: |
-          APP_VERSION=$(awk -F '"' '/^version = / {print $2; exit}' apps/gateway/Cargo.toml)
-          if [ -z "${APP_VERSION}" ]; then
-            echo "Could not determine version from apps/gateway/Cargo.toml" >&2
-            exit 1
-          fi
-          if [ "v${APP_VERSION}" != "${GITHUB_REF_NAME}" ]; then
-            echo "Tag ${GITHUB_REF_NAME} does not match apps/gateway version v${APP_VERSION}" >&2
-            exit 1
-          fi
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -63,7 +95,15 @@ jobs:
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package
-        run: tar -czf brain3-${{ matrix.target }}.tar.gz -C target/${{ matrix.target }}/release brain3
+        run: |
+          binary_name="brain3"
+          if [[ "${{ matrix.target }}" == *-windows-* ]]; then
+            binary_name="brain3.exe"
+          fi
+
+          tar -czf brain3-${{ matrix.target }}.tar.gz \
+            -C target/${{ matrix.target }}/release \
+            "$binary_name"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -72,7 +112,9 @@ jobs:
 
   release:
     name: Create GitHub Release
-    needs: prepare-assets
+    needs:
+      - prepare-assets
+      - release_meta
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -86,6 +128,7 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+          prerelease: ${{ needs.release_meta.outputs.prerelease == 'true' }}
 
   prepare-assets:
     name: Prepare Release Assets
@@ -139,7 +182,9 @@ jobs:
 
   publish-s3:
     name: Publish to S3
-    needs: prepare-assets
+    needs:
+      - prepare-assets
+      - release_meta
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -160,6 +205,7 @@ jobs:
       - name: Upload to S3
         env:
           AWS_REGION: ${{ secrets.AWS_REGION || 'us-east-1' }}
+          BRAIN3_UPDATE_LATEST: ${{ needs.release_meta.outputs.update_latest }}
         run: |
           bash scripts/upload-to-s3.sh \
             "${{ secrets.BRAIN3_S3_BUCKET }}" \
