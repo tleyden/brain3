@@ -746,9 +746,9 @@ async fn e2e_smoke_4_local_mcp_transcribes_tts_audio() -> Result<(), Box<dyn std
             }),
         )
         .await?;
-        let normalized = normalize_transcript(&transcript);
         assert_eq!(
-            normalized, "hello world",
+            transcript,
+            "Imagine you just close a desktop app, right? You think your work is done for the day. Oh, but it is not. No, it's not. Because in the background, this silent, invisible AI just continues to devour your laptop's GPU. Yeah, your battery just drains in minutes. Exactly. The fans are screaming and the system just eventually",
             "actual transcript: {transcript:?}"
         );
 
@@ -1439,13 +1439,6 @@ async fn call_tool_text(
             _ => None,
         })
         .ok_or_else(|| io::Error::other("tool result did not include text content").into())
-}
-
-fn normalize_transcript(transcript: &str) -> String {
-    transcript
-        .trim()
-        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_whitespace())
-        .to_ascii_lowercase()
 }
 
 fn json_array_field<'a>(
