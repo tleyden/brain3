@@ -43,14 +43,6 @@ struct CfTunnel {
     connections: Vec<serde_json::Value>,
 }
 
-fn cloudflared_on_path() -> bool {
-    std::process::Command::new("which")
-        .arg("cloudflared")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 /// Returns (registered, active_connection_count).
 /// registered=false means the tunnel name does not exist in Cloudflare's registry.
 async fn check_cf_registry(tunnel_name: &str) -> (bool, usize) {
@@ -104,9 +96,10 @@ async fn cleanup_tunnel(tunnel_name: &str) -> Result<(), TunnelError> {
 #[async_trait::async_trait]
 impl TunnelPort for CloudflareNamedTunnelAdapter {
     async fn start(&self) -> Result<TunnelInfo, TunnelError> {
-        if !cloudflared_on_path() {
+        let Some(cloudflared_path) = crate::util::find_cloudflared() else {
             return Err(TunnelError::CloudflaredNotFound);
-        }
+        };
+        tracing::debug!(path = %cloudflared_path.display(), "cloudflared resolved for named tunnel");
 
         if !self.config_file.exists() {
             return Err(TunnelError::ConfigNotFound(

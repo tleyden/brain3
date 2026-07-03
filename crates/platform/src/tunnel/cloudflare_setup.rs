@@ -6,12 +6,16 @@ use tokio::process::Command;
 use crate::util::user_home_dir;
 
 pub async fn check_cloudflared_installed() -> bool {
-    Command::new("which")
-        .arg("cloudflared")
-        .output()
-        .await
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    match crate::util::find_cloudflared() {
+        Some(path) => {
+            tracing::debug!(path = %path.display(), "cloudflared resolved");
+            true
+        }
+        None => {
+            tracing::debug!("cloudflared not found on PATH");
+            false
+        }
+    }
 }
 
 /// Returns true if `cloudflared tunnel list` succeeds (i.e. user is logged in).

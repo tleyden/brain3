@@ -28,20 +28,13 @@ impl CloudflareQuickTunnelAdapter {
     }
 }
 
-fn cloudflared_on_path() -> bool {
-    std::process::Command::new("which")
-        .arg("cloudflared")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-}
-
 #[async_trait::async_trait]
 impl TunnelPort for CloudflareQuickTunnelAdapter {
     async fn start(&self) -> Result<TunnelInfo, TunnelError> {
-        if !cloudflared_on_path() {
+        let Some(cloudflared_path) = crate::util::find_cloudflared() else {
             return Err(TunnelError::CloudflaredNotFound);
-        }
+        };
+        tracing::debug!(path = %cloudflared_path.display(), "cloudflared resolved for quick tunnel");
 
         let mut cmd = Command::new("cloudflared");
         cmd.args([
