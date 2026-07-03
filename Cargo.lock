@@ -372,6 +372,7 @@ dependencies = [
  "subtle",
  "symphonia",
  "tempfile",
+ "thiserror 2.0.18",
  "tokio",
  "tower-http 0.7.0",
  "tracing",
