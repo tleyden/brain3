@@ -704,7 +704,7 @@ async fn connect_public_mcp(
 {
     let transport = StreamableHttpClientTransport::from_config(
         StreamableHttpClientTransportConfig::with_uri(format!("http://127.0.0.1:{OAUTH_PORT}/mcp"))
-            .auth_header(format!("Bearer {access_token}")),
+            .auth_header(access_token),
     );
     let client_info = ClientInfo::new(
         ClientCapabilities::default(),
