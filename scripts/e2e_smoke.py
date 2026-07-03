@@ -13,6 +13,10 @@ from pathlib import Path
 CommandRunner = Callable[[list[str], Path], int]
 
 IMAGE_TAG = "brain3-mcp-vault-tools:e2e-local"
+DEFAULT_E2E_TESTS = [
+    "e2e_smoke_1_local_docker",
+    "e2e_smoke_2_oauth_public_flow",
+]
 
 
 def repo_root() -> Path:
@@ -44,7 +48,6 @@ def cargo_test_command(extra_args: Sequence[str]) -> list[str]:
         "--",
         "--nocapture",
         "--test-threads=1",
-        "--fail-fast",
         *extra_args,
     ]
 
@@ -71,7 +74,15 @@ def run(
         )
         return build_exit_code
 
-    return run_command(cargo_test_command(extra_args), root)
+    if extra_args:
+        return run_command(cargo_test_command(extra_args), root)
+
+    for test_name in DEFAULT_E2E_TESTS:
+        test_exit_code = run_command(cargo_test_command([test_name]), root)
+        if test_exit_code != 0:
+            return test_exit_code
+
+    return 0
 
 
 def main() -> int:

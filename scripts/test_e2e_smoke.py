@@ -52,10 +52,44 @@ class E2ESmokeScriptTests(unittest.TestCase):
                 "--",
                 "--nocapture",
                 "--test-threads=1",
-                "--fail-fast",
                 "e2e_smoke_starts_gateway",
             ],
         )
+
+    def test_default_run_executes_local_then_oauth_tests(self):
+        module = load_script()
+        calls = []
+
+        def fake_run(command, cwd):
+            calls.append((command, cwd))
+            return 0
+
+        exit_code = module.run([], run_command=fake_run)
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0][0][0:2], ["docker", "build"])
+        self.assertEqual(calls[1][0][-1], "e2e_smoke_1_local_docker")
+        self.assertEqual(calls[2][0][-1], "e2e_smoke_2_oauth_public_flow")
+        self.assertNotIn("--fail-fast", calls[1][0])
+        self.assertNotIn("--fail-fast", calls[2][0])
+
+    def test_default_run_aborts_before_oauth_when_local_test_fails(self):
+        module = load_script()
+        calls = []
+
+        def fake_run(command, cwd):
+            calls.append((command, cwd))
+            if command[-1] == "e2e_smoke_1_local_docker":
+                return 23
+            return 0
+
+        exit_code = module.run([], run_command=fake_run)
+
+        self.assertEqual(exit_code, 23)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][0][0:2], ["docker", "build"])
+        self.assertEqual(calls[1][0][-1], "e2e_smoke_1_local_docker")
 
     def test_build_failure_aborts_before_cargo_runs(self):
         module = load_script()
