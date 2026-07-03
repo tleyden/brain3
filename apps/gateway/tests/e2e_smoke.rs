@@ -28,6 +28,7 @@ use rmcp::{
 };
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 
 const OAUTH_PORT: u16 = 27630;
@@ -119,32 +120,40 @@ impl TempTestDir {
     }
 
     fn write_env_file(&self) -> io::Result<()> {
-        fs::write(
-            &self.env_file,
-            format!(
-                "B3_OAUTH2_GATEWAY_PORT={OAUTH_PORT}\n\
-                 B3_OAUTH2_GATEWAY_CLIENT_ID={OAUTH_CLIENT_ID}\n\
-                 B3_OAUTH2_GATEWAY_CLIENT_SECRET=e2e-test-client-secret\n\
-                 B3_USERNAME=e2e-test-user\n\
-                 B3_PASSWORD=e2e-test-password\n\
-                 B3_TOKEN_DB_PATH={}\n\
-                 B3_CF_QUICK_TUNNEL={}\n\
-                 B3_CONTAINER_RUNTIME=docker\n\
-                 B3_VAULT_PATH={}\n\
-                 B3_CONTAINER_IMAGE_REPO=brain3-mcp-vault-tools\n\
-                 B3_CONTAINER_IMAGE_TAG=e2e-local\n\
-                 B3_UPSTREAM_SHARED_SECRET=e2e-test-upstream-secret\n\
-                 B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=false\n\
-                 B3_LOCAL_MCP_PORT={LOCAL_MCP_PORT}\n\
-                 LOCAL_GATEWAY_MCP_BEARER_TOKEN={LOCAL_BEARER_TOKEN}\n\
-                 B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK={}\n\
-                 BRAIN3_ENABLE_SYNC_REINDEX_TOOL=true\n",
-                self.brain3_db.display(),
-                self.tunnel_mode.quick_tunnel_env_value(),
-                self.vault.display(),
-                self.tunnel_mode.enforce_hostname_check_env_value(),
-            ),
-        )
+        self.write_env_file_with_extra(&[])
+    }
+
+    fn write_env_file_with_extra(&self, extra: &[(&str, String)]) -> io::Result<()> {
+        let mut env_file = format!(
+            "B3_OAUTH2_GATEWAY_PORT={OAUTH_PORT}\n\
+             B3_OAUTH2_GATEWAY_CLIENT_ID={OAUTH_CLIENT_ID}\n\
+             B3_OAUTH2_GATEWAY_CLIENT_SECRET=e2e-test-client-secret\n\
+             B3_USERNAME=e2e-test-user\n\
+             B3_PASSWORD=e2e-test-password\n\
+             B3_TOKEN_DB_PATH={}\n\
+             B3_CF_QUICK_TUNNEL={}\n\
+             B3_CONTAINER_RUNTIME=docker\n\
+             B3_VAULT_PATH={}\n\
+             B3_CONTAINER_IMAGE_REPO=brain3-mcp-vault-tools\n\
+             B3_CONTAINER_IMAGE_TAG=e2e-local\n\
+             B3_UPSTREAM_SHARED_SECRET=e2e-test-upstream-secret\n\
+             B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=false\n\
+             B3_LOCAL_MCP_PORT={LOCAL_MCP_PORT}\n\
+             LOCAL_GATEWAY_MCP_BEARER_TOKEN={LOCAL_BEARER_TOKEN}\n\
+             B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK={}\n\
+             BRAIN3_ENABLE_SYNC_REINDEX_TOOL=true\n",
+            self.brain3_db.display(),
+            self.tunnel_mode.quick_tunnel_env_value(),
+            self.vault.display(),
+            self.tunnel_mode.enforce_hostname_check_env_value(),
+        );
+        for (key, value) in extra {
+            env_file.push_str(key);
+            env_file.push('=');
+            env_file.push_str(value);
+            env_file.push('\n');
+        }
+        fs::write(&self.env_file, env_file)
     }
 
     fn path_with_shim(&self) -> String {
@@ -217,6 +226,18 @@ impl Brain3Process {
         temp: &TempTestDir,
         tunnel_mode: TunnelMode,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::spawn_with_health_port(temp, tunnel_mode, OAUTH_PORT).await
+    }
+
+    async fn spawn_local_only(temp: &TempTestDir) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::spawn_with_health_port(temp, TunnelMode::Disabled, LOCAL_MCP_PORT).await
+    }
+
+    async fn spawn_with_health_port(
+        temp: &TempTestDir,
+        tunnel_mode: TunnelMode,
+        health_port: u16,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let binary = env!("CARGO_BIN_EXE_brain3");
         let mut command = Command::new(binary);
         command
@@ -266,23 +287,26 @@ impl Brain3Process {
             diagnostics_done,
             stdout_reader: Some(stdout_reader),
         };
-        process.wait_for_health().await?;
+        process.wait_for_health(health_port).await?;
         Ok(process)
     }
 
-    async fn wait_for_health(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn wait_for_health(&self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
         let deadline = Instant::now() + Duration::from_secs(30);
         let mut last_error = String::from("health endpoint was not probed");
 
         while Instant::now() < deadline {
-            match probe_health().await {
+            match probe_health(port).await {
                 Ok(()) => return Ok(()),
                 Err(error) => last_error = error.to_string(),
             }
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
-        Err(format!("gateway did not become healthy within 30s: {last_error}").into())
+        Err(
+            format!("gateway did not become healthy on port {port} within 30s: {last_error}")
+                .into(),
+        )
     }
 
     fn dump_diagnostics(&self) {
@@ -377,8 +401,8 @@ impl Drop for DiagnosticsDumpGuard<'_> {
     }
 }
 
-async fn probe_health() -> io::Result<()> {
-    let mut stream = TcpStream::connect(("127.0.0.1", OAUTH_PORT)).await?;
+async fn probe_health(port: u16) -> io::Result<()> {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await?;
     stream
         .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
         .await?;
@@ -682,6 +706,69 @@ async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[tokio::test]
+async fn e2e_smoke_4_local_mcp_transcribes_tts_audio() -> Result<(), Box<dyn std::error::Error>> {
+    let Some(model_path) = env::var_os("B3_E2E_WHISPER_MODEL_PATH")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    else {
+        println!(
+            "SKIP: e2e_smoke_4_local_mcp_transcribes_tts_audio requires B3_E2E_WHISPER_MODEL_PATH"
+        );
+        return Ok(());
+    };
+    if !model_path.is_file() {
+        return Err(format!(
+            "B3_E2E_WHISPER_MODEL_PATH does not point to a file: {}",
+            model_path.display()
+        )
+        .into());
+    }
+
+    let test_audio = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../testdata/test_tts.wav")
+        .canonicalize()?;
+    let download_url = serve_test_audio_once(test_audio).await?;
+
+    let temp = TempTestDir::create(TunnelMode::Disabled)?;
+    temp.write_env_file_with_extra(&[
+        ("B3_ACCESS_MODE", "local".to_string()),
+        ("B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED", "true".to_string()),
+        ("B3_WHISPER_MODEL_PATH", model_path.display().to_string()),
+        ("B3_WHISPER_MAX_AUDIO_BYTES", "10485760".to_string()),
+    ])?;
+
+    {
+        let gateway = Brain3Process::spawn_local_only(&temp).await?;
+        let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
+        let client = connect_local_mcp().await?;
+
+        let transcript = call_tool_text(
+            &client,
+            "transcribe_audio_file",
+            json!({
+                "audio_file": {
+                    "download_url": download_url,
+                    "file_id": "test_tts",
+                    "mime_type": "audio/wav",
+                    "file_name": "test_tts.wav"
+                }
+            }),
+        )
+        .await?;
+        let normalized = normalize_transcript(&transcript);
+        assert_eq!(
+            normalized, "hello world",
+            "actual transcript: {transcript:?}"
+        );
+
+        client.cancel().await?;
+    }
+
+    assert_no_container_residue().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn e2e_smoke_2_oauth_public_flow() -> Result<(), Box<dyn std::error::Error>> {
     let temp = TempTestDir::create(TunnelMode::Disabled)?;
     temp.write_env_file()?;
@@ -880,6 +967,27 @@ async fn connect_public_mcp(
                 io::Error::new(io::ErrorKind::TimedOut, "timed out connecting public MCP")
             })??,
     )
+}
+
+async fn serve_test_audio_once(path: PathBuf) -> Result<String, Box<dyn std::error::Error>> {
+    let body = fs::read(path)?;
+    let listener = TcpListener::bind(("127.0.0.1", 0)).await?;
+    let addr = listener.local_addr()?;
+    tokio::spawn(async move {
+        let Ok((mut stream, _)) = listener.accept().await else {
+            return;
+        };
+        let mut request = vec![0; 1024];
+        let _ = stream.read(&mut request).await;
+        let headers = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: audio/wav\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(headers.as_bytes()).await;
+        let _ = stream.write_all(&body).await;
+        let _ = stream.shutdown().await;
+    });
+    Ok(format!("http://{addr}/test_tts.wav"))
 }
 
 fn oauth_http_client() -> Result<reqwest::Client, Box<dyn std::error::Error>> {
@@ -1192,6 +1300,40 @@ async fn call_tool_json(
         "tool {name} returned MCP error result: {result:?}"
     );
     Ok(tool_result_json(&result)?)
+}
+
+async fn call_tool_text(
+    client: &rmcp::service::RunningService<rmcp::RoleClient, ClientInfo>,
+    name: &'static str,
+    arguments: Value,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let arguments = arguments
+        .as_object()
+        .cloned()
+        .ok_or("tool arguments must be a JSON object")?;
+    let result = client.call_tool(CallToolRequestParams::new(name).with_arguments(arguments));
+    let result = tokio::time::timeout(NETWORKED_E2E_TIMEOUT, result)
+        .await
+        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "timed out calling MCP tool"))??;
+    assert!(
+        result.is_error != Some(true),
+        "tool {name} returned MCP error result: {result:?}"
+    );
+    result
+        .content
+        .iter()
+        .find_map(|content| match content {
+            ContentBlock::Text(text) => Some(text.text.to_string()),
+            _ => None,
+        })
+        .ok_or_else(|| io::Error::other("tool result did not include text content").into())
+}
+
+fn normalize_transcript(transcript: &str) -> String {
+    transcript
+        .trim()
+        .trim_matches(|ch: char| ch.is_ascii_punctuation() || ch.is_whitespace())
+        .to_ascii_lowercase()
 }
 
 fn json_array_field<'a>(

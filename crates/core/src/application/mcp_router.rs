@@ -6,6 +6,7 @@ use crate::application::native_mcp_tool_registry::NativeMcpToolRegistry;
 use crate::application::proxy_mcp::ProxyMcpUseCase;
 use crate::application::validate_request::validate_host;
 use crate::domain::errors::ProxyError;
+use crate::domain::model::HostnameValidationConfig;
 use crate::ports::mcp_proxy::{McpProxyPort, McpProxyResponse};
 use crate::ports::native_mcp_tool::{NativeMcpToolError, NativeMcpToolOutput};
 
@@ -20,6 +21,10 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
             proxy,
             native_tools,
         }
+    }
+
+    pub fn hostname_validation(&self) -> &HostnameValidationConfig {
+        self.proxy.hostname_validation()
     }
 
     #[allow(clippy::too_many_arguments)]

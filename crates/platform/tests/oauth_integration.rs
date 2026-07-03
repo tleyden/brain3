@@ -10,6 +10,8 @@ use reqwest::Url;
 use serde_json::Value;
 use tokio::sync::Mutex;
 
+use brain3_core::application::mcp_router::McpRouterUseCase;
+use brain3_core::application::native_mcp_tool_registry::NativeMcpToolRegistry;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::errors::ProxyError;
 use brain3_core::domain::model::{
@@ -134,6 +136,15 @@ struct BuiltServer {
     issuer: Arc<Mutex<SqliteTokenStore>>,
 }
 
+fn empty_native_router<P: McpProxyPort>(
+    proxy_mcp: Arc<ProxyMcpUseCase<P>>,
+) -> Arc<McpRouterUseCase<P>> {
+    Arc::new(McpRouterUseCase::new(
+        proxy_mcp,
+        Arc::new(NativeMcpToolRegistry::new(Vec::new())),
+    ))
+}
+
 impl TestHarness {
     fn build_server(self, proxy: MockMcpProxy) -> BuiltServer {
         let registrar = Arc::new(GatewayRegistrar::new(
@@ -158,6 +169,7 @@ impl TestHarness {
             mcp_upstream_secret.clone(),
             self.hostname_validation.clone(),
         ));
+        let proxy_mcp = empty_native_router(proxy_mcp);
 
         let config = Arc::new(GatewayConfig {
             port: 0,
@@ -212,6 +224,7 @@ impl TestHarness {
             self.mcp_upstream_secret.clone(),
             self.hostname_validation.clone(),
         ));
+        let proxy_mcp = empty_native_router(proxy_mcp);
 
         let local_mcp = self
             .local_mcp

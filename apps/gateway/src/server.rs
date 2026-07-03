@@ -1,8 +1,12 @@
+use std::env;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
+use brain3_core::application::mcp_router::McpRouterUseCase;
+use brain3_core::application::native_mcp_tool_registry::NativeMcpToolRegistry;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use tokio::net::TcpListener;
@@ -13,13 +17,18 @@ use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::model::{AccessMode, GatewayConfig};
 use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::config::ConfigPort;
+use brain3_core::ports::native_mcp_tool::NativeMcpTool;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
 use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::{build_local_router, build_router};
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
+use brain3_platform::native_mcp_tools::whisper_transcribe::{
+    WhisperTranscribeConfig, WhisperTranscribeTool,
+};
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
+use brain3_platform::setup::app_home::Brain3AppHome;
 use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
 use crate::{apply_runtime_overrides, release, RuntimeOverrides};
@@ -398,17 +407,76 @@ fn build_gateway_state(
         upstream_secret,
         config.hostname_validation.clone(),
     ));
+    let native_tools = Arc::new(NativeMcpToolRegistry::new(native_mcp_tools_from_env()?));
+    let mcp_router = Arc::new(McpRouterUseCase::new(proxy_mcp, native_tools));
 
     let app_state = AppState {
         registrar,
         authorizer,
         issuer,
-        proxy_mcp,
+        proxy_mcp: mcp_router,
         config,
         rate_limiter: Arc::new(OAuthRateLimiter::new()),
     };
 
     Ok(app_state)
+}
+
+fn native_mcp_tools_from_env() -> Result<Vec<Arc<dyn NativeMcpTool>>> {
+    if !env_bool("B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED", false) {
+        tracing::debug!("native audio transcription disabled");
+        return Ok(Vec::new());
+    }
+
+    let model_path = whisper_model_path_from_env()?;
+    let max_audio_bytes = env::var("B3_WHISPER_MAX_AUDIO_BYTES")
+        .ok()
+        .map(|value| value.parse::<u64>())
+        .transpose()
+        .context("B3_WHISPER_MAX_AUDIO_BYTES must be an unsigned integer")?
+        .unwrap_or(52_428_800);
+
+    tracing::info!(
+        model_path = %model_path.display(),
+        max_audio_bytes,
+        "registering native MCP whisper transcription tool"
+    );
+
+    Ok(vec![Arc::new(WhisperTranscribeTool::new(
+        WhisperTranscribeConfig {
+            model_path,
+            max_audio_bytes,
+        },
+    ))])
+}
+
+fn whisper_model_path_from_env() -> Result<PathBuf> {
+    if let Some(path) = env::var_os("B3_WHISPER_MODEL_PATH")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+    {
+        return Ok(path);
+    }
+
+    let model = env::var("B3_WHISPER_MODEL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "base.en".to_string());
+    let filename = if model.starts_with("ggml-") && model.ends_with(".bin") {
+        model
+    } else {
+        format!("ggml-{model}.bin")
+    };
+    let app_home =
+        Brain3AppHome::resolve_from_env().context("failed to resolve Brain3 app home")?;
+    Ok(app_home.root_dir.join("whisper-models").join(filename))
+}
+
+fn env_bool(name: &str, default: bool) -> bool {
+    match env::var(name) {
+        Ok(val) => !["0", "false", "no", "off"].contains(&val.trim().to_lowercase().as_str()),
+        Err(_) => default,
+    }
 }
 
 fn local_url_from_addr(addr: SocketAddr) -> String {
