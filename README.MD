@@ -506,14 +506,15 @@ See the [Quick Start](#quick-start) prerequisites above before continuing.
 <details>
 <summary><strong>Linux prerequisites</strong></summary>
 
-Brain3's native audio transcription dependency builds C/C++ bindings through
-`bindgen`, which requires `libclang` at build time.
+Brain3's native audio transcription dependency builds Whisper's C/C++ code and
+bindings at compile time. Linux source builds need a C/C++ toolchain, CMake,
+Clang, and `libclang`.
 
 On Debian/Ubuntu systems:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y build-essential clang libclang-dev
+sudo apt-get install -y build-essential cmake clang libclang-dev
 ```
 
 If `libclang` is installed in a non-standard location, set `LIBCLANG_PATH` to
