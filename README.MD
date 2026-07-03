@@ -504,6 +504,24 @@ Once connected, your AI app has access to these vault tools:
 See the [Quick Start](#quick-start) prerequisites above before continuing.
 
 <details>
+<summary><strong>Linux prerequisites</strong></summary>
+
+Brain3's native audio transcription dependency builds C/C++ bindings through
+`bindgen`, which requires `libclang` at build time.
+
+On Debian/Ubuntu systems:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential clang libclang-dev
+```
+
+If `libclang` is installed in a non-standard location, set `LIBCLANG_PATH` to
+the directory containing `libclang.so`.
+
+</details>
+
+<details>
 <summary><strong>Clone and build from source</strong></summary>
 
 ```bash
