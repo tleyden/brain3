@@ -822,9 +822,10 @@ async fn e2e_smoke_3_oauth_quick_tunnel() -> Result<(), Box<dyn std::error::Erro
                 .await?;
             let access_token = token_response.access_token().secret();
 
-            let client = connect_public_mcp(&base_url, access_token).await?;
-            let create = call_tool_json(
-                &client,
+            let create = post_public_mcp_tool_call_json(
+                &http_client,
+                &base_url,
+                access_token,
                 "vault_create_overwrite_file",
                 json!({
                     "path": "oauth/quick-tunnel.md",
@@ -835,8 +836,10 @@ async fn e2e_smoke_3_oauth_quick_tunnel() -> Result<(), Box<dyn std::error::Erro
             assert_eq!(create["path"], "oauth/quick-tunnel.md");
             assert_eq!(create["created"], true);
 
-            let read = call_tool_json(
-                &client,
+            let read = post_public_mcp_tool_call_json(
+                &http_client,
+                &base_url,
+                access_token,
                 "vault_read",
                 json!({"path": "oauth/quick-tunnel.md"}),
             )
@@ -848,8 +851,6 @@ async fn e2e_smoke_3_oauth_quick_tunnel() -> Result<(), Box<dyn std::error::Erro
                     .contains("Cloudflare quick tunnel"),
                 "quick tunnel MCP read did not return the created note: {read}"
             );
-
-            client.cancel().await?;
         } else {
             drop(_diagnostics_guard);
             drop(gateway);
@@ -1073,6 +1074,48 @@ async fn post_mcp_tools_list(
     Ok(request.send().await?)
 }
 
+async fn post_public_mcp_tool_call_json(
+    http_client: &reqwest::Client,
+    base_url: &str,
+    bearer_token: &str,
+    name: &'static str,
+    arguments: Value,
+) -> Result<Value, Box<dyn std::error::Error>> {
+    let response = http_client
+        .post(format!("{base_url}/mcp"))
+        .bearer_auth(bearer_token)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .header(
+            reqwest::header::ACCEPT,
+            "application/json, text/event-stream",
+        )
+        .body(serde_json::to_string(&json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": name,
+                "arguments": arguments,
+            }
+        }))?)
+        .send()
+        .await?;
+
+    let status = response.status();
+    let body = response.text().await?;
+    assert!(
+        status.is_success(),
+        "public MCP tool call {name} returned HTTP {status}: {body}"
+    );
+
+    let value: Value = serde_json::from_str(&body)?;
+    assert!(
+        value.get("error").is_none(),
+        "public MCP tool call {name} returned JSON-RPC error: {value}"
+    );
+    tool_result_value_json(&value)
+}
+
 async fn assert_token_rejects_wrong_client_secret(
     http_client: &reqwest::Client,
     base_url: &str,
@@ -1210,6 +1253,24 @@ fn tool_result_json(result: &CallToolResult) -> Result<Value, Box<dyn std::error
             _ => None,
         })
         .ok_or("tool result did not include text content")?;
+    Ok(serde_json::from_str(text)?)
+}
+
+fn tool_result_value_json(value: &Value) -> Result<Value, Box<dyn std::error::Error>> {
+    let text = value
+        .get("result")
+        .and_then(|result| result.get("content"))
+        .and_then(Value::as_array)
+        .and_then(|content| {
+            content.iter().find_map(|block| {
+                (block.get("type").and_then(Value::as_str) == Some("text"))
+                    .then(|| block.get("text").and_then(Value::as_str))
+                    .flatten()
+            })
+        })
+        .ok_or_else(|| {
+            io::Error::other(format!("tool result did not include text content: {value}"))
+        })?;
     Ok(serde_json::from_str(text)?)
 }
 
