@@ -51,6 +51,8 @@ class E2ESmokeScriptTests(unittest.TestCase):
                 "e2e",
                 "--",
                 "--nocapture",
+                "--test-threads=1",
+                "--fail-fast",
                 "e2e_smoke_starts_gateway",
             ],
         )

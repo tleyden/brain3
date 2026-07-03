@@ -43,6 +43,8 @@ def cargo_test_command(extra_args: Sequence[str]) -> list[str]:
         "e2e",
         "--",
         "--nocapture",
+        "--test-threads=1",
+        "--fail-fast",
         *extra_args,
     ]
 
