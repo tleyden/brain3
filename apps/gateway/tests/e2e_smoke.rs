@@ -469,7 +469,6 @@ async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
             .map(|tool| tool.name.as_ref())
             .collect::<BTreeSet<_>>();
         let expected_tool_names = BTreeSet::from([
-            "transcribe_audio_file",
             "vault_apply_unified_diff",
             "vault_batch_frontmatter_update",
             "vault_batch_read",
@@ -733,6 +732,17 @@ async fn e2e_smoke_4_local_mcp_transcribes_tts_audio() -> Result<(), Box<dyn std
         let gateway = Brain3Process::spawn_local_only(&temp).await?;
         let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
         let client = connect_local_mcp().await?;
+
+        let tools = client.list_tools(Default::default()).await?;
+        let tool_names = tools
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_ref())
+            .collect::<BTreeSet<_>>();
+        assert!(
+            tool_names.contains("transcribe_audio_file"),
+            "enabled native audio transcription should advertise transcribe_audio_file; got {tool_names:?}"
+        );
 
         let transcript = call_tool_text(
             &client,
