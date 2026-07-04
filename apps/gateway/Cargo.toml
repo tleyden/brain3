@@ -24,7 +24,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 oauth2 = { version = "5", default-features = false, features = ["reqwest"] }
-rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", tag = "rmcp-v2.0.0", features = ["client", "transport-streamable-http-client-reqwest"] }
+rmcp = { git = "https://github.com/modelcontextprotocol/rust-sdk", tag = "rmcp-v2.1.0", features = ["client", "transport-streamable-http-client-reqwest"] }
 sha2 = "0.10"
 
 [features]
