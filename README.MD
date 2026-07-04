@@ -11,15 +11,27 @@
 <p align="center">
   <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
   <br/>
-  Give your AI access to a local markdown vault. Works with Claude, ChatGPT, or any MCP-compatible AI
+  Access and update your local markdown vault via an AI interface.  Works with Obsidian, LLMWiki, or Open Knowledge Format (OKF) markdown vaults.
   <br/>
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-Save an idea mid-conversation and pull it back later, without switching apps or losing context. Use your AI's built-in voice dictation when you'd rather talk than type.
+Markdown vaults like Obsidian are extremely powerful, but:
 
-The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
+1. Editing markdown via a mobile app is tedious and error-prone.
+2. The native OS voice dictation on iOS is not nearly as good as in AI apps.
+3. Copying and pasting content from AI responses into your vault is tedious. 
 
+Brain3 addresses those issues by creating a seamless bridge between your AI interface and your local markdown vault, so you can:  
+
+- Save an idea mid-conversation and pull it back later, without switching apps or losing context.
+- Use your AI's built-in voice dictation when you'd rather talk than type.
+
+You don't need to change anything about your current workflow or markdown vault. The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
+
+**What this is not**
+
+This does not "automatically" save anything from your AI chats into your vault.  You control if and when notes are saved. 
 
 <div align="center">
 
