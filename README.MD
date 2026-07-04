@@ -11,7 +11,7 @@
 <p align="center">
   <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
   <br/>
-  Access and update your local markdown vault via an AI interface.  
+  Access and update your local markdown vault via an AI interface 
   <br/>
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
@@ -19,19 +19,18 @@
 Markdown vaults like Obsidian are extremely powerful, but:
 
 1. Editing markdown via a mobile app is tedious and error-prone.
-2. The native OS voice dictation on iOS is not nearly as good as in AI apps.
+2. The native OS voice dictation on iOS is not nearly as good as in AI apps, and there's nothing in between to clean up the text.
 3. Copying and pasting content from AI responses into your vault is tedious. 
 
 Brain3 addresses those issues by creating a seamless bridge between your AI interface and your local markdown vault, so you can:  
 
-- Save an idea mid-conversation and pull it back later, without switching apps or losing context.
-- Use your AI's built-in voice dictation when you'd rather talk than type.
+- Pull context directly from your AI chats into your markdown vault, or vice versa.  
+- Use your AI's built-in voice dictation when you'd rather talk than type, and have it summarized or cleaned up however you specify.
+- Drop an audio file into your AI chat and have it transcribed and summarized into a markdown note.
 
-You don't need to change anything about your current workflow or markdown vault. The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.  Comptible with Obsidian (including Obsidian Sync), LLMWiki, or Open Knowledge Format (OKF) markdown vaults.
+You don't need to change anything about your current workflow or markdown vault structure. The notes stay as plain markdown on your machine.  
 
-**What this is not**
-
-This does not "automatically" save anything from your AI chats into your vault.  You control if and when notes are saved. 
+Comptible with Obsidian (including Obsidian Sync), LLMWiki, or Open Knowledge Format (OKF) markdown vaults.
 
 <div align="center">
 
@@ -43,10 +42,11 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 ## Use Cases
 
-1. Use your markdown vault as a way to do weekly and daily planning, make the AI your planning assistant.
+You can use Brain3 for anything you'd typically use a note-taking app for, like:
+
+1. Weekly and daily planning, make the AI your planning assistant.
 2. Jot down quick notes and ideas in an "inbox" folder, triage later.  (eg, [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/))
 3. As you are researching a topic with AI, you can just quickly save a summary into your markdown vault.  Your AI will already have the context.
-4. There are many other use cases, typical of note-taking, research and "second brain" workflows.
 
 ## Screenshots - Admin Terminal UI (TUI)
 
