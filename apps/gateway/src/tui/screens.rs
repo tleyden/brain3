@@ -73,7 +73,7 @@ fn progress_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Access",
         "Auth",
         "Network Security",
-        "Audio Transcription",
+        "Advanced",
         "Start",
         "Running",
     ];
@@ -123,7 +123,7 @@ fn screen_title(step: SetupStep) -> &'static str {
         SetupStep::AccessMode => "Local/Remote Access",
         SetupStep::Auth => "Auth Setup",
         SetupStep::PortsAndSettings => "Network Security",
-        SetupStep::AudioTranscription => "Audio Transcription",
+        SetupStep::AudioTranscription => "Advanced",
         SetupStep::Summary => "Summary",
         SetupStep::ConnectionCard => "MCP Config Settings",
         SetupStep::RuntimeStatus => "Runtime Status",
@@ -151,9 +151,7 @@ fn progress_caption(step: SetupStep) -> &'static str {
         SetupStep::PortsAndSettings => {
             "Review network ports, container identity, and security defaults."
         }
-        SetupStep::AudioTranscription => {
-            "Enable native audio transcription and choose a Whisper model."
-        }
+        SetupStep::AudioTranscription => "Review optional advanced features.",
         SetupStep::Summary => "Confirm what Brain3 will write before startup begins.",
         SetupStep::ConnectionCard | SetupStep::RuntimeStatus => {
             "Brain3 is configured. Use the connection details or monitor runtime status."
@@ -624,6 +622,11 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
 fn audio_transcription_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     vec![
+        Line::from(Span::styled(
+            "Audio Transcription",
+            section_heading_style(),
+        )),
+        blank_line(),
         muted_line("Audio Transcription is an MCP tool that runs natively in this process."),
         muted_line(
             "Drag an audio file into your AI assistant and it gets transcribed automatically.",
@@ -1749,9 +1752,12 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
 
-        assert_eq!(header, "Audio Transcription");
+        assert_eq!(header, "Advanced");
         assert!(progress.contains("Step 7 of 9"));
+        assert!(progress.contains("Advanced"));
+        assert!(!progress.contains("Audio Transcription"));
         assert!(details.contains("Native audio transcription"));
+        assert!(details.contains("Audio Transcription"));
         assert!(details.contains("Whisper model"));
         assert!(details.contains("base.en (142 MB)"));
         assert!(details.contains("README.md"));
