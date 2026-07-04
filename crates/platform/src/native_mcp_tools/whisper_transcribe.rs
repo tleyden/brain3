@@ -18,6 +18,7 @@ use tokio::io::AsyncWriteExt;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
+const PCM_SAMPLE_BYTES: u64 = std::mem::size_of::<f32>() as u64;
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -106,7 +107,7 @@ impl WhisperTranscribeTool {
         );
 
         let decode_start = Instant::now();
-        let samples = decode_audio_file_to_whisper_pcm(&audio_path)?;
+        let samples = decode_audio_file_to_whisper_pcm(&audio_path, self.config.max_audio_bytes)?;
         tracing::info!(
             file_id = %args.audio_file.file_id,
             sample_count = samples.len(),
@@ -344,6 +345,8 @@ enum WhisperTranscribeError {
     Download(String),
     #[error("audio download exceeds configured limit of {max_audio_bytes} bytes")]
     SizeLimitExceeded { max_audio_bytes: u64 },
+    #[error("decoded audio exceeds configured limit of {max_audio_bytes} bytes")]
+    DecodedAudioLimitExceeded { max_audio_bytes: u64 },
     #[error("temporary audio file error: {0}")]
     TempFile(String),
     #[error("audio decode failed: {0}")]
@@ -366,7 +369,10 @@ impl From<WhisperTranscribeError> for NativeMcpToolError {
     }
 }
 
-fn decode_audio_file_to_whisper_pcm(path: &Path) -> Result<Vec<f32>, WhisperTranscribeError> {
+fn decode_audio_file_to_whisper_pcm(
+    path: &Path,
+    max_decoded_audio_bytes: u64,
+) -> Result<Vec<f32>, WhisperTranscribeError> {
     let file =
         File::open(path).map_err(|error| WhisperTranscribeError::Decode(error.to_string()))?;
     let media_source = MediaSourceStream::new(Box::new(file), Default::default());
@@ -397,6 +403,11 @@ fn decode_audio_file_to_whisper_pcm(path: &Path) -> Result<Vec<f32>, WhisperTran
     let sample_rate = audio_params
         .sample_rate
         .ok_or_else(|| WhisperTranscribeError::Decode("audio sample rate missing".into()))?;
+    if sample_rate == 0 {
+        return Err(WhisperTranscribeError::Decode(
+            "audio sample rate must be greater than zero".into(),
+        ));
+    }
     let channel_count = audio_params
         .channels
         .as_ref()
@@ -412,6 +423,8 @@ fn decode_audio_file_to_whisper_pcm(path: &Path) -> Result<Vec<f32>, WhisperTran
         .make_audio_decoder(audio_params, &AudioDecoderOptions::default())
         .map_err(|error| WhisperTranscribeError::Decode(error.to_string()))?;
 
+    let max_source_mono_samples =
+        max_source_mono_samples_for_decoded_limit(max_decoded_audio_bytes, sample_rate);
     let mut mono_samples = Vec::new();
     loop {
         let packet = match format.next_packet() {
@@ -450,7 +463,18 @@ fn decode_audio_file_to_whisper_pcm(path: &Path) -> Result<Vec<f32>, WhisperTran
         }
         let mut interleaved = vec![0.0f32; decoded.samples_interleaved()];
         decoded.copy_to_slice_interleaved(&mut interleaved);
-        mono_samples.extend(downmix_interleaved_to_mono(&interleaved, channels));
+        let downmixed = downmix_interleaved_to_mono(&interleaved, channels);
+        let next_sample_count = mono_samples.len().checked_add(downmixed.len()).ok_or(
+            WhisperTranscribeError::DecodedAudioLimitExceeded {
+                max_audio_bytes: max_decoded_audio_bytes,
+            },
+        )?;
+        if next_sample_count > max_source_mono_samples {
+            return Err(WhisperTranscribeError::DecodedAudioLimitExceeded {
+                max_audio_bytes: max_decoded_audio_bytes,
+            });
+        }
+        mono_samples.extend(downmixed);
     }
 
     if mono_samples.is_empty() {
@@ -464,6 +488,20 @@ fn decode_audio_file_to_whisper_pcm(path: &Path) -> Result<Vec<f32>, WhisperTran
         sample_rate,
         TARGET_SAMPLE_RATE,
     ))
+}
+
+fn max_source_mono_samples_for_decoded_limit(
+    max_decoded_audio_bytes: u64,
+    source_rate: u32,
+) -> usize {
+    let max_target_samples = max_decoded_audio_bytes / PCM_SAMPLE_BYTES;
+    let max_source_samples = if source_rate < TARGET_SAMPLE_RATE {
+        max_target_samples.saturating_mul(source_rate as u64) / TARGET_SAMPLE_RATE as u64
+    } else {
+        max_target_samples
+    };
+
+    usize::try_from(max_source_samples).unwrap_or(usize::MAX)
 }
 
 fn downmix_interleaved_to_mono(interleaved: &[f32], channels: usize) -> Vec<f32> {
@@ -608,6 +646,42 @@ mod tests {
             .expect_err("oversized download should fail");
 
         assert!(error.to_string().contains("exceeds configured limit"));
+        assert!(fake
+            .calls
+            .lock()
+            .expect("fake transcriber lock should succeed")
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn call_rejects_audio_that_exceeds_decoded_pcm_cap() {
+        let wav = pcm_wav(16_000, 1, 800);
+        assert!(wav.len() < 2_000, "test WAV must fit download cap");
+        let download_url = serve_once(wav).await;
+        let fake = Arc::new(FakeTranscriber::default());
+        let tool = WhisperTranscribeTool::with_transcriber(
+            WhisperTranscribeConfig {
+                model_path: "/tmp/model.bin".into(),
+                max_audio_bytes: 2_000,
+            },
+            fake.clone(),
+        );
+
+        let error = tool
+            .call(json!({
+                "audio_file": {
+                    "download_url": download_url,
+                    "file_id": "file_decoded_oversized",
+                    "mime_type": "audio/wav",
+                    "file_name": "sample.wav"
+                }
+            }))
+            .await
+            .expect_err("decoded PCM over the configured cap should fail");
+
+        assert!(error
+            .to_string()
+            .contains("decoded audio exceeds configured limit"));
         assert!(fake
             .calls
             .lock()
