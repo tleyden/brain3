@@ -1,0 +1,3 @@
+[env]
+# Avoid GGML CMake runtime CPU feature probes hanging on Apple ARM; Metal remains enabled.
+GGML_NATIVE = "OFF"

@@ -3,6 +3,8 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use anyhow::{bail, Context, Result};
+use brain3_core::application::mcp_router::McpRouterUseCase;
+use brain3_core::application::native_mcp_tool_registry::NativeMcpToolRegistry;
 use oxide_auth::primitives::authorizer::AuthMap;
 use oxide_auth::primitives::generator::RandomGenerator;
 use tokio::net::TcpListener;
@@ -13,12 +15,16 @@ use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::domain::model::{AccessMode, GatewayConfig};
 use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::config::ConfigPort;
+use brain3_core::ports::native_mcp_tool::NativeMcpTool;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
 use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::{build_local_router, build_router};
 use brain3_platform::http::state::AppState;
 use brain3_platform::mcp_proxy::reqwest_proxy::ReqwestMcpProxy;
+use brain3_platform::native_mcp_tools::whisper_transcribe::{
+    WhisperTranscribeConfig, WhisperTranscribeTool,
+};
 use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
 use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
@@ -398,17 +404,53 @@ fn build_gateway_state(
         upstream_secret,
         config.hostname_validation.clone(),
     ));
+    let native_tools = Arc::new(NativeMcpToolRegistry::new(native_mcp_tools_from_config(
+        config.as_ref(),
+    )?));
+    let mcp_router = Arc::new(McpRouterUseCase::new(proxy_mcp, native_tools));
 
     let app_state = AppState {
         registrar,
         authorizer,
         issuer,
-        proxy_mcp,
+        proxy_mcp: mcp_router,
         config,
         rate_limiter: Arc::new(OAuthRateLimiter::new()),
     };
 
     Ok(app_state)
+}
+
+fn native_mcp_tools_from_config(config: &GatewayConfig) -> Result<Vec<Arc<dyn NativeMcpTool>>> {
+    let transcription = &config.native_audio_transcription;
+    if !transcription.enabled {
+        tracing::debug!("native audio transcription disabled");
+        return Ok(Vec::new());
+    }
+
+    if !transcription.model_path.exists() {
+        tracing::warn!(
+            model = %transcription.model,
+            model_path = %transcription.model_path.display(),
+            "native audio transcription enabled but whisper model file is missing; \
+             run `brain3 --setup` to download or reconfigure the model"
+        );
+        return Ok(Vec::new());
+    }
+
+    tracing::info!(
+        model = %transcription.model,
+        model_path = %transcription.model_path.display(),
+        max_audio_bytes = transcription.max_audio_bytes,
+        "registering native MCP whisper transcription tool"
+    );
+
+    Ok(vec![Arc::new(WhisperTranscribeTool::new(
+        WhisperTranscribeConfig {
+            model_path: transcription.model_path.clone(),
+            max_audio_bytes: transcription.max_audio_bytes,
+        },
+    ))])
 }
 
 fn local_url_from_addr(addr: SocketAddr) -> String {
@@ -428,6 +470,67 @@ fn local_url_from_addr(addr: SocketAddr) -> String {
                 IpAddr::V6(*v6.ip())
             };
             format!("http://[{}]:{}", ip, v6.port())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use brain3_core::domain::model::{
+        AccessMode, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
+        NativeAudioTranscriptionConfig, OAuthConfig,
+    };
+
+    use super::*;
+
+    #[test]
+    fn native_mcp_tools_skip_enabled_transcription_when_model_file_is_missing() {
+        let config = gateway_config_with_native_audio(NativeAudioTranscriptionConfig {
+            enabled: true,
+            model: "base.en".into(),
+            model_path: PathBuf::from("/tmp/brain3-test-missing-whisper-model/ggml-base.en.bin"),
+            max_audio_bytes: 50 * 1024 * 1024,
+        });
+
+        let tools = native_mcp_tools_from_config(&config).expect("tool loading should succeed");
+
+        assert!(
+            tools.is_empty(),
+            "missing whisper model file should prevent advertising transcribe_audio_file"
+        );
+    }
+
+    fn gateway_config_with_native_audio(
+        native_audio_transcription: NativeAudioTranscriptionConfig,
+    ) -> GatewayConfig {
+        GatewayConfig {
+            port: 8421,
+            host: "127.0.0.1".into(),
+            token_db_path: PathBuf::from("/tmp/brain3-test.db"),
+            oauth: OAuthConfig {
+                client_id: "brain3-oauth2-client".into(),
+                client_secret: "secret".into(),
+                access_token_lifetime_secs: 3600,
+                refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+                pkce_required: true,
+                username: "admin".into(),
+                password: "password".into(),
+            },
+            mcp_reverse_proxy: MCPReverseProxyConfig {
+                mcp_upstream_url: "http://127.0.0.1:8420".into(),
+                upstream_secret: "secret".into(),
+            },
+            hostname_validation: HostnameValidationConfig {
+                expected_host: None,
+                enforce: true,
+            },
+            access_mode: AccessMode::Both,
+            local_mcp: None,
+            container: None,
+            tunnel: None,
+            native_audio_transcription,
         }
     }
 }

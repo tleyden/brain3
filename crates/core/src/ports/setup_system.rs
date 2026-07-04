@@ -25,6 +25,12 @@ pub trait SetupSystemPort: Send + Sync {
 
     async fn ensure_app_home_dirs(&self, paths: &SetupPaths) -> Result<(), SetupError>;
 
+    async fn ensure_whisper_model(
+        &self,
+        paths: &SetupPaths,
+        model: &str,
+    ) -> Result<PathBuf, SetupError>;
+
     async fn write_env_file(&self, path: &Path, contents: &str) -> Result<(), SetupError>;
 
     async fn path_exists(&self, path: &Path) -> Result<bool, SetupError>;

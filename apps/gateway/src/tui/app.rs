@@ -15,7 +15,7 @@ use tokio::sync::oneshot;
 use brain3_core::application::first_run_setup::FirstRunSetupUseCase;
 use brain3_core::domain::setup::{
     AccessModeDraft, ConnectionCard, FinalizeSetupRequest, RuntimeLaunchPlan, RuntimeStartupPolicy,
-    SetupDefaults, SetupStep,
+    SetupDefaults, SetupStep, SetupSummary,
 };
 use brain3_core::ports::setup_system::SetupSystemPort;
 use brain3_platform::runtime::probe_mcp_vault_list;
@@ -38,6 +38,9 @@ pub enum GatewayTuiLaunch {
     Configured {
         launch_plan: RuntimeLaunchPlan,
         startup_options: ConfiguredStartupOptions,
+    },
+    Reconfigure {
+        launch_plan: RuntimeLaunchPlan,
     },
 }
 
@@ -102,6 +105,23 @@ pub async fn run_gateway_tui(
                 state,
                 startup_options.startup_policy,
                 Some(startup_options.orphan_gc_rerun_command),
+            )
+        }
+        GatewayTuiLaunch::Reconfigure { launch_plan } => {
+            let config = load_config(launch_plan.env_file.clone(), &runtime_overrides)?;
+            let mut preparation = use_case
+                .prepare_from_existing_config(config.as_ref())
+                .await
+                .map_err(|error| anyhow::anyhow!("{error}"))?;
+            preparation.paths.env_file = launch_plan.env_file.clone();
+            tracing::debug!(
+                env_file = %launch_plan.env_file.display(),
+                "reconfigure launch: opening Summary confirmation step"
+            );
+            (
+                FirstRunTuiState::new_configured(host.to_string(), log_file.clone(), preparation),
+                RuntimeStartupPolicy::setup_or_reconfigure(),
+                None,
             )
         }
     };
@@ -327,7 +347,7 @@ async fn event_loop(
                             tracing::debug!(msg, "lifetime validation failed");
                             state.error_message = Some(msg);
                         } else {
-                            state.step = SetupStep::Summary;
+                            state.step = SetupStep::AudioTranscription;
                         }
                     } else if let Err(msg) =
                         validate_port_input(&state.container_host_port_input, "Container host port")
@@ -340,7 +360,7 @@ async fn event_loop(
                         tracing::debug!(msg, "port validation failed");
                         state.error_message = Some(msg);
                     } else {
-                        state.step = SetupStep::Summary;
+                        state.step = SetupStep::AudioTranscription;
                     }
                 }
                 KeyCode::Tab | KeyCode::Down => {
@@ -410,10 +430,30 @@ async fn event_loop(
                 }
                 _ => {}
             },
-            SetupStep::Summary => match key.code {
+            SetupStep::AudioTranscription => match key.code {
                 KeyCode::Esc => {
                     state.clear_messages();
                     state.step = SetupStep::PortsAndSettings;
+                }
+                KeyCode::Enter => {
+                    state.clear_messages();
+                    state.step = SetupStep::Summary;
+                }
+                KeyCode::Tab | KeyCode::Down => {
+                    state.next_audio_transcription_focus();
+                }
+                KeyCode::BackTab | KeyCode::Up => {
+                    state.previous_audio_transcription_focus();
+                }
+                KeyCode::Char('t') => {
+                    state.toggle_audio_transcription_field();
+                }
+                _ => {}
+            },
+            SetupStep::Summary => match key.code {
+                KeyCode::Esc => {
+                    state.clear_messages();
+                    state.step = SetupStep::AudioTranscription;
                 }
                 KeyCode::Enter => {
                     finalize_and_start(state, use_case, runtime_overrides.clone(), startup_policy)
@@ -592,6 +632,35 @@ fn handle_runtime_tick(state: &mut FirstRunTuiState) -> bool {
             Err(oneshot::error::TryRecvError::Empty) => {}
         }
     }
+    if let Some(rx) = &mut state.finalize_rx {
+        match rx.try_recv() {
+            Ok(Ok((summary, runtime_overrides, startup_policy))) => {
+                state.finalize_rx = None;
+                apply_finalize_result(state, Ok(summary), runtime_overrides, startup_policy);
+            }
+            Ok(Err(error)) => {
+                state.finalize_rx = None;
+                apply_finalize_result(
+                    state,
+                    Err(error),
+                    RuntimeOverrides::default(),
+                    RuntimeStartupPolicy::setup_or_reconfigure(),
+                );
+            }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                state.finalize_rx = None;
+                apply_finalize_result(
+                    state,
+                    Err(anyhow::anyhow!(
+                        "setup finalization task stopped before completion"
+                    )),
+                    RuntimeOverrides::default(),
+                    RuntimeStartupPolicy::setup_or_reconfigure(),
+                );
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+        }
+    }
     if let Some(rx) = &mut state.probe_rx {
         match rx.try_recv() {
             Ok(Ok(())) => {
@@ -683,22 +752,34 @@ async fn finalize_and_start(
     state.clear_messages();
 
     let request: FinalizeSetupRequest = state.apply_inputs_to_draft();
+    let downloading_whisper_model = request.draft.native_audio_transcription_enabled;
+    let (tx, rx) = oneshot::channel();
+    let use_case = (*use_case).clone();
+    tokio::spawn(async move {
+        let result = use_case
+            .finalize(request)
+            .await
+            .map(|summary| (summary, runtime_overrides, startup_policy))
+            .map_err(|error| anyhow::anyhow!("{error}"));
+        let _ = tx.send(result);
+    });
 
-    // Fast: validate inputs, generate secrets, write env file.
-    let summary = match use_case
-        .finalize(request)
-        .await
-        .map_err(|error| anyhow::anyhow!("{error}"))
-    {
-        Ok(summary) => summary,
-        Err(error) => {
-            tracing::error!(error = %error, "failed to finalize setup");
-            state.error_message = Some(error.to_string());
-            return;
-        }
-    };
+    state.finalize_rx = Some(rx);
+    state.startup_rx = None;
+    state.info_message = Some(if downloading_whisper_model {
+        "Downloading Whisper model...".into()
+    } else {
+        "Saving configuration...".into()
+    });
+    state.step = SetupStep::RuntimeStatus;
+}
 
-    // Slow: container startup, tunnel, gateway bind — run in background so TUI stays live.
+fn start_runtime_after_finalize(
+    state: &mut FirstRunTuiState,
+    summary: SetupSummary,
+    runtime_overrides: RuntimeOverrides,
+    startup_policy: RuntimeStartupPolicy,
+) {
     let launch_plan = RuntimeLaunchPlan {
         paths: summary.paths.clone(),
         env_file: summary.paths.env_file.clone(),
@@ -717,6 +798,25 @@ async fn finalize_and_start(
     state.startup_rx = Some(rx);
     state.info_message = Some("Starting Brain3...".into());
     state.step = SetupStep::RuntimeStatus;
+}
+
+fn apply_finalize_result(
+    state: &mut FirstRunTuiState,
+    result: anyhow::Result<SetupSummary>,
+    runtime_overrides: RuntimeOverrides,
+    startup_policy: RuntimeStartupPolicy,
+) {
+    match result {
+        Ok(summary) => {
+            start_runtime_after_finalize(state, summary, runtime_overrides, startup_policy);
+        }
+        Err(error) => {
+            tracing::error!(error = %error, "failed to finalize setup");
+            state.error_message = Some(error.to_string());
+            state.info_message = None;
+            state.step = SetupStep::Summary;
+        }
+    }
 }
 
 async fn start_without_writing_env(
@@ -897,6 +997,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn finalize_and_start_immediately_shows_download_status_when_audio_enabled() {
+        let use_case = FirstRunSetupUseCase::new(
+            Arc::new(PlatformSetupSystem::with_environment(
+                SetupOperatingSystem::MacOS,
+                None,
+            )),
+            SetupDefaults {
+                default_container_image_repo: "ghcr.io/tleyden/brain3-mcp-vault-tools".into(),
+            },
+        );
+        let mut state = FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            sample_preparation(),
+        );
+        state.draft.native_audio_transcription_enabled = true;
+        state.draft.whisper_model = "base.en".into();
+
+        finalize_and_start(
+            &mut state,
+            &use_case,
+            RuntimeOverrides::default(),
+            RuntimeStartupPolicy::setup_or_reconfigure(),
+        )
+        .await;
+
+        assert_eq!(state.step, SetupStep::RuntimeStatus);
+        assert!(state.finalize_rx.is_some());
+        assert!(state.startup_rx.is_none());
+        assert_eq!(
+            state.info_message.as_deref(),
+            Some("Downloading Whisper model...")
+        );
+    }
+
+    #[tokio::test]
+    async fn finalize_success_starts_runtime_startup_task() {
+        let mut state = FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            sample_preparation(),
+        );
+        let summary = SetupSummary {
+            paths: state.preparation.paths.clone(),
+            draft: state.draft.clone(),
+            dependencies: state.preparation.dependencies.clone(),
+        };
+
+        start_runtime_after_finalize(
+            &mut state,
+            summary,
+            RuntimeOverrides::default(),
+            RuntimeStartupPolicy::setup_or_reconfigure(),
+        );
+
+        assert_eq!(state.step, SetupStep::RuntimeStatus);
+        assert!(state.startup_rx.is_some());
+        assert_eq!(state.info_message.as_deref(), Some("Starting Brain3..."));
+    }
+
+    #[test]
+    fn finalize_failure_returns_to_summary_with_error() {
+        let mut state = FirstRunTuiState::new(
+            "127.0.0.1".into(),
+            PathBuf::from("/tmp/brain3-home/brain3.log"),
+            sample_preparation(),
+        );
+        state.step = SetupStep::RuntimeStatus;
+        state.info_message = Some("Downloading Whisper model...".into());
+
+        apply_finalize_result(
+            &mut state,
+            Err(anyhow!("download Whisper model base.en: HTTP 503")),
+            RuntimeOverrides::default(),
+            RuntimeStartupPolicy::setup_or_reconfigure(),
+        );
+
+        assert_eq!(state.step, SetupStep::Summary);
+        assert_eq!(
+            state.error_message.as_deref(),
+            Some("download Whisper model base.en: HTTP 503")
+        );
+        assert!(state.info_message.is_none());
+    }
+
+    #[tokio::test]
     async fn shutdown_resets_tick_count_for_elapsed_message() {
         let mut state = FirstRunTuiState::new(
             "127.0.0.1".into(),
@@ -986,6 +1172,15 @@ mod tests {
                         local_mcp: None,
                         container: None,
                         tunnel: None,
+                        native_audio_transcription:
+                            brain3_core::domain::model::NativeAudioTranscriptionConfig {
+                                enabled: false,
+                                model: "base.en".into(),
+                                model_path: PathBuf::from(
+                                    "/tmp/brain3-home/whisper-models/ggml-base.en.bin",
+                                ),
+                                max_audio_bytes: 52_428_800,
+                            },
                     }),
                     "secret".into(),
                     brain3_core::domain::setup::RuntimeLaunchPlan {
@@ -1075,6 +1270,15 @@ mod tests {
                             enable_sync_reindex_tool: false,
                         }),
                         tunnel: None,
+                        native_audio_transcription:
+                            brain3_core::domain::model::NativeAudioTranscriptionConfig {
+                                enabled: false,
+                                model: "base.en".into(),
+                                model_path: PathBuf::from(
+                                    "/tmp/brain3-home/whisper-models/ggml-base.en.bin",
+                                ),
+                                max_audio_bytes: 52_428_800,
+                            },
                     }),
                     "secret".into(),
                     brain3_core::domain::setup::RuntimeLaunchPlan {
@@ -1175,6 +1379,9 @@ mod tests {
                 pkce_required: true,
                 enforce_hostname_check: true,
                 direct_public_origin_hostname: None,
+                native_audio_transcription_enabled: true,
+                whisper_model: "base.en".into(),
+                whisper_max_audio_bytes: 52_428_800,
             },
             dependencies: DependencyStatus {
                 operating_system: SetupOperatingSystem::MacOS,

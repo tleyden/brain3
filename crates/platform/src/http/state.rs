@@ -5,7 +5,7 @@ use oxide_auth::primitives::generator::RandomGenerator;
 use tokio::sync::Mutex;
 
 use crate::token_store::sqlite::SqliteTokenStore;
-use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
+use brain3_core::application::mcp_router::McpRouterUseCase;
 use brain3_core::domain::model::GatewayConfig;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
@@ -16,7 +16,7 @@ pub struct AppState<P: McpProxyPort> {
     pub registrar: Arc<GatewayRegistrar>,
     pub authorizer: Arc<Mutex<AuthMap<RandomGenerator>>>,
     pub issuer: Arc<Mutex<SqliteTokenStore>>,
-    pub proxy_mcp: Arc<ProxyMcpUseCase<P>>,
+    pub proxy_mcp: Arc<McpRouterUseCase<P>>,
     pub config: Arc<GatewayConfig>,
     pub rate_limiter: Arc<OAuthRateLimiter>,
 }

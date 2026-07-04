@@ -2,13 +2,14 @@ use std::path::PathBuf;
 
 use brain3_core::domain::setup::{
     AccessModeDraft, ConnectionCard, DependencyAvailability, FinalizeSetupRequest, InstallAction,
-    SetupDraftConfig, SetupPreparation, SetupStep, SetupSummary,
+    RuntimeStartupPolicy, SetupDraftConfig, SetupPreparation, SetupStep, SetupSummary,
 };
 use tokio::sync::oneshot;
 
 use brain3_platform::runtime::RuntimeBootstrap;
 
 use crate::server::{ConfiguredGatewaySession, GatewayServerHandle, GatewayServerStatus};
+use crate::RuntimeOverrides;
 
 use super::runtime_logs::RuntimeLogs;
 
@@ -42,6 +43,12 @@ pub enum PortsField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AudioTranscriptionField {
+    NativeAudioTranscription,
+    WhisperModel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DependencyDoctorFocus {
     InstallAction,
     Continue,
@@ -71,6 +78,8 @@ pub enum SummaryField {
     HostnameCheck,
     ContainerNetworkIsolation,
     ContainerNetworkName,
+    NativeAudioTranscription,
+    WhisperModel,
 }
 
 pub struct FirstRunTuiState {
@@ -97,6 +106,7 @@ pub struct FirstRunTuiState {
     pub auth_focus: AuthField,
     pub access_mode_focus: AccessModeField,
     pub ports_focus: PortsField,
+    pub audio_transcription_focus: AudioTranscriptionField,
     pub gateway_port_input: String,
     pub local_mcp_port_input: String,
     pub container_host_port_input: String,
@@ -108,6 +118,9 @@ pub struct FirstRunTuiState {
     pub dependency_focus: DependencyDoctorFocus,
     pub dependency_action_index: usize,
     pub summary_focus: SummaryField,
+    pub finalize_rx: Option<
+        oneshot::Receiver<anyhow::Result<(SetupSummary, RuntimeOverrides, RuntimeStartupPolicy)>>,
+    >,
     pub startup_rx: Option<oneshot::Receiver<anyhow::Result<ConfiguredGatewaySession>>>,
     pub probe_rx: Option<oneshot::Receiver<Result<(), String>>>,
     pub tick_count: u64,
@@ -158,6 +171,7 @@ impl FirstRunTuiState {
             auth_focus: AuthField::Username,
             access_mode_focus: AccessModeField::Both,
             ports_focus: PortsField::GatewayPort,
+            audio_transcription_focus: AudioTranscriptionField::NativeAudioTranscription,
             gateway_port_input,
             local_mcp_port_input,
             container_host_port_input,
@@ -169,6 +183,7 @@ impl FirstRunTuiState {
             dependency_focus,
             dependency_action_index: 0,
             summary_focus: SummaryField::VaultPath,
+            finalize_rx: None,
             startup_rx: None,
             probe_rx: None,
             tick_count: 0,
@@ -354,6 +369,33 @@ impl FirstRunTuiState {
                 self.draft.container_network_isolated = !self.draft.container_network_isolated;
             }
             _ => {}
+        }
+    }
+
+    pub fn next_audio_transcription_focus(&mut self) {
+        self.audio_transcription_focus = match self.audio_transcription_focus {
+            AudioTranscriptionField::NativeAudioTranscription => {
+                AudioTranscriptionField::WhisperModel
+            }
+            AudioTranscriptionField::WhisperModel => {
+                AudioTranscriptionField::NativeAudioTranscription
+            }
+        };
+    }
+
+    pub fn previous_audio_transcription_focus(&mut self) {
+        self.next_audio_transcription_focus();
+    }
+
+    pub fn toggle_audio_transcription_field(&mut self) {
+        match self.audio_transcription_focus {
+            AudioTranscriptionField::NativeAudioTranscription => {
+                self.draft.native_audio_transcription_enabled =
+                    !self.draft.native_audio_transcription_enabled;
+            }
+            AudioTranscriptionField::WhisperModel => {
+                cycle_whisper_model(&mut self.draft.whisper_model, true)
+            }
         }
     }
 
@@ -548,6 +590,11 @@ impl FirstRunTuiState {
             SummaryField::ContainerNetworkIsolation => {
                 self.draft.container_network_isolated = !self.draft.container_network_isolated;
             }
+            SummaryField::NativeAudioTranscription => {
+                self.draft.native_audio_transcription_enabled =
+                    !self.draft.native_audio_transcription_enabled;
+            }
+            SummaryField::WhisperModel => cycle_whisper_model(&mut self.draft.whisper_model, true),
             _ => {}
         }
     }
@@ -615,7 +662,8 @@ impl FirstRunTuiState {
                 AccessModeDraft::LocalOnly => SetupStep::AccessMode,
                 AccessModeDraft::RemoteOnly | AccessModeDraft::Both => SetupStep::Auth,
             }),
-            SetupStep::Summary => Some(SetupStep::PortsAndSettings),
+            SetupStep::AudioTranscription => Some(SetupStep::PortsAndSettings),
+            SetupStep::Summary => Some(SetupStep::AudioTranscription),
             SetupStep::ConnectionCard => None,
             SetupStep::RuntimeStatus => self
                 .connection_card
@@ -783,7 +831,6 @@ fn ports_focus_order(
             }
         }
     }
-
     order
 }
 
@@ -830,8 +877,43 @@ fn summary_focus_order(
             }
         }
     }
+    order.push(SummaryField::NativeAudioTranscription);
+    order.push(SummaryField::WhisperModel);
 
     order
+}
+
+const WHISPER_MODEL_CHOICES: &[(&str, &str)] = &[
+    ("tiny.en", "75 MB"),
+    ("base.en", "142 MB"),
+    ("small.en", "466 MB"),
+    ("medium.en", "1.5 GB"),
+];
+
+fn cycle_whisper_model(model: &mut String, forward: bool) {
+    let current_index = WHISPER_MODEL_CHOICES
+        .iter()
+        .position(|(choice, _)| *choice == model.as_str())
+        .unwrap_or(0);
+    let next_index = if forward {
+        (current_index + 1) % WHISPER_MODEL_CHOICES.len()
+    } else if current_index == 0 {
+        WHISPER_MODEL_CHOICES.len() - 1
+    } else {
+        current_index - 1
+    };
+    *model = WHISPER_MODEL_CHOICES[next_index].0.to_string();
+}
+
+pub fn whisper_model_label(model: &str) -> String {
+    if let Some((_, size)) = WHISPER_MODEL_CHOICES
+        .iter()
+        .find(|(choice, _)| *choice == model)
+    {
+        format!("{model} ({size})")
+    } else {
+        model.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -852,7 +934,7 @@ mod tests {
         state.draft.access_mode = AccessModeDraft::LocalOnly;
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..6 {
+        for _ in 0..8 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -867,6 +949,8 @@ mod tests {
                 SummaryField::ContainerName,
                 SummaryField::ContainerNetworkIsolation,
                 SummaryField::ContainerNetworkName,
+                SummaryField::NativeAudioTranscription,
+                SummaryField::WhisperModel,
             ]
         );
 
@@ -878,6 +962,12 @@ mod tests {
     fn local_only_previous_summary_focus_wraps_over_visible_fields_only() {
         let mut state = sample_state();
         state.draft.access_mode = AccessModeDraft::LocalOnly;
+
+        state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::WhisperModel);
+
+        state.previous_summary_focus();
+        assert_eq!(state.summary_focus, SummaryField::NativeAudioTranscription);
 
         state.previous_summary_focus();
         assert_eq!(state.summary_focus, SummaryField::ContainerNetworkName);
@@ -935,7 +1025,7 @@ mod tests {
         let mut state = sample_state();
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..14 {
+        for _ in 0..16 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -958,6 +1048,8 @@ mod tests {
                 SummaryField::HostnameCheck,
                 SummaryField::ContainerNetworkIsolation,
                 SummaryField::ContainerNetworkName,
+                SummaryField::NativeAudioTranscription,
+                SummaryField::WhisperModel,
             ]
         );
     }
@@ -968,7 +1060,7 @@ mod tests {
         state.generate_password = false;
 
         let mut actual = vec![state.summary_focus];
-        for _ in 0..15 {
+        for _ in 0..17 {
             state.next_summary_focus();
             actual.push(state.summary_focus);
         }
@@ -992,6 +1084,8 @@ mod tests {
                 SummaryField::HostnameCheck,
                 SummaryField::ContainerNetworkIsolation,
                 SummaryField::ContainerNetworkName,
+                SummaryField::NativeAudioTranscription,
+                SummaryField::WhisperModel,
             ]
         );
 
@@ -1012,6 +1106,53 @@ mod tests {
     }
 
     #[test]
+    fn audio_transcription_focus_wraps_over_audio_fields_only() {
+        let mut state = sample_state();
+
+        assert_eq!(
+            state.audio_transcription_focus,
+            AudioTranscriptionField::NativeAudioTranscription
+        );
+
+        state.next_audio_transcription_focus();
+        assert_eq!(
+            state.audio_transcription_focus,
+            AudioTranscriptionField::WhisperModel
+        );
+
+        state.next_audio_transcription_focus();
+        assert_eq!(
+            state.audio_transcription_focus,
+            AudioTranscriptionField::NativeAudioTranscription
+        );
+
+        state.previous_audio_transcription_focus();
+        assert_eq!(
+            state.audio_transcription_focus,
+            AudioTranscriptionField::WhisperModel
+        );
+    }
+
+    #[test]
+    fn audio_transcription_model_cycles_through_supported_choices() {
+        let mut state = sample_state();
+        state.audio_transcription_focus = AudioTranscriptionField::WhisperModel;
+        state.draft.whisper_model = "tiny.en".into();
+
+        state.toggle_audio_transcription_field();
+        assert_eq!(state.draft.whisper_model, "base.en");
+
+        state.toggle_audio_transcription_field();
+        assert_eq!(state.draft.whisper_model, "small.en");
+
+        state.toggle_audio_transcription_field();
+        assert_eq!(state.draft.whisper_model, "medium.en");
+
+        state.toggle_audio_transcription_field();
+        assert_eq!(state.draft.whisper_model, "tiny.en");
+    }
+
+    #[test]
     fn summary_focus_skips_container_network_name_when_isolation_is_disabled() {
         let mut state = sample_state();
         state.draft.container_network_isolated = false;
@@ -1019,7 +1160,7 @@ mod tests {
 
         state.next_summary_focus();
 
-        assert_eq!(state.summary_focus, SummaryField::VaultPath);
+        assert_eq!(state.summary_focus, SummaryField::NativeAudioTranscription);
     }
 
     #[test]
@@ -1133,6 +1274,9 @@ mod tests {
                 pkce_required: true,
                 enforce_hostname_check: true,
                 direct_public_origin_hostname: None,
+                native_audio_transcription_enabled: true,
+                whisper_model: "base.en".into(),
+                whisper_max_audio_bytes: 52_428_800,
             },
             dependencies: DependencyStatus {
                 operating_system: SetupOperatingSystem::MacOS,

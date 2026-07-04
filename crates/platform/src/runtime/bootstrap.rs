@@ -132,7 +132,7 @@ mod tests {
 
     use brain3_core::domain::model::{
         AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig,
-        MCPReverseProxyConfig, OAuthConfig,
+        MCPReverseProxyConfig, NativeAudioTranscriptionConfig, OAuthConfig,
     };
     use brain3_core::domain::setup::{RuntimeLaunchPlan, SetupPaths};
 
@@ -178,6 +178,12 @@ mod tests {
                 enable_sync_reindex_tool: false,
             }),
             tunnel: None,
+            native_audio_transcription: NativeAudioTranscriptionConfig {
+                enabled: false,
+                model: "base.en".into(),
+                model_path: PathBuf::from("/tmp/brain3-home/whisper-models/ggml-base.en.bin"),
+                max_audio_bytes: 52_428_800,
+            },
         });
         let launch_plan = RuntimeLaunchPlan {
             paths: SetupPaths::new(
@@ -377,14 +383,14 @@ fn ensure_named_tunnel_config_exists(config: &GatewayConfig) -> Result<()> {
     eprintln!(
         "\nERROR: Cloudflare named tunnel not yet provisioned.\n\
          \n  Config file not found: {}\
-         \n\n  Run this in an interactive terminal:\n    brain3 --cf-setup\
+         \n\n  Run this in an interactive terminal:\n    brain3 --cloudflare-setup\
          \n\n  Or use a quick tunnel instead (no setup needed):\n    Set B3_CF_QUICK_TUNNEL=true in .env (and remove B3_CF_TUNNEL_NAME/B3_CF_DOMAIN)\n",
         config_file.display()
     );
     tracing::error!(
         config_file = %config_file.display(),
         tunnel_name = %tunnel_name,
-        "named tunnel config file not found — run: brain3 --cf-setup"
+        "named tunnel config file not found — run: brain3 --cloudflare-setup"
     );
     bail!(
         "named tunnel config file not found: {}",

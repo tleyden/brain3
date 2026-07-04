@@ -53,6 +53,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - The upstream shared secret mounted into the MCP container
 - Local `.env`, Cloudflare tunnel config, and SQLite token database files
 - Gateway public origin, Cloudflare tunnel identity, and container network isolation state
+- Native Whisper model files loaded by the gateway process for audio transcription
 
 ### Trust Boundaries
 
@@ -61,12 +62,15 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - Local host filesystem and temp-directory principals
 - Local process-control principals that can signal the running gateway process
 - The boundary between the Rust gateway and the `brain3-mcp-vault-tools` container
+- The native transcription boundary where the Rust gateway downloads and parses untrusted audio bytes in-process instead of forwarding them to the container
+- Gateway-initiated internet egress for temporary audio `download_url` fetches and setup-time Whisper model downloads
 - Vault content that may be user-controlled or, in some deployments, third-party-controlled
 
 ### Attacker Capabilities
 
 - Send arbitrary HTTP requests and headers to public gateway routes when tunneling is enabled
 - Operate or compromise the preregistered OAuth client after it is provisioned with Brain3 credentials
+- Supply a `transcribe_audio_file` audio `download_url` through an authorized MCP client, causing the gateway to issue an outbound GET and parse the returned bytes as audio
 - Read local files or logs available to the current OS principal or broader local principals
 - Supply hostile vault content when the user does not fully control imported or shared notes
 
@@ -76,11 +80,15 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - Public ingress should be opt-in and should not broaden exposure accidentally
 - Local secrets and vault contents should not leak through logs or insecure default storage/permissions
 - Container networking should keep the MCP server private by default
+- Native transcription should enforce bounded downloads and reject bytes that cannot be decoded as audio before running Whisper inference
 
 ### Assumptions
 
 - `poc/` is dead legacy and out of active scan scope
 - Rust memory safety is assumed; this scan focused on logic, policy, and boundary bugs rather than memory corruption
+- Native audio transcription intentionally moves untrusted binary audio parsing into the privileged Rust gateway process. This is an accepted trade-off for host-side Metal/CPU inference, but decoder or `whisper.cpp` memory-safety issues would affect the gateway process rather than the sandboxed MCP container.
+- The native transcription `download_url` is not host-allowlisted. Size limits and audio decoding reduce impact, but this remains an accepted SSRF-adjacent egress surface for authorized clients.
+- Whisper model downloads are setup-time, user-initiated egress and must be checksum-verified before model files are treated as usable.
 - Prompt injection is generally out of scope for user-controlled vault content, but not for vaults the user does not fully control
 - The gateway's SIGUSR1 diagnostics trigger is local-only: a sender must already be able to signal the gateway process, and the dump is written only to that process's stdout plus a log-file marker. The dump includes the MCP container's own logs, so the container must continue to avoid logging secrets; trace-level body logging remains covered by Finding 4.
 

@@ -11,15 +11,26 @@
 <p align="center">
   <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
   <br/>
-  Give your AI access to a local markdown vault. Works with Claude, ChatGPT, or any MCP-compatible AI
+  Access and update your local markdown vault via an AI interface 
   <br/>
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
 
-Save an idea mid-conversation and pull it back later, without switching apps or losing context. Use your AI's built-in voice dictation when you'd rather talk than type.
+Markdown vaults like Obsidian are extremely powerful, but:
 
-The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
+1. Editing markdown via a mobile app is tedious and error-prone.
+2. The native OS voice dictation on iOS is not nearly as good as in AI apps, and there's nothing in between to clean up the text.
+3. Copying and pasting content from AI responses into your vault is tedious. 
 
+Brain3 addresses those issues by creating a seamless bridge between your AI interface and your local markdown vault, so you can:  
+
+- Pull context directly from your AI chats into your markdown vault, or vice versa.  
+- Use your AI's built-in voice dictation when you'd rather talk than type, and have it summarized or cleaned up however you specify.
+- Drop an audio file into your AI chat and have it transcribed and summarized into a markdown note.
+
+You don't need to change anything about your current workflow or markdown vault structure. The notes stay as plain markdown on your machine.  
+
+Comptible with Obsidian (including Obsidian Sync), LLMWiki, or Open Knowledge Format (OKF) markdown vaults.
 
 <div align="center">
 
@@ -31,10 +42,11 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 ## Use Cases
 
-1. Use your markdown vault as a way to do weekly and daily planning, make the AI your planning assistant.
+You can use Brain3 for anything you'd typically use a note-taking app for, like:
+
+1. Weekly and daily planning, make the AI your planning assistant.
 2. Jot down quick notes and ideas in an "inbox" folder, triage later.  (eg, [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/))
 3. As you are researching a topic with AI, you can just quickly save a summary into your markdown vault.  Your AI will already have the context.
-4. There are many other use cases, typical of note-taking, research and "second brain" workflows.
 
 ## Screenshots - Admin Terminal UI (TUI)
 
@@ -125,6 +137,8 @@ It should launch an interactive setup wizard.
   <img width="600" alt="Brain3 setup wizard screenshot" src="docs/screenshots/SetupWizardScreenshot.png" />
 </a>
 
+For an existing install, run `brain3 --setup` to review and change current settings, including enabling audio transcription on installs created before that option existed.
+
 #### What the setup wizard will ask
 
 The vault path is the only required decision. The other steps have defaults you can keep unless your setup needs something different; see the [Configuration Reference](#configuration-reference) for the full list.
@@ -132,7 +146,8 @@ The vault path is the only required decision. The other steps have defaults you 
 - **Vault Path** — enter the absolute path to your Obsidian vault. It must already exist.
 - **Local/Remote Access** — choose Local MCP only, Remote MCP only, or Both.
 - **Auth Setup** — choose the username (`admin`) and client ID (`brain3-oauth2-client`). The password is auto-generated; press `g` to enter a custom one.
-- **Network Security** — review ports, container name, and token lifetimes. Leave these defaults alone unless your setup requires otherwise.
+- **Network Security** — review ports, container name, token lifetimes, PKCE, hostname checks, and container networking.
+- **Audio Transcription** — enable the native `transcribe_audio_file` MCP tool and choose the Whisper model Brain3 should download and checksum-verify.
 
 ### Configure your AI 
 
@@ -347,7 +362,7 @@ Brain3's normal first-run setup configures the app and defaults to a Cloudflare 
 5. Run the named tunnel provisioning wizard:
 
 ```bash
-brain3 --cf-setup
+brain3 --cloudflare-setup
 ```
 
 6. The wizard verifies `cloudflared`, handles login if needed, creates or reuses the named tunnel, writes the config file, and configures the DNS route.
@@ -460,8 +475,11 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_USERNAME` | *(required)* | Login username for the Brain3 sign-in page |
 | `B3_PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
 | `B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` | Reject requests for unexpected hostnames |
+| `B3_NATIVE_AUDIO_TRANSCRIPTION_ENABLED` | `false` | Enable the native `transcribe_audio_file` MCP tool. The tool runs in the gateway process, not the MCP container. |
+| `B3_WHISPER_MODEL` | `base.en` | Whisper ggml model to use. Supported setup choices are `tiny.en`, `base.en`, `small.en`, and `medium.en`; files are stored in `~/.brain3/whisper-models/`. |
+| `B3_WHISPER_MAX_AUDIO_BYTES` | `52428800` | Maximum audio download size accepted by `transcribe_audio_file`. This is supported as a `.env` setting and is not edited in the setup wizard. |
 | `B3_CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
-| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cf-setup` to provision it |
+| `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cloudflare-setup` to provision it |
 | `B3_CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `B3_CF_TUNNEL_NAME`) |
 | `B3_CF_TUNNEL_CONFIG_FILE` | `.cloudflared/<tunnel-name>.yml` | Optional path to the `cloudflared` config file written during named tunnel provisioning |
 | `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
@@ -491,12 +509,32 @@ Once connected, your AI app has access to these vault tools:
 | `vault_list` | List files and directories in the vault. |
 | `vault_move` | Move or rename a file. |
 | `vault_delete` | Delete a file. |
+| `transcribe_audio_file` | Native audio transcription for uploaded audio file references. Runs in the gateway process; uses Metal acceleration on macOS and CPU inference on Linux. Windows support is not yet available. |
 
 </details>
 
 ## Developers / Contributors
 
 See the [Quick Start](#quick-start) prerequisites above before continuing.
+
+<details>
+<summary><strong>Linux prerequisites</strong></summary>
+
+Brain3's native audio transcription dependency builds Whisper's C/C++ code and
+bindings at compile time. Linux source builds need a C/C++ toolchain, CMake,
+Clang, and `libclang`.
+
+On Debian/Ubuntu systems:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y build-essential cmake clang libclang-dev
+```
+
+If `libclang` is installed in a non-standard location, set `LIBCLANG_PATH` to
+the directory containing `libclang.so`.
+
+</details>
 
 <details>
 <summary><strong>Clone and build from source</strong></summary>
@@ -516,7 +554,7 @@ cargo build --release
 ./target/release/brain3
 ```
 
-Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. See [Quick Start](#quick-start) for the full flow.
+Brain3 launches the setup wizard on first run and goes straight to the runtime status screen on subsequent runs. Run `brain3 --setup` to review or change existing settings later, including native audio transcription. See [Quick Start](#quick-start) for the full flow.
 
 </details>
 

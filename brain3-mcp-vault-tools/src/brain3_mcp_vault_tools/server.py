@@ -250,16 +250,19 @@ class InboundRequestLoggingMiddleware:
 
         async def receive_wrapper() -> Message:
             message = await receive()
-            if trace_enabled and message["type"] == "http.request":
+            if message["type"] == "http.request":
                 request_body_chunks.append(message.get("body", b""))
                 if not message.get("more_body", False):
-                    logger.log(
-                        TRACE,
-                        "MCP request body method=%s path=%s body=%s",
-                        scope.get("method", "<unknown>"),
-                        path,
-                        b"".join(request_body_chunks).decode("utf-8", errors="replace"),
-                    )
+                    full_body = b"".join(request_body_chunks)
+                    if trace_enabled:
+                        logger.log(
+                            TRACE,
+                            "MCP request body method=%s path=%s body_bytes=%d body=%s",
+                            scope.get("method", "<unknown>"),
+                            path,
+                            len(full_body),
+                            full_body.decode("utf-8", errors="replace"),
+                        )
             return message
 
         response_body_chunks: list[bytes] = []

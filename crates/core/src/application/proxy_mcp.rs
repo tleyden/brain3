@@ -133,7 +133,6 @@ impl<P: McpProxyPort> ProxyMcpUseCase<P> {
             body = %String::from_utf8_lossy(&body[..body.len().min(1024)]),
             "MCP proxy: request body"
         );
-
         let mut final_headers = filtered_headers;
         final_headers.push((
             "x-brain3-upstream-secret".into(),

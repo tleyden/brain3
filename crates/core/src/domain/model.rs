@@ -19,6 +19,15 @@ pub struct GatewayConfig {
     pub local_mcp: Option<LocalMcpConfig>,
     pub container: Option<ContainerStartupConfig>,
     pub tunnel: Option<TunnelConfig>,
+    pub native_audio_transcription: NativeAudioTranscriptionConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeAudioTranscriptionConfig {
+    pub enabled: bool,
+    pub model: String,
+    pub model_path: PathBuf,
+    pub max_audio_bytes: u64,
 }
 
 #[derive(Debug, Clone)]
