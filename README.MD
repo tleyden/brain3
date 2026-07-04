@@ -11,7 +11,7 @@
 <p align="center">
   <img width="250" alt="Brain3 Logo" src="docs/logo/brain3-lockup-light.svg" />
   <br/>
-  Access and update your local markdown vault via an AI interface.  Works with Obsidian, LLMWiki, or Open Knowledge Format (OKF) markdown vaults.
+  Access and update your local markdown vault via an AI interface.  
   <br/>
   <img width="800" alt="Brain3 Architecture Diagram" src="docs/screenshots/brain3_architecture_diagram.png" />
 </p>
@@ -27,7 +27,7 @@ Brain3 addresses those issues by creating a seamless bridge between your AI inte
 - Save an idea mid-conversation and pull it back later, without switching apps or losing context.
 - Use your AI's built-in voice dictation when you'd rather talk than type.
 
-You don't need to change anything about your current workflow or markdown vault. The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.
+You don't need to change anything about your current workflow or markdown vault. The notes stay as plain markdown on your machine, so you build up a memory that's yours and isn't locked to any one AI provider.  Comptible with Obsidian (including Obsidian Sync), LLMWiki, or Open Knowledge Format (OKF) markdown vaults.
 
 **What this is not**
 
