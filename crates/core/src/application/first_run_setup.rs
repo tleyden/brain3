@@ -186,7 +186,7 @@ impl FirstRunSetupUseCase {
             username: config.oauth.username.clone(),
             password: config.oauth.password.clone(),
             access_mode: access_mode_draft_from_config(config.access_mode),
-            tunnel_mode: tunnel_mode_draft_from_config(config.tunnel.as_ref()),
+            tunnel_mode: tunnel_mode_draft_from_config(config),
             container_runtime: container
                 .map(|container| container.runtime)
                 .unwrap_or_else(|| default_container_runtime(self.port.operating_system())),
@@ -220,7 +220,7 @@ impl FirstRunSetupUseCase {
                 .unwrap_or_default(),
             pkce_required: config.oauth.pkce_required,
             enforce_hostname_check: config.hostname_validation.enforce,
-            direct_public_origin_hostname: None,
+            direct_public_origin_hostname: direct_public_origin_hostname_from_config(config),
             native_audio_transcription_enabled: config.native_audio_transcription.enabled,
             whisper_model: config.native_audio_transcription.model.clone(),
             whisper_max_audio_bytes: config.native_audio_transcription.max_audio_bytes,
@@ -286,8 +286,8 @@ fn access_mode_draft_from_config(access_mode: AccessMode) -> AccessModeDraft {
     }
 }
 
-fn tunnel_mode_draft_from_config(tunnel: Option<&TunnelConfig>) -> TunnelModeDraft {
-    match tunnel {
+fn tunnel_mode_draft_from_config(config: &GatewayConfig) -> TunnelModeDraft {
+    match config.tunnel.as_ref() {
         Some(TunnelConfig::CloudflareQuick { .. }) => TunnelModeDraft::CloudflareQuick,
         Some(TunnelConfig::CloudflareNamed {
             tunnel_name,
@@ -297,8 +297,18 @@ fn tunnel_mode_draft_from_config(tunnel: Option<&TunnelConfig>) -> TunnelModeDra
             tunnel_name: tunnel_name.clone(),
             domain: domain.clone(),
         },
-        None => TunnelModeDraft::Disabled,
+        None => direct_public_origin_hostname_from_config(config)
+            .map(|hostname| TunnelModeDraft::DirectPublicOrigin { hostname })
+            .unwrap_or(TunnelModeDraft::Disabled),
     }
+}
+
+fn direct_public_origin_hostname_from_config(config: &GatewayConfig) -> Option<String> {
+    if config.tunnel.is_some() {
+        return None;
+    }
+
+    config.hostname_validation.expected_host.clone()
 }
 
 fn image_repo_from_reference(image: &str) -> String {
@@ -674,6 +684,72 @@ mod tests {
         assert!(!preparation.draft.native_audio_transcription_enabled);
         assert_eq!(preparation.draft.whisper_model, "tiny.en");
         assert_eq!(preparation.draft.whisper_max_audio_bytes, 12_345);
+    }
+
+    #[tokio::test]
+    async fn prepare_from_existing_config_preserves_direct_public_origin() {
+        let port = Arc::new(MockSetupSystemPort::new(vec![]));
+        let use_case = FirstRunSetupUseCase::new(port, sample_defaults());
+
+        let preparation = use_case
+            .prepare_from_existing_config(&GatewayConfig {
+                port: 9421,
+                host: "127.0.0.1".into(),
+                token_db_path: PathBuf::from("/tmp/brain3-home/brain3.db"),
+                oauth: crate::domain::model::OAuthConfig {
+                    client_id: "saved-client".into(),
+                    client_secret: "saved-secret".into(),
+                    access_token_lifetime_secs: 1234,
+                    refresh_token_lifetime_secs: 5678,
+                    pkce_required: true,
+                    username: "saved-user".into(),
+                    password: "saved-password".into(),
+                },
+                mcp_reverse_proxy: crate::domain::model::MCPReverseProxyConfig {
+                    mcp_upstream_url: "http://127.0.0.1:2765".into(),
+                    upstream_secret: "upstream-secret".into(),
+                },
+                hostname_validation: crate::domain::model::HostnameValidationConfig {
+                    expected_host: Some("brain3.example.com".into()),
+                    enforce: true,
+                },
+                access_mode: crate::domain::model::AccessMode::Remote,
+                local_mcp: None,
+                container: Some(crate::domain::model::ContainerStartupConfig {
+                    runtime: ContainerRuntime::Docker,
+                    image: "ghcr.io/example/custom-mcp:v9.9.9".into(),
+                    container_name: "saved-container".into(),
+                    network_name: "saved-network".into(),
+                    vault_path: PathBuf::from("/srv/vault"),
+                    upstream_secret: "upstream-secret".into(),
+                    host_port: 9556,
+                    container_port: 9557,
+                    isolation_strategy: None,
+                    dev_mount_source: None,
+                    mcp_log_level: None,
+                    enable_sync_reindex_tool: false,
+                }),
+                tunnel: None,
+                native_audio_transcription: crate::domain::model::NativeAudioTranscriptionConfig {
+                    enabled: false,
+                    model: "tiny.en".into(),
+                    model_path: PathBuf::from("/tmp/brain3-home/whisper-models/ggml-tiny.en.bin"),
+                    max_audio_bytes: 12_345,
+                },
+            })
+            .await
+            .expect("prepare_from_existing_config should succeed");
+
+        assert_eq!(
+            preparation.draft.tunnel_mode,
+            TunnelModeDraft::DirectPublicOrigin {
+                hostname: "brain3.example.com".into()
+            }
+        );
+        assert_eq!(
+            preparation.draft.direct_public_origin_hostname,
+            Some("brain3.example.com".into())
+        );
     }
 
     #[tokio::test]
