@@ -18,19 +18,19 @@
 
 Markdown vaults like Obsidian are extremely powerful, but:
 
-1. Editing markdown via a mobile app is tedious and error-prone.
-2. The native OS voice dictation on iOS is not nearly as good as in AI apps, and there's nothing in between to clean up the text.
-3. Copying and pasting content from AI responses into your vault is tedious. 
+1. **Editing markdown on mobile is tedious**  (moving checkboxes around is the worst)
+2. The **native OS voice dictation isn't great**, at least not on iOS.
+3. **Copying and pasting content** between your AI and your markdowns just slows you down. 
 
-Brain3 addresses those issues by creating a seamless bridge between your AI interface and your local markdown vault, so you can:  
+with brain3 you can:  
 
-- Pull context directly from your AI chats into your markdown vault, or vice versa.  
-- Use your AI's built-in voice dictation when you'd rather talk than type, and have it summarized or cleaned up however you specify.
-- Drop an audio file into your AI chat and have it transcribed and summarized into a markdown note.
+- **Pull in context directly** from your AI chats into your markdown vault, or vice versa: pull from your markdown files into your chats.  
+- Use your AI's **built-in voice dictation** when you'd rather talk than type, and have it summarized or cleaned up however you specify.
+- **Transcribe audio files** directly from your AI chat into a markdown note.
 
-You don't need to change anything about your current workflow or markdown vault structure. The notes stay as plain markdown on your machine.  
+Brain3 just adds another UX layer. You don't need to change anything about your markdown vault structure or storage.
 
-Comptible with Obsidian (including Obsidian Sync), LLMWiki, or Open Knowledge Format (OKF) markdown vaults.
+Comptible with Obsidian, including Obsidian Sync. LLMWiki + Open Knowledge Format (OKF) markdown vault support is on the roadmap.
 
 <div align="center">
 
@@ -42,11 +42,11 @@ https://github.com/user-attachments/assets/9c58b146-a874-4faf-8e43-f6b7f7f48e75
 
 ## Use Cases
 
-You can use Brain3 for anything you'd typically use a note-taking app for, like:
+All the same use cases you'd typically use a note-taking app for, like:
 
 1. Weekly and daily planning, make the AI your planning assistant.
-2. Jot down quick notes and ideas in an "inbox" folder, triage later.  (eg, [close any open loops](https://www.reddit.com/r/getdisciplined/comments/12vemas/advice_close_open_loops/))
-3. As you are researching a topic with AI, you can just quickly save a summary into your markdown vault.  Your AI will already have the context.
+2. Jot down quick notes and ideas in an "inbox" folder.
+3. etc..
 
 ## Screenshots - Admin Terminal UI (TUI)
 
