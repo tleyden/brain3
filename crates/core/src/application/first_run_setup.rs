@@ -13,7 +13,7 @@ use crate::domain::setup::{
 };
 use crate::ports::setup_system::SetupSystemPort;
 
-pub const CURRENT_RELEASE: &str = "v0.2.10";
+pub const CURRENT_RELEASE: &str = "v0.2.11";
 
 #[derive(Clone)]
 pub struct FirstRunSetupUseCase {
