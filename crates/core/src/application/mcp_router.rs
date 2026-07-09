@@ -184,6 +184,18 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
 
         for client in &self.plugin_containers {
             if let Some(unprefixed_name) = client.strip_prefix(name) {
+                // Verify that the unprefixed tool name was advertised during initialization
+                if !client.has_tool(unprefixed_name) {
+                    tracing::warn!(
+                        container = %client.container_name(),
+                        prefixed_tool_name = name,
+                        tool_name = unprefixed_name,
+                        request_id = ?request.get("id"),
+                        "MCP router: rejecting call to unadvertised Plugin MCP tool"
+                    );
+                    return Ok(Some(tool_not_found_response(request, name)));
+                }
+
                 tracing::info!(
                     container = %client.container_name(),
                     prefixed_tool_name = name,
@@ -191,7 +203,21 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
                     request_id = ?request.get("id"),
                     "MCP router: routing Plugin MCP tool call"
                 );
-                return Ok(Some(client.call_tool(request, unprefixed_name).await?));
+
+                // Handle transport errors gracefully and convert them to JSON-RPC errors
+                match client.call_tool(request, unprefixed_name).await {
+                    Ok(response) => return Ok(Some(response)),
+                    Err(error) => {
+                        tracing::error!(
+                            container = %client.container_name(),
+                            tool_name = unprefixed_name,
+                            request_id = ?request.get("id"),
+                            error = %error,
+                            "MCP router: Plugin MCP tool call failed"
+                        );
+                        return Ok(Some(plugin_transport_error_response(request, name, &error)));
+                    }
+                }
             }
         }
 
@@ -293,6 +319,48 @@ fn native_tool_response(
 
 fn native_tool_error_to_proxy_error(error: NativeMcpToolError) -> ProxyError {
     ProxyError::BadGateway(format!("native MCP tool initialization failed: {error}"))
+}
+
+fn tool_not_found_response(request: &Value, tool_name: &str) -> McpProxyResponse {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": request.get("id").cloned().unwrap_or(Value::Null),
+        "error": {
+            "code": -32601,
+            "message": format!("Tool not found: {tool_name}"),
+        }
+    });
+
+    let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
+
+    McpProxyResponse {
+        status: 200,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body,
+    }
+}
+
+fn plugin_transport_error_response(
+    request: &Value,
+    tool_name: &str,
+    error: &ProxyError,
+) -> McpProxyResponse {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": request.get("id").cloned().unwrap_or(Value::Null),
+        "error": {
+            "code": -32603,
+            "message": format!("Plugin container error calling {tool_name}: {error}"),
+        }
+    });
+
+    let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
+
+    McpProxyResponse {
+        status: 200,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body,
+    }
 }
 
 #[cfg(test)]
@@ -681,7 +749,7 @@ mod tests {
     #[tokio::test]
     async fn tools_call_for_prefixed_plugin_tool_bypasses_vault_proxy_and_strips_prefix() {
         let (plugin_proxy, plugin_client) = initialized_plugin_client(
-            br#"{"jsonrpc":"2.0","id":99,"result":{"tools":[]}}"#.to_vec(),
+            br#"{"jsonrpc":"2.0","id":99,"result":{"tools":[{"name":"search_deck","description":"Search deck","inputSchema":{"type":"object"}}]}}"#.to_vec(),
         )
         .await;
         let (router, captured, _, plugin_captured) = router_with_tool_and_plugin(
@@ -765,6 +833,56 @@ mod tests {
                 .lock()
                 .expect("initialize lock should succeed"),
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_call_rejects_unadvertised_plugin_tool() {
+        let (plugin_proxy, plugin_client) = initialized_plugin_client(
+            br#"{"jsonrpc":"2.0","id":99,"result":{"tools":[{"name":"search_deck","description":"Search deck","inputSchema":{"type":"object"}}]}}"#.to_vec(),
+        )
+        .await;
+        let (router, _, _, plugin_captured) = router_with_tool_and_plugin(
+            br#"{"jsonrpc":"2.0","result":{}}"#.to_vec(),
+            plugin_proxy,
+            plugin_client,
+        );
+
+        let response = router
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "fluensy_learn__unadvertised_tool",
+                        "arguments": {}
+                    }
+                })
+                .to_string()
+                .into_bytes(),
+            )
+            .await
+            .expect("should return error response");
+
+        assert_eq!(response.status, 200);
+        let body: Value = serde_json::from_slice(&response.body).expect("response should be JSON");
+        assert!(body.get("error").is_some(), "response should contain error");
+        assert_eq!(body["error"]["code"], -32601);
+
+        // Plugin should only have initialization calls, not the tool call
+        let plugin_requests = plugin_captured
+            .lock()
+            .expect("plugin capture lock should succeed");
+        assert_eq!(
+            plugin_requests.len(),
+            2,
+            "plugin should only receive initialize and tools/list, not the rejected tool call"
         );
     }
 }

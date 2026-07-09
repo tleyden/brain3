@@ -159,13 +159,20 @@ pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), 
         return Ok(());
     }
 
-    if !port.is_running(&id).await? {
+    if port.is_running(&id).await? {
+        tracing::info!(container = %startup.container_name, runtime = ?startup.runtime, "stopping managed MCP container during shutdown");
+        port.stop(&id).await?;
+    } else {
         tracing::debug!(container = %startup.container_name, "managed MCP container already stopped during shutdown");
-        return Ok(());
     }
 
-    tracing::info!(container = %startup.container_name, runtime = ?startup.runtime, "stopping managed MCP container during shutdown");
-    port.stop(&id).await
+    // macOS containers require explicit removal; Docker containers use --rm
+    if startup.runtime == ContainerRuntime::MacOSContainer {
+        tracing::info!(container = %startup.container_name, "removing managed macOS MCP container during shutdown");
+        port.remove(&id).await?;
+    }
+
+    Ok(())
 }
 
 pub async fn stop_plugin_mcp_container(
@@ -179,13 +186,20 @@ pub async fn stop_plugin_mcp_container(
         return Ok(());
     }
 
-    if !port.is_running(&id).await? {
+    if port.is_running(&id).await? {
+        tracing::info!(container = %plugin.name, runtime = ?plugin.runtime, "stopping managed Plugin MCP Container during shutdown");
+        port.stop(&id).await?;
+    } else {
         tracing::debug!(container = %plugin.name, "managed Plugin MCP Container already stopped during shutdown");
-        return Ok(());
     }
 
-    tracing::info!(container = %plugin.name, runtime = ?plugin.runtime, "stopping managed Plugin MCP Container during shutdown");
-    port.stop(&id).await
+    // macOS containers require explicit removal; Docker containers use --rm
+    if plugin.runtime == ContainerRuntime::MacOSContainer {
+        tracing::info!(container = %plugin.name, "removing managed macOS Plugin MCP Container during shutdown");
+        port.remove(&id).await?;
+    }
+
+    Ok(())
 }
 
 pub(crate) fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
@@ -411,12 +425,18 @@ fn plugin_auth_kind(auth: &PluginMcpContainerAuth) -> &'static str {
 fn resolve_plugin_host_port(plugin: &PluginMcpContainerConfig) -> Result<u16, ContainerError> {
     match plugin.host_port {
         Some(port) => Ok(port),
-        None => pick_free_loopback_port().map_err(|error| {
-            ContainerError::Other(format!(
-                "failed to pick host port for Plugin MCP Container '{}': {error}",
-                plugin.name
-            ))
-        }),
+        None => {
+            // KNOWN LIMITATION: There is a small race window between selecting a free port
+            // and the container runtime binding to it. Another process could bind to the
+            // same port in that gap. If this becomes a problem, specify an explicit host_port
+            // in the plugin configuration.
+            pick_free_loopback_port().map_err(|error| {
+                ContainerError::Other(format!(
+                    "failed to pick host port for Plugin MCP Container '{}': {error}",
+                    plugin.name
+                ))
+            })
+        }
     }
 }
 
@@ -629,6 +649,8 @@ mod tests {
         exists_calls: Vec<String>,
         /// Responses returned by `exists()` in order; cycles `false` once exhausted.
         exists_responses: Vec<bool>,
+        /// Responses returned by `is_running()` in order; cycles `false` once exhausted.
+        is_running_responses: Vec<bool>,
     }
 
     struct MockContainerPort {
@@ -672,7 +694,13 @@ mod tests {
         }
 
         async fn is_running(&self, _id: &ContainerId) -> Result<bool, ContainerError> {
-            Ok(false)
+            let mut s = self.state.lock().expect("lock should not be poisoned");
+            let result = if s.is_running_responses.is_empty() {
+                false
+            } else {
+                s.is_running_responses.remove(0)
+            };
+            Ok(result)
         }
 
         async fn logs_tail(

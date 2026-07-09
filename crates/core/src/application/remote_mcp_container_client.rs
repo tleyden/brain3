@@ -75,6 +75,12 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             .filter(|name| !name.is_empty())
     }
 
+    pub fn has_tool(&self, unprefixed_tool_name: &str) -> bool {
+        self.tool_schemas
+            .iter()
+            .any(|schema| schema.original_name == unprefixed_tool_name)
+    }
+
     pub async fn call_tool(
         &self,
         request: &Value,
