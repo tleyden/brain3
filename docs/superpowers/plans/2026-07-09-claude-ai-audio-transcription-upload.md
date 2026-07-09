@@ -21,162 +21,222 @@ fetchable `download_url`. There is no `_meta` hint Claude.ai honors that
 would cause it to synthesize one. So `transcribe_audio_file` is currently
 unreachable from Claude.ai — confirmed, not a misconfiguration.
 
-## Verified: is the proposed presigned-upload-URL pattern real?
+## Correction: what the MCP spec actually says about binary tool *inputs*
 
-Yes, cross-checked against three independent sources (not just the
-assistant-generated script, which I don't treat as authoritative on its
-own):
+A second assistant-generated message claimed "the MCP spec defines
+`AudioContent` with base64 `data`... the same pattern applies to tool
+inputs." I checked this against the spec directly
+(`modelcontextprotocol.io/specification/draft/server/tools` and `.../schema`)
+and it's **half right, stated too strongly**:
 
-- **Official docs** (`platform.claude.com/docs/.../code-execution-tool`):
-  confirms user file uploads made through the **raw Messages API** use a
-  `container_upload` block + `file_id` from the Files API — that's the
-  API-level mechanism and it's a red herring for Claude.ai chat.
-- **Claude Help Center** ("Create and edit files with Claude"): confirms
-  Settings → Capabilities → Code execution and file creation has an
-  "Additional allowed domains" network allowlist, and that this exists for
-  **individual Free/Pro/Max accounts**, not just Team/Enterprise. Also
-  confirms: *"If MCP integrations are enabled, network communication
-  remains possible through those connections regardless of the network
-  egress setting"* — i.e. the egress toggle only gates code running inside
-  the sandbox (a `curl` call), not MCP tool calls themselves.
-- **Independent third-party implementation** (futuresearch.ai blog, "How to
-  Upload Large Files to an MCP Server Without Filling the Context Window")
-  describes the exact same three-step flow already in production: request a
-  presigned URL from an MCP tool → Claude runs `curl -X PUT` inside the
-  sandbox → a second MCP tool call exchanges an opaque ID for the parsed
-  result. Confirms presigned URLs need a short TTL (theirs: 5 min) and that
-  omitting the domain from "Additional allowed domains" fails the `curl`
-  with a network error even though the URL is valid.
+- `AudioContent`/`ImageContent` (`{ "type": "audio", "data": "<base64>",
+  "mimeType": "..." }`) are real, spec-defined types — but they're part of
+  `ContentBlock`, used for **tool results** (and prompts/resources), not
+  tool call *arguments*.
+- Tool **inputs** are governed purely by a server's own `inputSchema` (plain
+  JSON Schema). The spec places zero constraints on how a server author
+  models a "file" input. A base64 string property is a legal and common
+  choice, but it is exactly as much of an "application-level convention" as
+  brain3's existing `{ download_url, file_id }` shape (which is OpenAI's
+  convention) or the presigned-upload-URL shape (a pattern several MCP
+  servers have independently converged on, per the earlier research pass) —
+  none of the three is more "spec-native" than the others. The spec is
+  silent on file input modeling by design.
 
-One caveat found and worth noting, not blocking: a filed GitHub issue
-(`anthropics/claude-code#63182`) reports the **Team-plan org-level**
-allowlist not reaching the sandbox proxy. Doesn't affect individual
-accounts, which is presumably how this user runs Claude.ai.
+This matters for the plan because it means base64-inline is not free of
+design trade-offs just because it "is in the spec" — it isn't, in the input
+direction. It's still worth strongly considering on its own merits (below),
+just not on the basis of spec compliance.
 
-**Conclusion: the pattern is real and is the documented way to get sandbox-local
-bytes into an MCP server. The assistant-generated script is not usable
-as-is** — it's a standalone Python/FastMCP/faster-whisper server with no
-auth, no framework fit, and it duplicates whisper-rs inference brain3 already
-has natively in Rust. It also introduces an unauthenticated public HTTP
-upload endpoint, which conflicts directly with this repo's security rule
-("gateway is intentionally closed to preregistered clients only") and the
-AGENTS.MD rule that new ingress points require a `SECURITY_AUDIT.md` threat
-model update first.
+## Revised design: two viable options, staged by effort/risk
 
-## Design goal
+### Option A — inline base64 argument (new, recommended to try first)
 
-Reuse brain3's existing native Rust transcription path (`whisper-rs`,
-existing `max_audio_bytes` cap, existing audio decode/size-limit logic) and
-add a second, Claude.ai-shaped way to *get bytes into* that path, without
-weakening the "only the preregistered client reaches protected data"
-guarantee.
+Add a third accepted shape to `transcribe_audio_file`'s existing
+`audio_file` argument:
 
-Two new pieces, one path reused:
+```json
+{ "audio_file": { "audio_data": "<base64>", "mime_type": "audio/wav", "file_name": "memo.wav" } }
+```
 
-1. **New native MCP tool `request_audio_upload`** (mirrors
-   `WhisperTranscribeTool`'s shape in
-   `crates/platform/src/native_mcp_tools/`). Only reachable the same way
-   every other tool is: through the OAuth-protected `/mcp` route, so only the
-   preregistered client can ever obtain an upload token. Returns:
-   - a short-TTL (5 min, matching the pattern found in research), single-use,
-     cryptographically random `upload_id`
-   - the `curl -X PUT` command string Claude should run in its sandbox
-   - the size cap, sourced from the *same* `max_audio_bytes` config
-     (`config.native_audio_transcription.max_audio_bytes`) already used by
-     `transcribe_audio_file` — no second, divergent limit.
+Server-side: `base64::decode`, then feed straight into the *existing*
+`decode_audio_file_to_whisper_pcm` path (same size-limit enforcement, same
+whisper-rs inference) — no HTTP GET, no new HTTP route, no new registry, no
+new tool.
 
-2. **New unauthenticated-but-capability-scoped HTTP route**
-   `PUT /uploads/{upload_id}` in `crates/platform/src/http/` (new
-   `uploads.rs` handler, wired into both `router.rs` builders). Unauthenticated
-   because the sandbox's `curl` can't carry the OAuth bearer token — but the
-   `upload_id` itself is the capability: unguessable, single-use, expires in
-   5 minutes, and can only ever have been minted by a call to
-   `request_audio_upload` that already passed OAuth. Streams the body to a
-   temp file with the same byte-cap-while-streaming behavior already used in
-   `download_to_temp_file`, rejecting early (413) rather than buffering
-   unbounded bytes.
+**Why this is attractive:**
+- Zero new ingress. The bytes travel over the *existing* OAuth-protected
+  `/mcp` JSON-RPC channel — no new trust boundary, no `SECURITY_AUDIT.md`
+  rewrite beyond noting the input variant exists.
+- No dependency on Cloudflare tunnel naming, "Additional allowed domains,"
+  or the sandbox's `curl` working at all.
+- Much smaller code change: one new struct variant + one new schema branch
+  in a file that already exists, reusing 100% of the decode/limit/inference
+  pipeline.
 
-3. **Extend `transcribe_audio_file`'s input schema** to a `oneOf` /
-   discriminated union: either the existing
-   `{ download_url, file_id, ... }` (ChatGPT path, unchanged, existing tests
-   keep passing) or a new `{ upload_id }` (Claude.ai path) that reads the
-   already-landed temp file instead of doing an HTTP GET. This keeps the
-   tool count at +1 total (`request_audio_upload`), consistent with
-   AGENTS.MD's "keep number of tools as few as possible."
+**Why it's genuinely uncertain whether it works from Claude.ai chat, and
+needs to be tested empirically before committing to it as the answer:**
+- For Claude.ai to call the tool with `audio_data` populated, it needs to
+  get the attached file's raw bytes into that JSON argument somehow. Two
+  paths exist, and I could not confirm from docs which (if either) applies
+  to the **Claude.ai consumer chat product** (as opposed to the raw
+  Developer Platform/Messages API, which is a different product surface):
+  1. *Without code execution*: the model would have to literally emit the
+     base64 text as tokens in its own response. Per-turn output token caps
+     (commonly in the thousands, model/config-dependent) make this
+     impractical past a very short clip, and — per the earlier research
+     pass — Claude.ai doesn't appear to give the model raw byte access to
+     an attached audio file without code execution in the first place.
+  2. *With code execution enabled*, Anthropic's documented "[programmatic
+     tool calling](https://www.anthropic.com/engineering/code-execution-with-mcp)"
+     pattern lets sandboxed code call an MCP tool directly — the tool
+     argument (including a base64 blob it constructs from a sandbox-local
+     file) is assembled and sent by the *script*, not typed out by the
+     model, so it doesn't consume output tokens or context. This is real
+     and documented for the API, but I found no confirmation it's exposed
+     in Claude.ai's consumer chat UI today rather than being an
+     API/agent-harness-only capability.
+- Practical size ceiling either way is much smaller than the tool's current
+  50MB (`max_audio_bytes`) download cap — a 50MB file would be ~67MB of
+  base64 text, unworkable as a JSON-RPC argument or (if per case 1 above)
+  model output. Recommend a separate, much smaller cap specifically for the
+  inline-base64 path (e.g. single-digit MB of raw audio — enough for a
+  multi-minute voice memo, not a long recording) rather than reusing
+  `max_audio_bytes` as-is.
 
-No changes needed in `brain3-mcp-vault-tools` (Python container) —
-transcription is a native in-gateway Rust tool, unrelated to that codebase.
+**Verification step before writing any code**: attach a short (~10-30s)
+audio clip in an actual Claude.ai chat with code execution + this gateway's
+MCP connector enabled, and ask Claude to transcribe it via a temporary test
+tool that just echoes back `len(audio_data)`. This directly answers "can
+Claude.ai get sandbox-local bytes into a tool argument at all" before
+investing in either Option A's real implementation or Option B below.
 
-## Required threat-model update (must happen before/with implementation)
+### Option B — presigned-upload-URL + sandbox `curl` (fallback, kept from prior plan draft, demoted not dropped)
 
-`SECURITY_AUDIT.md`'s Threat Model section needs new entries before this
-ships, per AGENTS.MD:
+If Option A's verification step shows Claude.ai chat cannot practically get
+file bytes into a tool argument (no programmatic-tool-calling access, or
+sizes that matter for real recordings blow past output-token limits), fall
+back to the previously researched, independently-confirmed pattern: a
+`request_audio_upload` tool hands back a short-TTL single-use presigned
+`PUT` URL, Claude's sandbox `curl`s the file to it directly (bypassing the
+model's context entirely), then `transcribe_audio_file` is called with an
+`upload_id`.
 
-- **New asset**: in-flight uploaded audio bytes sitting in the upload
-  registry/temp dir between `request_audio_upload` and `transcribe_audio_file`.
-- **New trust boundary**: `PUT /uploads/{upload_id}` is reachable by anyone
-  who can reach the public gateway origin, without an OAuth bearer token —
-  the security boundary shifts from "bearer token" to "possession of a
-  live, unguessable, single-use, 5-minute-TTL token." Needs explicit
-  reasoning for why that's an acceptable trade-off (same style as the
-  existing `download_url` SSRF-adjacent acceptance already documented for
-  Finding-adjacent assumptions).
-- **New attacker capability**: an attacker who can observe/guess an
-  `upload_id` within its 5-minute window could PUT arbitrary bytes that get
-  whisper-decoded — mitigated by the existing size cap + audio decode
-  validation, same as today's `download_url` path.
-- Note the token is generated with a CSPRNG (e.g. reuse whatever the
-  existing OAuth `RandomGenerator`/token generation already uses in this
-  codebase, don't hand-roll).
+This option is real (confirmed against official docs, the Claude Help
+Center, and an independent third-party MCP server doing exactly this) but
+costs meaningfully more:
+- A genuinely new, only-token-gated (not bearer-gated) public HTTP ingress
+  point — requires a `SECURITY_AUDIT.md` Threat Model update per AGENTS.MD
+  before/with implementation (new asset: in-flight uploaded bytes; new
+  trust boundary: possession of an unguessable single-use 5-minute token
+  substitutes for the OAuth bearer token on this one route; new attacker
+  capability: anyone who can reach the public origin and guess/observe a
+  live token within its TTL can PUT bytes that get whisper-decoded,
+  mitigated by the same size cap + decode validation already in place).
+- Operational dependency: requires a **named/persistent** Cloudflare
+  tunnel, since Claude.ai's "Additional allowed domains" allowlist is
+  hostname-keyed and the default quick tunnel's URL rotates on every
+  gateway restart (SECURITY_AUDIT.md Finding [3]).
+- More moving parts: new upload-token registry with TTL/single-use/cleanup
+  semantics, a new HTTP handler, a new `NativeMcpTool`.
 
-## Operational dependency worth flagging to the user (not a code change)
+Design details (registry shape, route placement, size-cap-while-streaming,
+reuse of `max_audio_bytes`, test list) are unchanged from the prior version
+of this plan and are kept below in case Option A doesn't pan out.
 
-The Cloudflare **quick tunnel** (SECURITY_AUDIT.md Finding [3]) gets a new
-URL on every gateway restart. Claude.ai's "Additional allowed domains"
-allowlist is keyed by hostname, so a quick tunnel would force re-whitelisting
-the domain after every restart for the sandbox `curl` to succeed. This flow
-works far better with a **named/persistent** Cloudflare tunnel domain. Worth
-calling out to the user as a prerequisite, not something to silently work
-around in code.
+<details>
+<summary>Option B implementation detail (collapsed — only needed if Option A fails verification)</summary>
 
-## Implementation steps
-
-1. Update `SECURITY_AUDIT.md` Threat Model (assets / trust boundaries /
-   attacker capabilities) per above.
-2. Add an in-memory upload registry (`Mutex<HashMap<upload_id, Entry>>` or
-   similar), `Entry { expires_at, used: bool, path: Option<PathBuf> }`,
-   likely as a small adapter under `crates/platform/src/` with lazy
-   expiry-sweep on access (mirrors the Python script's `_uploads` dict but
-   safe and bounded — needs eventual cleanup of orphaned temp files for
-   uploads that were reserved but never PUT to, and never transcribed).
-3. Add `request_audio_upload` `NativeMcpTool` impl, registered alongside
-   `WhisperTranscribeTool` in `native_mcp_tools_from_config` (`apps/gateway/src/server.rs`).
-4. Add `PUT /uploads/{upload_id}` handler in `crates/platform/src/http/`,
-   wired into `router.rs`'s `build_router` (must be reachable through the
-   public tunnel-facing router, same as `/oauth/*`).
-5. Extend `WhisperToolArguments`/`OpenAIFileReferenceInput` deserialization
-   in `whisper_transcribe.rs` to accept the `upload_id` variant, sharing the
-   existing decode/size-limit/inference path; update `input_schema()` and
-   the OpenAI `_meta` handling so it's additive, not replacing, the existing
-   ChatGPT shape.
-6. Tests (per AGENTS.MD: core behavior only, no tests on tool description
-   strings): upload happy path, size-limit rejection while streaming,
+1. Add an in-memory upload registry (`Mutex<HashMap<upload_id, Entry>>` or
+   similar), `Entry { expires_at, used: bool, path: Option<PathBuf> }`, with
+   lazy expiry-sweep on access, and cleanup of orphaned temp files for
+   uploads that were reserved but never PUT to or never transcribed.
+2. Add `request_audio_upload` `NativeMcpTool` impl (mirrors
+   `WhisperTranscribeTool`'s shape), registered alongside it in
+   `native_mcp_tools_from_config` (`apps/gateway/src/server.rs`). Returns
+   the `upload_id`, the `curl -X PUT` command, TTL, and the size cap
+   (sourced from the same `max_audio_bytes` config already used by
+   `transcribe_audio_file` — no second, divergent limit).
+3. Add `PUT /uploads/{upload_id}` handler in `crates/platform/src/http/`
+   (new `uploads.rs`), wired into `router.rs`'s `build_router` (must be
+   reachable through the public tunnel-facing router, same as `/oauth/*`).
+   Streams the body to a temp file with the same byte-cap-while-streaming
+   behavior already used in `download_to_temp_file`, rejecting early (413)
+   rather than buffering unbounded bytes.
+4. Extend `WhisperToolArguments` deserialization to accept the `upload_id`
+   variant, sharing the existing decode/size-limit/inference path.
+5. Tests: upload happy path, size-limit rejection while streaming,
    unknown/expired upload_id, single-use enforcement (second PUT and second
    transcribe both rejected after first success), `transcribe_audio_file`
-   accepting `upload_id` end-to-end with a fake transcriber (same pattern as
-   existing tests in `whisper_transcribe.rs`).
-7. Local verification per AGENTS.MD: `cargo test -p brain3 --no-run`, then
-   `cargo test`. Given this touches the gateway's public HTTP surface, also
-   run the e2e smoke suite (`uv run scripts/e2e_smoke.py`) since AGENTS.MD
-   calls that out explicitly for gateway/proxy changes.
+   accepting `upload_id` end-to-end with a fake transcriber.
 
-## Open questions for you before I implement
+</details>
 
-- Confirm you're on an individual Claude.ai plan (Free/Pro/Max) — the Team-plan
-  allowlist bug (`claude-code#63182`) would make this unreliable on Team.
-- Confirm you're willing to move to a named Cloudflare tunnel if not already
-  (needed so "Additional allowed domains" survives restarts).
-- OK with the upload endpoint being unauthenticated-but-capability-scoped
-  (token-gated) rather than bearer-token gated? That's the only way to make
-  the sandbox's `curl` work at all, but it is a new ingress shape worth your
-  explicit sign-off given the security posture of this repo.
+No changes needed in `brain3-mcp-vault-tools` (Python container) under
+either option — transcription is a native in-gateway Rust tool, unrelated
+to that codebase.
+
+## Wording fix: stop branding the existing shape as OpenAI-only
+
+Today's `input_schema()` describes the `audio_file` object as *"OpenAI file
+reference for the uploaded audio file"* and `file_id` as *"OpenAI file
+identifier."* That's misleading in the same direction as the base64 claim
+above: the `{ download_url, file_id }` **shape** is generic JSON Schema —
+any MCP client capable of handing the tool a temporary authorized download
+URL could use it. What's actually OpenAI-specific is only the `_meta`
+`openai/fileParams` hint that tells *ChatGPT specifically* to populate it
+automatically.
+
+Reword (implementation detail, to land alongside whichever option ships):
+
+- `audio_file` description: from *"OpenAI file reference for the uploaded
+  audio file"* to something like *"Reference to an uploaded audio file
+  accessible via a temporary authorized download URL. Populated
+  automatically by OpenAI Apps SDK clients via the `openai/fileParams`
+  hint; any MCP client that can supply a fetchable `download_url` may use
+  this shape."*
+- `file_id` description: from *"OpenAI file identifier"* to *"Client-issued
+  identifier for the uploaded file (opaque to this tool; used for
+  logging/correlation only)."*
+
+This is purely descriptive-string wording — no behavior change, low risk,
+worth doing regardless of which option (A or B) also ships, since it
+currently mis-documents the tool for any future non-OpenAI client author
+(including whichever shape we add for Claude.ai).
+
+## Implementation order
+
+1. Reword the existing `audio_file`/`file_id` schema descriptions (above) —
+   independent, no-risk, do any time.
+2. Run the empirical verification step under Option A (attach a short clip
+   in a real Claude.ai chat, confirm whether bytes reach a tool argument at
+   all, and by which mechanism).
+3. If verification succeeds: implement Option A (new `audio_data`/
+   `mime_type` schema branch + decode path + a separate, smaller size cap
+   for this path + tests). No `SECURITY_AUDIT.md` change expected beyond a
+   one-line note that this input variant exists, since no new trust
+   boundary is created.
+4. If verification fails or sizes are impractical: implement Option B per
+   the collapsed detail above, including the required `SECURITY_AUDIT.md`
+   Threat Model update *before* the new route ships, and confirm with you
+   first that you're willing to move to a named Cloudflare tunnel (needed
+   for "Additional allowed domains" to survive restarts) and that you're OK
+   with a token-gated-rather-than-bearer-gated upload route.
+5. Local verification per AGENTS.MD either way: `cargo test -p brain3
+   --no-run`, then `cargo test`. If Option B ships (new gateway HTTP
+   surface), also run `uv run scripts/e2e_smoke.py` per AGENTS.MD's
+   explicit call-out for gateway/proxy changes.
+
+## Open questions for you before I implement anything
+
+- OK with doing the manual Claude.ai verification step (step 2) before
+  committing to either option's full implementation? It's the cheapest way
+  to avoid building the wrong one.
+- If it comes to Option B: confirm you're on an individual Claude.ai plan
+  (Free/Pro/Max) — a filed GitHub issue (`anthropics/claude-code#63182`)
+  reports the Team-plan org-level allowlist not reaching the sandbox proxy,
+  so Option B would be unreliable on Team.
+- If it comes to Option B: confirm you're willing to move to a named
+  Cloudflare tunnel, and sign off on the token-gated (not bearer-gated)
+  upload endpoint as a new ingress shape, given this repo's security
+  posture.
