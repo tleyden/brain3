@@ -65,6 +65,27 @@ pub enum ContainerRuntime {
     MacOSContainer,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExtraMcpContainerConfig {
+    pub name: String,
+    pub runtime: ContainerRuntime,
+    pub image: String,
+    pub container_port: u16,
+    pub host_port: Option<u16>,
+    pub host_directory: PathBuf,
+    pub container_directory: PathBuf,
+    pub auth: ExtraMcpContainerAuth,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExtraMcpContainerAuth {
+    None,
+    BearerToken {
+        secret_file: PathBuf,
+        secret_mount_path: PathBuf,
+    },
+}
+
 /// How the gateway reaches the MCP container when it is on an internal-only network.
 ///
 /// The strategy is independent of the container runtime so future runtimes can
