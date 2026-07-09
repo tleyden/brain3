@@ -48,12 +48,31 @@ design trade-offs just because it "is in the spec" — it isn't, in the input
 direction. It's still worth strongly considering on its own merits (below),
 just not on the basis of spec compliance.
 
+## ⚠️ Non-negotiable constraint: do not touch the working OpenAI path
+
+**The existing `{ download_url, file_id }` shape is live, tested, and
+confirmed working end-to-end with ChatGPT today.** Nothing in this plan
+should modify its behavior, its wire format, its `_meta` hint, or the
+existing passing tests for it
+(`whisper_transcribe.rs::call_downloads_decodes_resamples_and_returns_transcript`
+and friends). Both options below are strictly *additive*: every code path
+that already ships must keep working, byte-for-byte, exactly as it does
+today. If an implementation of either option requires changing how the
+`download_url`/`file_id` shape is parsed or validated, that's a sign the
+approach is wrong — go back and find a purely-additive way instead.
+
 ## Revised design: two viable options, staged by effort/risk
 
 ### Option A — inline base64 argument (new, recommended to try first)
 
-Add a third accepted shape to `transcribe_audio_file`'s existing
-`audio_file` argument:
+**This is not a new tool.** It's the *same* `transcribe_audio_file` tool,
+same registration, same name, same OpenAI shape untouched — just one more
+accepted shape for its existing `audio_file` argument, sitting alongside
+`{ download_url, file_id }` as an alternative (e.g. a `oneOf` branch in the
+JSON Schema, or simply extra optional fields with server-side logic that
+picks a path based on which fields are present). A client sends *either*
+the existing OpenAI-style reference *or* this new one — never both, and the
+OpenAI path is completely unaffected by this addition:
 
 ```json
 { "audio_file": { "audio_data": "<base64>", "mime_type": "audio/wav", "file_name": "memo.wav" } }
@@ -213,9 +232,14 @@ currently mis-documents the tool for any future non-OpenAI client author
    all, and by which mechanism).
 3. If verification succeeds: implement Option A (new `audio_data`/
    `mime_type` schema branch + decode path + a separate, smaller size cap
-   for this path + tests). No `SECURITY_AUDIT.md` change expected beyond a
-   one-line note that this input variant exists, since no new trust
-   boundary is created.
+   for this path + tests) as a **strictly additive** change — do not modify
+   `OpenAIFileReferenceInput`, the `download_url`/`file_id` required fields,
+   or the existing `_meta` hint. Run the full existing
+   `whisper_transcribe.rs` test suite before and after and confirm every
+   existing test still passes unmodified — that's the regression signal
+   that the working ChatGPT path is intact. No `SECURITY_AUDIT.md` change
+   expected beyond a one-line note that this input variant exists, since no
+   new trust boundary is created.
 4. If verification fails or sizes are impractical: implement Option B per
    the collapsed detail above, including the required `SECURITY_AUDIT.md`
    Threat Model update *before* the new route ships, and confirm with you
