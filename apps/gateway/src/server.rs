@@ -12,11 +12,13 @@ use tokio::sync::{watch, Mutex};
 use tokio::task::JoinHandle;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
-use brain3_core::domain::model::{AccessMode, GatewayConfig};
+use brain3_core::application::remote_mcp_container_client::RemoteMcpContainerClient;
+use brain3_core::domain::model::{AccessMode, ExtraMcpContainerAuth, GatewayConfig};
 use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::native_mcp_tool::NativeMcpTool;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
+use brain3_platform::container::startup::StartedExtraMcpContainer;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
 use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::{build_local_router, build_router};
@@ -95,10 +97,31 @@ impl GatewayServerHandle {
     }
 }
 
+#[allow(dead_code)]
 pub async fn run_gateway_server_until<F>(
     host: &str,
     config: Arc<GatewayConfig>,
     upstream_secret: String,
+    shutdown: F,
+) -> Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
+    run_gateway_server_until_with_extra_containers(
+        host,
+        config,
+        upstream_secret,
+        Vec::new(),
+        shutdown,
+    )
+    .await
+}
+
+pub async fn run_gateway_server_until_with_extra_containers<F>(
+    host: &str,
+    config: Arc<GatewayConfig>,
+    upstream_secret: String,
+    extra_mcp_containers: Vec<StartedExtraMcpContainer>,
     shutdown: F,
 ) -> Result<()>
 where
@@ -119,7 +142,8 @@ where
         .as_ref()
         .and_then(|(listener, _)| listener.local_addr().ok())
         .map(local_url_from_addr);
-    let app_state = build_gateway_state(Arc::clone(&config), upstream_secret)?;
+    let app_state =
+        build_gateway_state(Arc::clone(&config), upstream_secret, &extra_mcp_containers).await?;
     let (shutdown_tx, _) = watch::channel(false);
 
     tracing::info!(
@@ -221,6 +245,15 @@ pub async fn spawn_gateway_server(
     config: Arc<GatewayConfig>,
     upstream_secret: String,
 ) -> Result<GatewayServerHandle> {
+    spawn_gateway_server_with_extra_containers(host, config, upstream_secret, Vec::new()).await
+}
+
+pub async fn spawn_gateway_server_with_extra_containers(
+    host: &str,
+    config: Arc<GatewayConfig>,
+    upstream_secret: String,
+    extra_mcp_containers: Vec<StartedExtraMcpContainer>,
+) -> Result<GatewayServerHandle> {
     tracing::info!(
         access_mode = ?config.access_mode,
         "access mode: binding only needed ports"
@@ -249,7 +282,8 @@ pub async fn spawn_gateway_server(
     };
     let bind_addr_display = bind_addr.to_string();
     let local_url = local_url_from_addr(bind_addr);
-    let app_state = build_gateway_state(Arc::clone(&config), upstream_secret)?;
+    let app_state =
+        build_gateway_state(Arc::clone(&config), upstream_secret, &extra_mcp_containers).await?;
     let (shutdown_tx, _) = watch::channel(false);
     let mut join_handles = Vec::new();
 
@@ -332,10 +366,11 @@ pub async fn spawn_configured_gateway_session(
         bootstrap_configured_runtime(Arc::clone(&config), launch_plan, startup_policy).await?;
 
     let (server, display_url) = if runtime.can_start_gateway() {
-        let server = spawn_gateway_server(
+        let server = spawn_gateway_server_with_extra_containers(
             host,
             Arc::clone(&runtime.config),
             runtime.upstream_secret.clone(),
+            runtime.extra_mcp_containers.clone(),
         )
         .await?;
         let local_url = server.local_url().to_string();
@@ -378,9 +413,10 @@ async fn bind_local_mcp_listener(config: &GatewayConfig) -> Result<Option<(TcpLi
     Ok(Some((listener, local_mcp.port)))
 }
 
-fn build_gateway_state(
+async fn build_gateway_state(
     config: Arc<GatewayConfig>,
     upstream_secret: String,
+    extra_mcp_containers: &[StartedExtraMcpContainer],
 ) -> Result<AppState<ReqwestMcpProxy>> {
     let registrar = Arc::new(GatewayRegistrar::new(
         &config.oauth.client_id,
@@ -399,7 +435,7 @@ fn build_gateway_state(
 
     let mcp_proxy = Arc::new(ReqwestMcpProxy::new());
     let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
-        mcp_proxy,
+        Arc::clone(&mcp_proxy),
         config.mcp_reverse_proxy.mcp_upstream_url.clone(),
         upstream_secret,
         config.hostname_validation.clone(),
@@ -407,7 +443,12 @@ fn build_gateway_state(
     let native_tools = Arc::new(NativeMcpToolRegistry::new(native_mcp_tools_from_config(
         config.as_ref(),
     )?));
-    let mcp_router = Arc::new(McpRouterUseCase::new(proxy_mcp, native_tools));
+    let extra_clients = build_extra_mcp_clients(Arc::clone(&mcp_proxy), extra_mcp_containers).await;
+    let mcp_router = Arc::new(McpRouterUseCase::new_with_extra_containers(
+        proxy_mcp,
+        native_tools,
+        extra_clients,
+    ));
 
     let app_state = AppState {
         registrar,
@@ -419,6 +460,68 @@ fn build_gateway_state(
     };
 
     Ok(app_state)
+}
+
+async fn build_extra_mcp_clients(
+    proxy: Arc<ReqwestMcpProxy>,
+    containers: &[StartedExtraMcpContainer],
+) -> Vec<Arc<RemoteMcpContainerClient<ReqwestMcpProxy>>> {
+    let mut clients = Vec::new();
+    for container in containers {
+        let mcp_url = extra_mcp_url(container);
+        let bearer_token = match extra_bearer_token(container) {
+            Ok(token) => token,
+            Err(error) => {
+                tracing::error!(
+                    container = %container.config.name,
+                    error = %error,
+                    "skipping extra MCP container client because bearer token could not be loaded"
+                );
+                continue;
+            }
+        };
+
+        match RemoteMcpContainerClient::initialize_and_cache_tools(
+            container.config.name.clone(),
+            mcp_url,
+            bearer_token,
+            Arc::clone(&proxy),
+        )
+        .await
+        {
+            Ok(client) => clients.push(Arc::new(client)),
+            Err(error) => {
+                tracing::error!(
+                    container = %container.config.name,
+                    error = %error,
+                    "skipping extra MCP container tools because initialize/tools-list failed"
+                );
+            }
+        }
+    }
+
+    clients
+}
+
+fn extra_mcp_url(container: &StartedExtraMcpContainer) -> String {
+    match &container.container_ip {
+        Some(container_ip) => format!(
+            "http://{}:{}/mcp",
+            container_ip, container.config.container_port
+        ),
+        None => format!("http://127.0.0.1:{}/mcp", container.host_port),
+    }
+}
+
+fn extra_bearer_token(container: &StartedExtraMcpContainer) -> Result<Option<String>> {
+    match &container.config.auth {
+        ExtraMcpContainerAuth::None => Ok(None),
+        ExtraMcpContainerAuth::BearerToken { secret_file, .. } => {
+            let token = std::fs::read_to_string(secret_file)
+                .with_context(|| format!("failed to read {}", secret_file.display()))?;
+            Ok(Some(token.trim().to_string()))
+        }
+    }
 }
 
 fn native_mcp_tools_from_config(config: &GatewayConfig) -> Result<Vec<Arc<dyn NativeMcpTool>>> {
@@ -479,7 +582,8 @@ mod tests {
     use std::path::PathBuf;
 
     use brain3_core::domain::model::{
-        AccessMode, GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
+        AccessMode, ContainerRuntime, ExtraMcpContainerAuth, ExtraMcpContainerConfig,
+        GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
         NativeAudioTranscriptionConfig, OAuthConfig,
     };
 
@@ -500,6 +604,73 @@ mod tests {
             tools.is_empty(),
             "missing whisper model file should prevent advertising transcribe_audio_file"
         );
+    }
+
+    #[test]
+    fn extra_mcp_url_uses_container_ip_when_available() {
+        let container = StartedExtraMcpContainer {
+            config: sample_extra_container_config(8420, ExtraMcpContainerAuth::None),
+            host_port: 18420,
+            container_ip: Some("172.18.0.2".into()),
+        };
+
+        assert_eq!(extra_mcp_url(&container), "http://172.18.0.2:8420/mcp");
+    }
+
+    #[test]
+    fn extra_mcp_url_uses_loopback_host_port_without_container_ip() {
+        let container = StartedExtraMcpContainer {
+            config: sample_extra_container_config(8420, ExtraMcpContainerAuth::None),
+            host_port: 18420,
+            container_ip: None,
+        };
+
+        assert_eq!(extra_mcp_url(&container), "http://127.0.0.1:18420/mcp");
+    }
+
+    #[test]
+    fn extra_bearer_token_reads_and_trims_secret_file() {
+        let secret_file = std::env::temp_dir().join(format!(
+            "brain3-extra-token-test-{}-{}.token",
+            std::process::id(),
+            "phase3"
+        ));
+        std::fs::write(&secret_file, "secret-token\n").expect("write secret");
+        let container = StartedExtraMcpContainer {
+            config: sample_extra_container_config(
+                8420,
+                ExtraMcpContainerAuth::BearerToken {
+                    secret_file,
+                    secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
+                },
+            ),
+            host_port: 18420,
+            container_ip: None,
+        };
+
+        assert_eq!(
+            extra_bearer_token(&container).expect("token should load"),
+            Some("secret-token".into())
+        );
+        if let ExtraMcpContainerAuth::BearerToken { secret_file, .. } = &container.config.auth {
+            let _ = std::fs::remove_file(secret_file);
+        }
+    }
+
+    fn sample_extra_container_config(
+        container_port: u16,
+        auth: ExtraMcpContainerAuth,
+    ) -> ExtraMcpContainerConfig {
+        ExtraMcpContainerConfig {
+            name: "fluensy_learn".into(),
+            runtime: ContainerRuntime::Docker,
+            image: "ghcr.io/example/fluensy-learn:latest".into(),
+            container_port,
+            host_port: None,
+            host_directory: "/tmp/fluensy-data".into(),
+            container_directory: "/data".into(),
+            auth,
+        }
     }
 
     fn gateway_config_with_native_audio(

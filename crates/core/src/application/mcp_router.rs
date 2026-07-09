@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 use crate::application::native_mcp_tool_registry::NativeMcpToolRegistry;
 use crate::application::proxy_mcp::ProxyMcpUseCase;
+use crate::application::remote_mcp_container_client::RemoteMcpContainerClient;
 use crate::application::validate_request::validate_host;
 use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
@@ -13,13 +14,23 @@ use crate::ports::native_mcp_tool::{NativeMcpToolError, NativeMcpToolOutput};
 pub struct McpRouterUseCase<P: McpProxyPort> {
     proxy: Arc<ProxyMcpUseCase<P>>,
     native_tools: Arc<NativeMcpToolRegistry>,
+    extra_containers: Vec<Arc<RemoteMcpContainerClient<P>>>,
 }
 
 impl<P: McpProxyPort> McpRouterUseCase<P> {
     pub fn new(proxy: Arc<ProxyMcpUseCase<P>>, native_tools: Arc<NativeMcpToolRegistry>) -> Self {
+        Self::new_with_extra_containers(proxy, native_tools, Vec::new())
+    }
+
+    pub fn new_with_extra_containers(
+        proxy: Arc<ProxyMcpUseCase<P>>,
+        native_tools: Arc<NativeMcpToolRegistry>,
+        extra_containers: Vec<Arc<RemoteMcpContainerClient<P>>>,
+    ) -> Self {
         Self {
             proxy,
             native_tools,
+            extra_containers,
         }
     }
 
@@ -92,10 +103,13 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
                     .proxy
                     .handle_unvalidated(request_host, method, path, query, headers, body)
                     .await?;
-                Ok(self.append_native_tool_schemas(response))
+                Ok(self.append_tool_schemas(response))
             }
             Some("tools/call") => {
                 if let Some(response) = self.maybe_call_native_tool(parsed_body.as_ref()).await? {
+                    return Ok(response);
+                }
+                if let Some(response) = self.maybe_call_extra_tool(parsed_body.as_ref()).await? {
                     return Ok(response);
                 }
 
@@ -154,9 +168,45 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
         Ok(Some(native_tool_response(request, output)?))
     }
 
-    fn append_native_tool_schemas(&self, response: McpProxyResponse) -> McpProxyResponse {
+    async fn maybe_call_extra_tool(
+        &self,
+        request: Option<&Value>,
+    ) -> Result<Option<McpProxyResponse>, ProxyError> {
+        let Some(request) = request else {
+            return Ok(None);
+        };
+        let Some(params) = request.get("params").and_then(Value::as_object) else {
+            return Ok(None);
+        };
+        let Some(name) = params.get("name").and_then(Value::as_str) else {
+            return Ok(None);
+        };
+
+        for client in &self.extra_containers {
+            if let Some(unprefixed_name) = client.strip_prefix(name) {
+                tracing::info!(
+                    container = %client.container_name(),
+                    prefixed_tool_name = name,
+                    tool_name = unprefixed_name,
+                    request_id = ?request.get("id"),
+                    "MCP router: routing extra MCP tool call"
+                );
+                return Ok(Some(client.call_tool(request, unprefixed_name).await?));
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn append_tool_schemas(&self, response: McpProxyResponse) -> McpProxyResponse {
         let native_schemas = self.native_tools.list_schemas();
-        if native_schemas.is_empty() {
+        let extra_schemas = self
+            .extra_containers
+            .iter()
+            .flat_map(|client| client.prefixed_tool_schemas())
+            .collect::<Vec<_>>();
+
+        if native_schemas.is_empty() && extra_schemas.is_empty() {
             return response;
         }
 
@@ -175,7 +225,9 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
         };
 
         let native_tool_count = native_schemas.len();
+        let extra_tool_count = extra_schemas.len();
         tools.extend(native_schemas);
+        tools.extend(extra_schemas);
         let total_tool_count = tools.len();
 
         let Ok(new_body) = serde_json::to_vec(&body) else {
@@ -185,8 +237,9 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
 
         tracing::info!(
             native_tool_count = native_tool_count,
+            extra_tool_count = extra_tool_count,
             total_tool_count = total_tool_count,
-            "MCP router: appended native MCP tools to tools/list response"
+            "MCP router: appended native and extra MCP tools to tools/list response"
         );
 
         McpProxyResponse {
@@ -251,6 +304,7 @@ mod tests {
 
     use crate::application::native_mcp_tool_registry::NativeMcpToolRegistry;
     use crate::application::proxy_mcp::ProxyMcpUseCase;
+    use crate::application::remote_mcp_container_client::RemoteMcpContainerClient;
     use crate::domain::errors::ProxyError;
     use crate::domain::model::HostnameValidationConfig;
     use crate::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
@@ -365,6 +419,67 @@ mod tests {
         )
     }
 
+    fn router_with_tool_and_extra(
+        proxy_body: Vec<u8>,
+        extra_proxy: Arc<CapturingProxy>,
+        extra_client: Arc<RemoteMcpContainerClient<CapturingProxy>>,
+    ) -> (
+        McpRouterUseCase<CapturingProxy>,
+        Arc<Mutex<Vec<McpProxyRequest>>>,
+        Arc<FakeNativeTool>,
+        Arc<Mutex<Vec<McpProxyRequest>>>,
+    ) {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let proxy = Arc::new(CapturingProxy {
+            captured: Arc::clone(&captured),
+            response_body: proxy_body,
+        });
+        let proxy_use_case = Arc::new(ProxyMcpUseCase::new(
+            proxy,
+            "http://127.0.0.1:8420".into(),
+            "shared-secret".into(),
+            HostnameValidationConfig {
+                expected_host: None,
+                enforce: true,
+            },
+        ));
+        let tool = Arc::new(FakeNativeTool::new());
+        let registry = NativeMcpToolRegistry::new(vec![tool.clone() as Arc<dyn NativeMcpTool>]);
+        let extra_captured = Arc::clone(&extra_proxy.captured);
+        (
+            McpRouterUseCase::new_with_extra_containers(
+                proxy_use_case,
+                Arc::new(registry),
+                vec![extra_client],
+            ),
+            captured,
+            tool,
+            extra_captured,
+        )
+    }
+
+    async fn initialized_extra_client(
+        response_body: Vec<u8>,
+    ) -> (
+        Arc<CapturingProxy>,
+        Arc<RemoteMcpContainerClient<CapturingProxy>>,
+    ) {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let proxy = Arc::new(CapturingProxy {
+            captured,
+            response_body,
+        });
+        let client = RemoteMcpContainerClient::initialize_and_cache_tools(
+            "fluensy_learn".into(),
+            "http://127.0.0.1:18420/mcp".into(),
+            None,
+            Arc::clone(&proxy),
+        )
+        .await
+        .expect("extra client should initialize");
+        (proxy, Arc::new(client))
+    }
+
     #[tokio::test]
     async fn tools_call_for_native_tool_bypasses_proxy_and_returns_local_result() {
         let (router, captured, tool) =
@@ -471,6 +586,148 @@ mod tests {
                 .all(|(name, _)| !name.eq_ignore_ascii_case("content-length")),
             "augmented tools/list responses must not retain the upstream content-length"
         );
+    }
+
+    #[tokio::test]
+    async fn tools_list_appends_prefixed_extra_container_tool_schemas() {
+        let (extra_proxy, extra_client) = initialized_extra_client(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 99,
+                "result": {
+                    "tools": [
+                        {
+                            "name": "search_deck",
+                            "description": "Search deck",
+                            "inputSchema": { "type": "object" }
+                        }
+                    ]
+                }
+            })
+            .to_string()
+            .into_bytes(),
+        )
+        .await;
+        let (router, captured, _, extra_captured) = router_with_tool_and_extra(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "result": {
+                    "tools": [
+                        {
+                            "name": "container_tool",
+                            "description": "Container tool",
+                            "inputSchema": { "type": "object" }
+                        }
+                    ]
+                }
+            })
+            .to_string()
+            .into_bytes(),
+            extra_proxy,
+            extra_client,
+        );
+
+        let response = router
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/list"
+                })
+                .to_string()
+                .into_bytes(),
+            )
+            .await
+            .expect("tools/list should succeed");
+
+        assert_eq!(
+            captured.lock().expect("capture lock should succeed").len(),
+            1,
+            "vault proxy should still receive tools/list"
+        );
+        assert_eq!(
+            extra_captured
+                .lock()
+                .expect("extra capture lock should succeed")
+                .len(),
+            2,
+            "extra client should only have startup initialize and tools/list calls"
+        );
+
+        let body: Value =
+            serde_json::from_slice(&response.body).expect("response body should be JSON");
+        let tool_names = body["result"]["tools"]
+            .as_array()
+            .expect("tools should be an array")
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap_or_default())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            tool_names,
+            vec![
+                "container_tool",
+                "fake_native_tool",
+                "fluensy_learn__search_deck"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_call_for_prefixed_extra_tool_bypasses_vault_proxy_and_strips_prefix() {
+        let (extra_proxy, extra_client) = initialized_extra_client(
+            br#"{"jsonrpc":"2.0","id":99,"result":{"tools":[]}}"#.to_vec(),
+        )
+        .await;
+        let (router, captured, _, extra_captured) = router_with_tool_and_extra(
+            br#"{"jsonrpc":"2.0","result":{}}"#.to_vec(),
+            extra_proxy,
+            extra_client,
+        );
+
+        let response = router
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 7,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "fluensy_learn__search_deck",
+                        "arguments": { "query": "rust" }
+                    }
+                })
+                .to_string()
+                .into_bytes(),
+            )
+            .await
+            .expect("extra tools/call should succeed");
+
+        assert_eq!(response.status, 200);
+        assert!(
+            captured
+                .lock()
+                .expect("vault capture lock should succeed")
+                .is_empty(),
+            "vault proxy should not receive prefixed extra tool call"
+        );
+        let extra_requests = extra_captured
+            .lock()
+            .expect("extra capture lock should succeed");
+        assert_eq!(extra_requests.len(), 3);
+        let body: Value =
+            serde_json::from_slice(&extra_requests[2].body).expect("request should be JSON");
+        assert_eq!(body["params"]["name"], "search_deck");
+        assert_eq!(body["params"]["arguments"]["query"], "rust");
     }
 
     #[tokio::test]
