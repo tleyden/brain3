@@ -3,16 +3,16 @@ use std::sync::Arc;
 use anyhow::{bail, Result};
 use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{
-    ContainerNetworkIsolationStrategy, ExtraMcpContainerConfig, GatewayConfig, TunnelConfig,
+    ContainerNetworkIsolationStrategy, GatewayConfig, PluginMcpContainerConfig, TunnelConfig,
 };
 use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::tunnel::TunnelPort;
 
+use crate::config::brain3_yaml::load_plugin_mcp_containers_config;
 use crate::config::log_config;
-use crate::config::mcp_containers_config::load_extra_mcp_containers_config;
 use crate::container::startup::{
-    ensure_extra_mcp_container, ensure_mcp_container, installation_scope_id,
-    stop_extra_mcp_container, stop_mcp_container, StartedExtraMcpContainer,
+    ensure_mcp_container, ensure_plugin_mcp_container, installation_scope_id, stop_mcp_container,
+    stop_plugin_mcp_container, StartedPluginMcpContainer,
 };
 use crate::tunnel::start_tunnel;
 
@@ -43,7 +43,7 @@ pub struct RuntimeBootstrap {
     pub public_url: Option<String>,
     pub container_status: StartupStatus,
     pub tunnel_status: StartupStatus,
-    pub extra_mcp_containers: Vec<StartedExtraMcpContainer>,
+    pub plugin_mcp_containers: Vec<StartedPluginMcpContainer>,
     managed_container_started: bool,
     tunnel: Option<Box<dyn TunnelPort>>,
 }
@@ -65,7 +65,7 @@ impl RuntimeBootstrap {
             public_url,
             container_status,
             tunnel_status,
-            extra_mcp_containers: Vec::new(),
+            plugin_mcp_containers: Vec::new(),
             managed_container_started,
             tunnel: None,
         }
@@ -82,13 +82,13 @@ impl RuntimeBootstrap {
     pub async fn shutdown_managed_runtime(&mut self) {
         self.stop_tunnel().await;
 
-        for extra in &self.extra_mcp_containers {
-            if let Err(error) = stop_extra_mcp_container(&extra.config).await {
+        for plugin in &self.plugin_mcp_containers {
+            if let Err(error) = stop_plugin_mcp_container(&plugin.config).await {
                 tracing::warn!(
-                    container = %extra.config.name,
-                    runtime = ?extra.config.runtime,
+                    container = %plugin.config.name,
+                    runtime = ?plugin.config.runtime,
                     error = %error,
-                    "failed to stop managed extra MCP container during shutdown; continuing exit"
+                    "failed to stop managed Plugin MCP Container during shutdown; continuing exit"
                 );
             }
         }
@@ -303,8 +303,8 @@ pub async fn bootstrap_configured_runtime(
         container_status
     };
 
-    let extra_mcp_containers = if container_status.allows_gateway_start() {
-        start_extra_mcp_containers(
+    let plugin_mcp_containers = if container_status.allows_gateway_start() {
+        start_plugin_mcp_containers(
             &launch_plan.paths.app_home,
             startup_policy,
             installation_id.as_str(),
@@ -313,7 +313,7 @@ pub async fn bootstrap_configured_runtime(
     } else {
         tracing::debug!(
             container_status = ?container_status,
-            "skipping extra MCP containers because core MCP container is not ready"
+            "skipping Plugin MCP Containers because core MCP container is not ready"
         );
         Vec::new()
     };
@@ -360,23 +360,23 @@ pub async fn bootstrap_configured_runtime(
         public_url,
         container_status,
         tunnel_status,
-        extra_mcp_containers,
+        plugin_mcp_containers,
         managed_container_started,
         tunnel: tunnel_guard,
     })
 }
 
-async fn start_extra_mcp_containers(
+async fn start_plugin_mcp_containers(
     app_home: &std::path::Path,
     startup_policy: RuntimeStartupPolicy,
     installation_id: &str,
-) -> Vec<StartedExtraMcpContainer> {
-    let config_path = app_home.join("mcp_containers.yaml");
-    let configs = load_extra_mcp_containers_config(&config_path);
+) -> Vec<StartedPluginMcpContainer> {
+    let config_path = app_home.join("brain3.yaml");
+    let configs = load_plugin_mcp_containers_config(&config_path);
     if configs.is_empty() {
         tracing::debug!(
             path = %config_path.display(),
-            "no extra MCP containers configured"
+            "no Plugin MCP Containers configured"
         );
         return Vec::new();
     }
@@ -384,25 +384,25 @@ async fn start_extra_mcp_containers(
     tracing::info!(
         path = %config_path.display(),
         count = configs.len(),
-        "loaded extra MCP container configs"
+        "loaded Plugin MCP Container configs"
     );
 
     let mut started = Vec::new();
     for config in configs {
-        match ensure_extra_mcp_container(&config, startup_policy, installation_id).await {
+        match ensure_plugin_mcp_container(&config, startup_policy, installation_id).await {
             Ok(container) => {
                 tracing::info!(
                     container = %container.config.name,
                     host_port = container.host_port,
                     container_ip = ?container.container_ip,
-                    "extra MCP container ready"
+                    "Plugin MCP Container ready"
                 );
                 started.push(container);
             }
             Err(error) => {
-                log_extra_container_startup_failure(&config, &error);
+                log_plugin_container_startup_failure(&config, &error);
                 if error.started_container() {
-                    stop_failed_extra_container(&config).await;
+                    stop_failed_plugin_container(&config).await;
                 }
             }
         }
@@ -411,31 +411,31 @@ async fn start_extra_mcp_containers(
     started
 }
 
-fn log_extra_container_startup_failure(config: &ExtraMcpContainerConfig, error: &ContainerError) {
+fn log_plugin_container_startup_failure(config: &PluginMcpContainerConfig, error: &ContainerError) {
     let summary = error.summary();
     if let Some(logs) = error.recent_logs() {
         tracing::error!(
             container = %config.name,
             summary,
             logs = %logs,
-            "extra MCP container startup failed; continuing without it"
+            "Plugin MCP Container startup failed; continuing without it"
         );
     } else {
         tracing::error!(
             container = %config.name,
             summary,
-            "extra MCP container startup failed; continuing without it"
+            "Plugin MCP Container startup failed; continuing without it"
         );
     }
 }
 
-async fn stop_failed_extra_container(config: &ExtraMcpContainerConfig) {
-    if let Err(error) = stop_extra_mcp_container(config).await {
+async fn stop_failed_plugin_container(config: &PluginMcpContainerConfig) {
+    if let Err(error) = stop_plugin_mcp_container(config).await {
         tracing::warn!(
             container = %config.name,
             runtime = ?config.runtime,
             error = %error,
-            "failed to stop extra MCP container after startup failure; continuing gateway startup"
+            "failed to stop Plugin MCP Container after startup failure; continuing gateway startup"
         );
     }
 }

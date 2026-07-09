@@ -1,6 +1,7 @@
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use brain3_core::application::mcp_router::McpRouterUseCase;
@@ -13,12 +14,12 @@ use tokio::task::JoinHandle;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::remote_mcp_container_client::RemoteMcpContainerClient;
-use brain3_core::domain::model::{AccessMode, ExtraMcpContainerAuth, GatewayConfig};
+use brain3_core::domain::model::{AccessMode, GatewayConfig, PluginMcpContainerAuth};
 use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::native_mcp_tool::NativeMcpTool;
 use brain3_platform::config::env_file::EnvFileConfigAdapter;
-use brain3_platform::container::startup::StartedExtraMcpContainer;
+use brain3_platform::container::startup::StartedPluginMcpContainer;
 use brain3_platform::http::rate_limit::OAuthRateLimiter;
 use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::{build_local_router, build_router};
@@ -31,6 +32,9 @@ use brain3_platform::runtime::{bootstrap_configured_runtime, RuntimeBootstrap};
 use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
 use crate::{apply_runtime_overrides, release, RuntimeOverrides};
+
+const PLUGIN_MCP_CLIENT_INIT_TIMEOUT: Duration = Duration::from_secs(15);
+const PLUGIN_MCP_CLIENT_INIT_RETRY_INTERVAL: Duration = Duration::from_millis(250);
 
 pub struct ConfiguredGatewaySession {
     pub runtime: RuntimeBootstrap,
@@ -107,7 +111,7 @@ pub async fn run_gateway_server_until<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    run_gateway_server_until_with_extra_containers(
+    run_gateway_server_until_with_plugin_containers(
         host,
         config,
         upstream_secret,
@@ -117,11 +121,11 @@ where
     .await
 }
 
-pub async fn run_gateway_server_until_with_extra_containers<F>(
+pub async fn run_gateway_server_until_with_plugin_containers<F>(
     host: &str,
     config: Arc<GatewayConfig>,
     upstream_secret: String,
-    extra_mcp_containers: Vec<StartedExtraMcpContainer>,
+    plugin_mcp_containers: Vec<StartedPluginMcpContainer>,
     shutdown: F,
 ) -> Result<()>
 where
@@ -143,7 +147,7 @@ where
         .and_then(|(listener, _)| listener.local_addr().ok())
         .map(local_url_from_addr);
     let app_state =
-        build_gateway_state(Arc::clone(&config), upstream_secret, &extra_mcp_containers).await?;
+        build_gateway_state(Arc::clone(&config), upstream_secret, &plugin_mcp_containers).await?;
     let (shutdown_tx, _) = watch::channel(false);
 
     tracing::info!(
@@ -245,14 +249,14 @@ pub async fn spawn_gateway_server(
     config: Arc<GatewayConfig>,
     upstream_secret: String,
 ) -> Result<GatewayServerHandle> {
-    spawn_gateway_server_with_extra_containers(host, config, upstream_secret, Vec::new()).await
+    spawn_gateway_server_with_plugin_containers(host, config, upstream_secret, Vec::new()).await
 }
 
-pub async fn spawn_gateway_server_with_extra_containers(
+pub async fn spawn_gateway_server_with_plugin_containers(
     host: &str,
     config: Arc<GatewayConfig>,
     upstream_secret: String,
-    extra_mcp_containers: Vec<StartedExtraMcpContainer>,
+    plugin_mcp_containers: Vec<StartedPluginMcpContainer>,
 ) -> Result<GatewayServerHandle> {
     tracing::info!(
         access_mode = ?config.access_mode,
@@ -283,7 +287,7 @@ pub async fn spawn_gateway_server_with_extra_containers(
     let bind_addr_display = bind_addr.to_string();
     let local_url = local_url_from_addr(bind_addr);
     let app_state =
-        build_gateway_state(Arc::clone(&config), upstream_secret, &extra_mcp_containers).await?;
+        build_gateway_state(Arc::clone(&config), upstream_secret, &plugin_mcp_containers).await?;
     let (shutdown_tx, _) = watch::channel(false);
     let mut join_handles = Vec::new();
 
@@ -366,11 +370,11 @@ pub async fn spawn_configured_gateway_session(
         bootstrap_configured_runtime(Arc::clone(&config), launch_plan, startup_policy).await?;
 
     let (server, display_url) = if runtime.can_start_gateway() {
-        let server = spawn_gateway_server_with_extra_containers(
+        let server = spawn_gateway_server_with_plugin_containers(
             host,
             Arc::clone(&runtime.config),
             runtime.upstream_secret.clone(),
-            runtime.extra_mcp_containers.clone(),
+            runtime.plugin_mcp_containers.clone(),
         )
         .await?;
         let local_url = server.local_url().to_string();
@@ -416,7 +420,7 @@ async fn bind_local_mcp_listener(config: &GatewayConfig) -> Result<Option<(TcpLi
 async fn build_gateway_state(
     config: Arc<GatewayConfig>,
     upstream_secret: String,
-    extra_mcp_containers: &[StartedExtraMcpContainer],
+    plugin_mcp_containers: &[StartedPluginMcpContainer],
 ) -> Result<AppState<ReqwestMcpProxy>> {
     let registrar = Arc::new(GatewayRegistrar::new(
         &config.oauth.client_id,
@@ -443,11 +447,12 @@ async fn build_gateway_state(
     let native_tools = Arc::new(NativeMcpToolRegistry::new(native_mcp_tools_from_config(
         config.as_ref(),
     )?));
-    let extra_clients = build_extra_mcp_clients(Arc::clone(&mcp_proxy), extra_mcp_containers).await;
-    let mcp_router = Arc::new(McpRouterUseCase::new_with_extra_containers(
+    let plugin_clients =
+        build_plugin_mcp_clients(Arc::clone(&mcp_proxy), plugin_mcp_containers).await;
+    let mcp_router = Arc::new(McpRouterUseCase::new_with_plugin_containers(
         proxy_mcp,
         native_tools,
-        extra_clients,
+        plugin_clients,
     ));
 
     let app_state = AppState {
@@ -462,26 +467,26 @@ async fn build_gateway_state(
     Ok(app_state)
 }
 
-async fn build_extra_mcp_clients(
+async fn build_plugin_mcp_clients(
     proxy: Arc<ReqwestMcpProxy>,
-    containers: &[StartedExtraMcpContainer],
+    containers: &[StartedPluginMcpContainer],
 ) -> Vec<Arc<RemoteMcpContainerClient<ReqwestMcpProxy>>> {
     let mut clients = Vec::new();
     for container in containers {
-        let mcp_url = extra_mcp_url(container);
-        let bearer_token = match extra_bearer_token(container) {
+        let mcp_url = plugin_mcp_url(container);
+        let bearer_token = match plugin_bearer_token(container) {
             Ok(token) => token,
             Err(error) => {
                 tracing::error!(
                     container = %container.config.name,
                     error = %error,
-                    "skipping extra MCP container client because bearer token could not be loaded"
+                    "skipping Plugin MCP Container client because bearer token could not be loaded"
                 );
                 continue;
             }
         };
 
-        match RemoteMcpContainerClient::initialize_and_cache_tools(
+        match initialize_plugin_mcp_client_with_retry(
             container.config.name.clone(),
             mcp_url,
             bearer_token,
@@ -494,7 +499,7 @@ async fn build_extra_mcp_clients(
                 tracing::error!(
                     container = %container.config.name,
                     error = %error,
-                    "skipping extra MCP container tools because initialize/tools-list failed"
+                    "skipping Plugin MCP Container tools because initialize/tools-list failed"
                 );
             }
         }
@@ -503,7 +508,43 @@ async fn build_extra_mcp_clients(
     clients
 }
 
-fn extra_mcp_url(container: &StartedExtraMcpContainer) -> String {
+async fn initialize_plugin_mcp_client_with_retry(
+    container_name: String,
+    mcp_url: String,
+    bearer_token: Option<String>,
+    proxy: Arc<ReqwestMcpProxy>,
+) -> Result<RemoteMcpContainerClient<ReqwestMcpProxy>> {
+    let started_at = Instant::now();
+    let deadline = started_at + PLUGIN_MCP_CLIENT_INIT_TIMEOUT;
+    let mut attempt = 1_u32;
+
+    loop {
+        match RemoteMcpContainerClient::initialize_and_cache_tools(
+            container_name.clone(),
+            mcp_url.clone(),
+            bearer_token.clone(),
+            Arc::clone(&proxy),
+        )
+        .await
+        {
+            Ok(client) => return Ok(client),
+            Err(error) if Instant::now() < deadline => {
+                tracing::warn!(
+                    container = %container_name,
+                    attempt,
+                    elapsed_ms = started_at.elapsed().as_millis() as u64,
+                    error = %error,
+                    "Plugin MCP Container initialize/tools-list failed; retrying"
+                );
+                attempt += 1;
+                tokio::time::sleep(PLUGIN_MCP_CLIENT_INIT_RETRY_INTERVAL).await;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
+fn plugin_mcp_url(container: &StartedPluginMcpContainer) -> String {
     match &container.container_ip {
         Some(container_ip) => format!(
             "http://{}:{}/mcp",
@@ -513,10 +554,10 @@ fn extra_mcp_url(container: &StartedExtraMcpContainer) -> String {
     }
 }
 
-fn extra_bearer_token(container: &StartedExtraMcpContainer) -> Result<Option<String>> {
+fn plugin_bearer_token(container: &StartedPluginMcpContainer) -> Result<Option<String>> {
     match &container.config.auth {
-        ExtraMcpContainerAuth::None => Ok(None),
-        ExtraMcpContainerAuth::BearerToken { secret_file, .. } => {
+        PluginMcpContainerAuth::None => Ok(None),
+        PluginMcpContainerAuth::BearerToken { secret_file, .. } => {
             let token = std::fs::read_to_string(secret_file)
                 .with_context(|| format!("failed to read {}", secret_file.display()))?;
             Ok(Some(token.trim().to_string()))
@@ -582,9 +623,9 @@ mod tests {
     use std::path::PathBuf;
 
     use brain3_core::domain::model::{
-        AccessMode, ContainerRuntime, ExtraMcpContainerAuth, ExtraMcpContainerConfig,
-        GatewayConfig, HostnameValidationConfig, MCPReverseProxyConfig,
-        NativeAudioTranscriptionConfig, OAuthConfig,
+        AccessMode, ContainerRuntime, GatewayConfig, HostnameValidationConfig,
+        MCPReverseProxyConfig, NativeAudioTranscriptionConfig, OAuthConfig, PluginMcpContainerAuth,
+        PluginMcpContainerConfig,
     };
 
     use super::*;
@@ -607,39 +648,39 @@ mod tests {
     }
 
     #[test]
-    fn extra_mcp_url_uses_container_ip_when_available() {
-        let container = StartedExtraMcpContainer {
-            config: sample_extra_container_config(8420, ExtraMcpContainerAuth::None),
+    fn plugin_mcp_url_uses_container_ip_when_available() {
+        let container = StartedPluginMcpContainer {
+            config: sample_plugin_container_config(8420, PluginMcpContainerAuth::None),
             host_port: 18420,
             container_ip: Some("172.18.0.2".into()),
         };
 
-        assert_eq!(extra_mcp_url(&container), "http://172.18.0.2:8420/mcp");
+        assert_eq!(plugin_mcp_url(&container), "http://172.18.0.2:8420/mcp");
     }
 
     #[test]
-    fn extra_mcp_url_uses_loopback_host_port_without_container_ip() {
-        let container = StartedExtraMcpContainer {
-            config: sample_extra_container_config(8420, ExtraMcpContainerAuth::None),
+    fn plugin_mcp_url_uses_loopback_host_port_without_container_ip() {
+        let container = StartedPluginMcpContainer {
+            config: sample_plugin_container_config(8420, PluginMcpContainerAuth::None),
             host_port: 18420,
             container_ip: None,
         };
 
-        assert_eq!(extra_mcp_url(&container), "http://127.0.0.1:18420/mcp");
+        assert_eq!(plugin_mcp_url(&container), "http://127.0.0.1:18420/mcp");
     }
 
     #[test]
-    fn extra_bearer_token_reads_and_trims_secret_file() {
+    fn plugin_bearer_token_reads_and_trims_secret_file() {
         let secret_file = std::env::temp_dir().join(format!(
-            "brain3-extra-token-test-{}-{}.token",
+            "brain3-plugin-token-test-{}-{}.token",
             std::process::id(),
             "phase3"
         ));
         std::fs::write(&secret_file, "secret-token\n").expect("write secret");
-        let container = StartedExtraMcpContainer {
-            config: sample_extra_container_config(
+        let container = StartedPluginMcpContainer {
+            config: sample_plugin_container_config(
                 8420,
-                ExtraMcpContainerAuth::BearerToken {
+                PluginMcpContainerAuth::BearerToken {
                     secret_file,
                     secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
                 },
@@ -649,19 +690,19 @@ mod tests {
         };
 
         assert_eq!(
-            extra_bearer_token(&container).expect("token should load"),
+            plugin_bearer_token(&container).expect("token should load"),
             Some("secret-token".into())
         );
-        if let ExtraMcpContainerAuth::BearerToken { secret_file, .. } = &container.config.auth {
+        if let PluginMcpContainerAuth::BearerToken { secret_file, .. } = &container.config.auth {
             let _ = std::fs::remove_file(secret_file);
         }
     }
 
-    fn sample_extra_container_config(
+    fn sample_plugin_container_config(
         container_port: u16,
-        auth: ExtraMcpContainerAuth,
-    ) -> ExtraMcpContainerConfig {
-        ExtraMcpContainerConfig {
+        auth: PluginMcpContainerAuth,
+    ) -> PluginMcpContainerConfig {
+        PluginMcpContainerConfig {
             name: "fluensy_learn".into(),
             runtime: ContainerRuntime::Docker,
             image: "ghcr.io/example/fluensy-learn:latest".into(),

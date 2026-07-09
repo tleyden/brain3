@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::io::{self, BufRead, BufReader, Read};
+use std::net::TcpListener as StdTcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
@@ -43,6 +44,8 @@ const OAUTH_PASSWORD: &str = "e2e-test-password";
 const OAUTH_REDIRECT_URI: &str = "https://claude.ai/api/mcp/auth_callback";
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(10);
 const NETWORKED_E2E_TIMEOUT: Duration = Duration::from_secs(15);
+const HELLO_MCP_CONTAINER_NAME: &str = "hello_mcp";
+const HELLO_MCP_BEARER_TOKEN: &str = "e2e-hello-mcp-token";
 const WHISPER_MODEL_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(600);
 const DEFAULT_WHISPER_MODEL_URL: &str =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin";
@@ -85,6 +88,7 @@ struct TempTestDir {
     env_file: PathBuf,
     brain3_db: PathBuf,
     cloudflared_shim_dir: PathBuf,
+    container_host_port: u16,
     tunnel_mode: TunnelMode,
 }
 
@@ -99,6 +103,7 @@ impl TempTestDir {
         let cloudflared_shim_dir = root.join("bin");
         fs::create_dir_all(&vault)?;
         fs::create_dir_all(&cloudflared_shim_dir)?;
+        let container_host_port = pick_free_loopback_port()?;
 
         let temp = Self {
             env_file: root.join(".env"),
@@ -106,6 +111,7 @@ impl TempTestDir {
             root,
             vault,
             cloudflared_shim_dir,
+            container_host_port,
             tunnel_mode,
         };
         if tunnel_mode.uses_cloudflared_shim() {
@@ -144,6 +150,7 @@ impl TempTestDir {
              B3_CONTAINER_IMAGE_REPO=brain3-mcp-vault-tools\n\
              B3_CONTAINER_IMAGE_TAG=e2e-local\n\
              B3_UPSTREAM_SHARED_SECRET=e2e-test-upstream-secret\n\
+             B3_CONTAINER_HOST_PORT={}\n\
              B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=false\n\
              B3_LOCAL_MCP_PORT={LOCAL_MCP_PORT}\n\
              LOCAL_GATEWAY_MCP_BEARER_TOKEN={LOCAL_BEARER_TOKEN}\n\
@@ -152,6 +159,7 @@ impl TempTestDir {
             self.brain3_db.display(),
             self.tunnel_mode.quick_tunnel_env_value(),
             self.vault.display(),
+            self.container_host_port,
             self.tunnel_mode.enforce_hostname_check_env_value(),
         );
         for (key, value) in extra {
@@ -161,6 +169,32 @@ impl TempTestDir {
             env_file.push('\n');
         }
         fs::write(&self.env_file, env_file)
+    }
+
+    fn write_brain3_yaml_with_hello_mcp(&self) -> io::Result<()> {
+        let host_directory = self.root.join("hello-mcp-data");
+        fs::create_dir_all(&host_directory)?;
+        let secret_file = self.root.join("hello_mcp.token");
+        fs::write(&secret_file, format!("{HELLO_MCP_BEARER_TOKEN}\n"))?;
+        fs::write(
+            self.root.join("brain3.yaml"),
+            format!(
+                r#"plugin_mcp_containers:
+  - name: {HELLO_MCP_CONTAINER_NAME}
+    platform: docker
+    image: brain3-e2e-hello-mcp
+    tag: e2e-local
+    port: 8420
+    host_directory: {}
+    container_directory: /data
+    auth:
+      type: bearer_token
+      secret_file: {}
+"#,
+                host_directory.display(),
+                secret_file.display()
+            ),
+        )
     }
 
     fn path_with_shim(&self) -> String {
@@ -173,6 +207,14 @@ impl TempTestDir {
             .to_string_lossy()
             .into_owned()
     }
+}
+
+fn pick_free_loopback_port() -> io::Result<u16> {
+    StdTcpListener::bind(("127.0.0.1", 0)).and_then(|listener| {
+        let port = listener.local_addr()?.port();
+        drop(listener);
+        Ok(port)
+    })
 }
 
 #[test]
@@ -268,6 +310,10 @@ impl Brain3Process {
             .env("B3_CONTAINER_IMAGE_REPO", "brain3-mcp-vault-tools")
             .env("B3_CONTAINER_IMAGE_TAG", "e2e-local")
             .env("B3_UPSTREAM_SHARED_SECRET", "e2e-test-upstream-secret")
+            .env(
+                "B3_CONTAINER_HOST_PORT",
+                temp.container_host_port.to_string(),
+            )
             .env("B3_CONTAINER_INTERNAL_NETWORK_ISOLATION", "false")
             .env("B3_LOCAL_MCP_PORT", LOCAL_MCP_PORT.to_string())
             .env("LOCAL_GATEWAY_MCP_BEARER_TOKEN", LOCAL_BEARER_TOKEN)
@@ -762,6 +808,43 @@ async fn e2e_smoke_4_local_mcp_transcribes_tts_audio() -> Result<(), Box<dyn std
             "Imagine you just close a desktop app, right? You think your work is done for the day. Oh, but it is not. No, it's not. Because in the background, this silent, invisible AI just continues to devour your laptop's GPU. Yeah, your battery just drains in minutes. Exactly. The fans are screaming and the system just eventually",
             "actual transcript: {transcript:?}"
         );
+
+        client.cancel().await?;
+    }
+
+    assert_no_container_residue().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn e2e_smoke_5_plugin_mcp_container() -> Result<(), Box<dyn std::error::Error>> {
+    let temp = TempTestDir::create(TunnelMode::Disabled)?;
+    temp.write_env_file()?;
+    temp.write_brain3_yaml_with_hello_mcp()?;
+
+    {
+        let gateway = Brain3Process::spawn(&temp, TunnelMode::Disabled).await?;
+        let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
+        assert_container_running_and_vault_visible(&gateway).await?;
+        let client = connect_local_mcp().await?;
+
+        let tools = client.list_tools(Default::default()).await?;
+        let tool_names = tools
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_ref())
+            .collect::<BTreeSet<_>>();
+        assert!(
+            tool_names.contains("vault_list"),
+            "vault tools should still be present alongside Plugin MCP Container tools: {tool_names:?}"
+        );
+        assert!(
+            tool_names.contains("hello_mcp__hello"),
+            "Plugin MCP Container tool should be advertised with container prefix: {tool_names:?}"
+        );
+
+        let hello = call_tool_text(&client, "hello_mcp__hello", json!({})).await?;
+        assert_eq!(hello, "hello world");
 
         client.cancel().await?;
     }
@@ -1514,20 +1597,35 @@ fn tool_result_value_json(value: &Value) -> Result<Value, Box<dyn std::error::Er
 async fn assert_no_container_residue() -> Result<(), Box<dyn std::error::Error>> {
     let deadline = Instant::now() + Duration::from_secs(15);
     let mut last_output = String::new();
+    let managed_names = [CONTAINER_NAME, HELLO_MCP_CONTAINER_NAME];
 
     while Instant::now() < deadline {
-        let output = Command::new("docker")
-            .args([
-                "ps",
-                "-a",
-                "--filter",
-                &format!("name={CONTAINER_NAME}"),
-                "--format",
-                "{{.Names}}",
-            ])
-            .output()?;
-        last_output = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if output.status.success() && last_output.is_empty() {
+        let mut residues = Vec::new();
+        for name in managed_names {
+            let output = Command::new("docker")
+                .args([
+                    "ps",
+                    "-a",
+                    "--filter",
+                    &format!("name={name}"),
+                    "--format",
+                    "{{.Names}}",
+                ])
+                .output()?;
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                residues.push(format!("docker ps failed for {name}: {stderr}"));
+            } else if !stdout.is_empty() {
+                residues.push(stdout);
+            }
+        }
+        last_output = residues
+            .into_iter()
+            .filter(|name| !name.is_empty())
+            .collect::<Vec<_>>()
+            .join(", ");
+        if last_output.is_empty() {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(250)).await;

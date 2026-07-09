@@ -40,7 +40,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             container = %client.container_name,
             mcp_url = %client.mcp_url,
             bearer_token_configured = client.bearer_token.is_some(),
-            "initializing extra MCP container client"
+            "initializing Plugin MCP Container client"
         );
         client.initialize().await?;
         let tool_schemas = client.fetch_prefixed_tool_schemas().await?;
@@ -48,7 +48,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
         tracing::info!(
             container = %client.container_name,
             tool_count = tool_schemas.len(),
-            "cached extra MCP container tool schemas"
+            "cached Plugin MCP Container tool schemas"
         );
 
         Ok(Self {
@@ -83,7 +83,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
         let mut forwarded = request.clone();
         let Some(params) = forwarded.get_mut("params").and_then(Value::as_object_mut) else {
             return Err(ProxyError::BadGateway(
-                "extra MCP tools/call request missing params object".into(),
+                "Plugin MCP tools/call request missing params object".into(),
             ));
         };
         params.insert(
@@ -92,14 +92,16 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
         );
 
         let body = serde_json::to_vec(&forwarded).map_err(|error| {
-            ProxyError::BadGateway(format!("failed to serialize extra MCP tools/call: {error}"))
+            ProxyError::BadGateway(format!(
+                "failed to serialize Plugin MCP tools/call: {error}"
+            ))
         })?;
 
         tracing::info!(
             container = %self.container_name,
             tool_name = unprefixed_tool_name,
             request_id = ?request.get("id"),
-            "forwarding tools/call to extra MCP container"
+            "forwarding tools/call to Plugin MCP Container"
         );
 
         self.forward_json(body).await
@@ -110,7 +112,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             .forward_json(
                 serde_json::to_vec(&json!({
                     "jsonrpc": "2.0",
-                    "id": format!("brain3-extra-{}-initialize", self.container_name),
+                    "id": format!("brain3-plugin-{}-initialize", self.container_name),
                     "method": "initialize",
                     "params": {
                         "protocolVersion": "2024-11-05",
@@ -123,7 +125,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
                 }))
                 .map_err(|error| {
                     ProxyError::BadGateway(format!(
-                        "failed to serialize extra MCP initialize: {error}"
+                        "failed to serialize Plugin MCP initialize: {error}"
                     ))
                 })?,
             )
@@ -138,13 +140,13 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             .forward_json(
                 serde_json::to_vec(&json!({
                     "jsonrpc": "2.0",
-                    "id": format!("brain3-extra-{}-tools-list", self.container_name),
+                    "id": format!("brain3-plugin-{}-tools-list", self.container_name),
                     "method": "tools/list",
                     "params": {}
                 }))
                 .map_err(|error| {
                     ProxyError::BadGateway(format!(
-                        "failed to serialize extra MCP tools/list: {error}"
+                        "failed to serialize Plugin MCP tools/list: {error}"
                     ))
                 })?,
             )
@@ -153,7 +155,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
 
         let body = serde_json::from_slice::<Value>(&response.body).map_err(|error| {
             ProxyError::BadGateway(format!(
-                "extra MCP container '{}' returned invalid tools/list JSON: {error}",
+                "Plugin MCP Container '{}' returned invalid tools/list JSON: {error}",
                 self.container_name
             ))
         })?;
@@ -163,7 +165,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             .and_then(Value::as_array)
             .ok_or_else(|| {
                 ProxyError::BadGateway(format!(
-                    "extra MCP container '{}' tools/list response missing result.tools array",
+                    "Plugin MCP Container '{}' tools/list response missing result.tools array",
                     self.container_name
                 ))
             })?;
@@ -174,7 +176,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
                 tracing::warn!(
                     container = %self.container_name,
                     schema = %tool,
-                    "skipping extra MCP tool schema without string name"
+                    "skipping Plugin MCP tool schema without string name"
                 );
                 continue;
             };
@@ -188,7 +190,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
                 tracing::warn!(
                     container = %self.container_name,
                     schema = %tool,
-                    "skipping non-object extra MCP tool schema"
+                    "skipping non-object Plugin MCP tool schema"
                 );
                 continue;
             }
@@ -220,7 +222,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             mcp_url = %self.mcp_url,
             bearer_token_hint = ?self.bearer_token.as_ref().map(|token| elide_secret(token)),
             body_bytes = body.len(),
-            "sending request to extra MCP container"
+            "sending request to Plugin MCP Container"
         );
 
         self.proxy
@@ -243,7 +245,7 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
         }
 
         Err(ProxyError::BadGateway(format!(
-            "extra MCP container '{}' {operation} failed with HTTP {}",
+            "Plugin MCP Container '{}' {operation} failed with HTTP {}",
             self.container_name, response.status
         )))
     }
@@ -350,7 +352,7 @@ mod tests {
                 "jsonrpc": "2.0",
                 "id": 7,
                 "result": {
-                    "content": [{ "type": "text", "text": "extra response" }]
+                    "content": [{ "type": "text", "text": "plugin response" }]
                 }
             })),
         ]));

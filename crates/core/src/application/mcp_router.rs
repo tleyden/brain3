@@ -14,23 +14,23 @@ use crate::ports::native_mcp_tool::{NativeMcpToolError, NativeMcpToolOutput};
 pub struct McpRouterUseCase<P: McpProxyPort> {
     proxy: Arc<ProxyMcpUseCase<P>>,
     native_tools: Arc<NativeMcpToolRegistry>,
-    extra_containers: Vec<Arc<RemoteMcpContainerClient<P>>>,
+    plugin_containers: Vec<Arc<RemoteMcpContainerClient<P>>>,
 }
 
 impl<P: McpProxyPort> McpRouterUseCase<P> {
     pub fn new(proxy: Arc<ProxyMcpUseCase<P>>, native_tools: Arc<NativeMcpToolRegistry>) -> Self {
-        Self::new_with_extra_containers(proxy, native_tools, Vec::new())
+        Self::new_with_plugin_containers(proxy, native_tools, Vec::new())
     }
 
-    pub fn new_with_extra_containers(
+    pub fn new_with_plugin_containers(
         proxy: Arc<ProxyMcpUseCase<P>>,
         native_tools: Arc<NativeMcpToolRegistry>,
-        extra_containers: Vec<Arc<RemoteMcpContainerClient<P>>>,
+        plugin_containers: Vec<Arc<RemoteMcpContainerClient<P>>>,
     ) -> Self {
         Self {
             proxy,
             native_tools,
-            extra_containers,
+            plugin_containers,
         }
     }
 
@@ -109,7 +109,7 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
                 if let Some(response) = self.maybe_call_native_tool(parsed_body.as_ref()).await? {
                     return Ok(response);
                 }
-                if let Some(response) = self.maybe_call_extra_tool(parsed_body.as_ref()).await? {
+                if let Some(response) = self.maybe_call_plugin_tool(parsed_body.as_ref()).await? {
                     return Ok(response);
                 }
 
@@ -168,7 +168,7 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
         Ok(Some(native_tool_response(request, output)?))
     }
 
-    async fn maybe_call_extra_tool(
+    async fn maybe_call_plugin_tool(
         &self,
         request: Option<&Value>,
     ) -> Result<Option<McpProxyResponse>, ProxyError> {
@@ -182,14 +182,14 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
             return Ok(None);
         };
 
-        for client in &self.extra_containers {
+        for client in &self.plugin_containers {
             if let Some(unprefixed_name) = client.strip_prefix(name) {
                 tracing::info!(
                     container = %client.container_name(),
                     prefixed_tool_name = name,
                     tool_name = unprefixed_name,
                     request_id = ?request.get("id"),
-                    "MCP router: routing extra MCP tool call"
+                    "MCP router: routing Plugin MCP tool call"
                 );
                 return Ok(Some(client.call_tool(request, unprefixed_name).await?));
             }
@@ -200,13 +200,13 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
 
     fn append_tool_schemas(&self, response: McpProxyResponse) -> McpProxyResponse {
         let native_schemas = self.native_tools.list_schemas();
-        let extra_schemas = self
-            .extra_containers
+        let plugin_schemas = self
+            .plugin_containers
             .iter()
             .flat_map(|client| client.prefixed_tool_schemas())
             .collect::<Vec<_>>();
 
-        if native_schemas.is_empty() && extra_schemas.is_empty() {
+        if native_schemas.is_empty() && plugin_schemas.is_empty() {
             return response;
         }
 
@@ -225,9 +225,9 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
         };
 
         let native_tool_count = native_schemas.len();
-        let extra_tool_count = extra_schemas.len();
+        let plugin_tool_count = plugin_schemas.len();
         tools.extend(native_schemas);
-        tools.extend(extra_schemas);
+        tools.extend(plugin_schemas);
         let total_tool_count = tools.len();
 
         let Ok(new_body) = serde_json::to_vec(&body) else {
@@ -237,9 +237,9 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
 
         tracing::info!(
             native_tool_count = native_tool_count,
-            extra_tool_count = extra_tool_count,
+            plugin_tool_count = plugin_tool_count,
             total_tool_count = total_tool_count,
-            "MCP router: appended native and extra MCP tools to tools/list response"
+            "MCP router: appended native and Plugin MCP tools to tools/list response"
         );
 
         McpProxyResponse {
@@ -419,10 +419,10 @@ mod tests {
         )
     }
 
-    fn router_with_tool_and_extra(
+    fn router_with_tool_and_plugin(
         proxy_body: Vec<u8>,
-        extra_proxy: Arc<CapturingProxy>,
-        extra_client: Arc<RemoteMcpContainerClient<CapturingProxy>>,
+        plugin_proxy: Arc<CapturingProxy>,
+        plugin_client: Arc<RemoteMcpContainerClient<CapturingProxy>>,
     ) -> (
         McpRouterUseCase<CapturingProxy>,
         Arc<Mutex<Vec<McpProxyRequest>>>,
@@ -445,20 +445,20 @@ mod tests {
         ));
         let tool = Arc::new(FakeNativeTool::new());
         let registry = NativeMcpToolRegistry::new(vec![tool.clone() as Arc<dyn NativeMcpTool>]);
-        let extra_captured = Arc::clone(&extra_proxy.captured);
+        let plugin_captured = Arc::clone(&plugin_proxy.captured);
         (
-            McpRouterUseCase::new_with_extra_containers(
+            McpRouterUseCase::new_with_plugin_containers(
                 proxy_use_case,
                 Arc::new(registry),
-                vec![extra_client],
+                vec![plugin_client],
             ),
             captured,
             tool,
-            extra_captured,
+            plugin_captured,
         )
     }
 
-    async fn initialized_extra_client(
+    async fn initialized_plugin_client(
         response_body: Vec<u8>,
     ) -> (
         Arc<CapturingProxy>,
@@ -476,7 +476,7 @@ mod tests {
             Arc::clone(&proxy),
         )
         .await
-        .expect("extra client should initialize");
+        .expect("plugin client should initialize");
         (proxy, Arc::new(client))
     }
 
@@ -589,8 +589,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_list_appends_prefixed_extra_container_tool_schemas() {
-        let (extra_proxy, extra_client) = initialized_extra_client(
+    async fn tools_list_appends_prefixed_plugin_container_tool_schemas() {
+        let (plugin_proxy, plugin_client) = initialized_plugin_client(
             json!({
                 "jsonrpc": "2.0",
                 "id": 99,
@@ -608,7 +608,7 @@ mod tests {
             .into_bytes(),
         )
         .await;
-        let (router, captured, _, extra_captured) = router_with_tool_and_extra(
+        let (router, captured, _, plugin_captured) = router_with_tool_and_plugin(
             json!({
                 "jsonrpc": "2.0",
                 "id": 3,
@@ -624,8 +624,8 @@ mod tests {
             })
             .to_string()
             .into_bytes(),
-            extra_proxy,
-            extra_client,
+            plugin_proxy,
+            plugin_client,
         );
 
         let response = router
@@ -652,12 +652,12 @@ mod tests {
             "vault proxy should still receive tools/list"
         );
         assert_eq!(
-            extra_captured
+            plugin_captured
                 .lock()
-                .expect("extra capture lock should succeed")
+                .expect("plugin capture lock should succeed")
                 .len(),
             2,
-            "extra client should only have startup initialize and tools/list calls"
+            "plugin client should only have startup initialize and tools/list calls"
         );
 
         let body: Value =
@@ -679,15 +679,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_call_for_prefixed_extra_tool_bypasses_vault_proxy_and_strips_prefix() {
-        let (extra_proxy, extra_client) = initialized_extra_client(
+    async fn tools_call_for_prefixed_plugin_tool_bypasses_vault_proxy_and_strips_prefix() {
+        let (plugin_proxy, plugin_client) = initialized_plugin_client(
             br#"{"jsonrpc":"2.0","id":99,"result":{"tools":[]}}"#.to_vec(),
         )
         .await;
-        let (router, captured, _, extra_captured) = router_with_tool_and_extra(
+        let (router, captured, _, plugin_captured) = router_with_tool_and_plugin(
             br#"{"jsonrpc":"2.0","result":{}}"#.to_vec(),
-            extra_proxy,
-            extra_client,
+            plugin_proxy,
+            plugin_client,
         );
 
         let response = router
@@ -710,7 +710,7 @@ mod tests {
                 .into_bytes(),
             )
             .await
-            .expect("extra tools/call should succeed");
+            .expect("plugin tools/call should succeed");
 
         assert_eq!(response.status, 200);
         assert!(
@@ -718,14 +718,14 @@ mod tests {
                 .lock()
                 .expect("vault capture lock should succeed")
                 .is_empty(),
-            "vault proxy should not receive prefixed extra tool call"
+            "vault proxy should not receive prefixed plugin tool call"
         );
-        let extra_requests = extra_captured
+        let plugin_requests = plugin_captured
             .lock()
-            .expect("extra capture lock should succeed");
-        assert_eq!(extra_requests.len(), 3);
+            .expect("plugin capture lock should succeed");
+        assert_eq!(plugin_requests.len(), 3);
         let body: Value =
-            serde_json::from_slice(&extra_requests[2].body).expect("request should be JSON");
+            serde_json::from_slice(&plugin_requests[2].body).expect("request should be JSON");
         assert_eq!(body["params"]["name"], "search_deck");
         assert_eq!(body["params"]["arguments"]["query"], "rust");
     }
