@@ -25,8 +25,10 @@ to start, log an error and continue running with whatever did come up.
   container keeps its current `.env`-driven config path. This plan only adds
   the schema and code structured so that migration is easy later, not doing
   the migration itself.
-- Not moving `.env` into YAML wholesale. Just reserve the top-level shape so
-  that's an additive, non-breaking change later.
+- Not moving `.env` into YAML wholesale in this plan. `brain3.yaml` (see
+  below) is intentionally a general-purpose, multi-section config file so
+  that migration is additive later, but only the `plugin_mcp_containers`
+  section is implemented/read now.
 
 ## Decisions locked in
 
@@ -71,19 +73,27 @@ is the main correctness gate for the feature as a whole).
 
 ### Config file
 
-- New optional file: `<app_home>/mcp_containers.yaml` (next to the existing
-  `.env`). `app_home` defaults to `~/.brain3` (overridable via `B3_HOME`), so
-  in the common case this is `~/.brain3/mcp_containers.yaml`. Absence of the
-  file is the default, normal state — nothing changes for existing users.
+- New optional file: `<app_home>/brain3.yaml` (next to the existing `.env`).
+  `app_home` defaults to `~/.brain3` (overridable via `B3_HOME`), so in the
+  common case this is `~/.brain3/brain3.yaml`. Absence of the file is the
+  default, normal state — nothing changes for existing users.
+- `brain3.yaml` is a **general-purpose, multi-section config file** — over
+  time, more of what's currently in `.env` (and new config that doesn't fit
+  `.env`'s flat key=value shape) is expected to move here as its own
+  top-level section. This plan only defines and reads one section,
+  `plugin_mcp_containers`; other sections are simply not present yet, and an
+  unrecognized/absent section is not an error.
 - Parse failures or per-entry validation failures are logged at `error` and
   that entry is skipped. A malformed YAML file does not crash the gateway —
   it behaves as if the file were absent, but loudly logs why.
 
-### Schema (forward-compatible root shape)
+### Schema (`plugin_mcp_containers` section of `brain3.yaml`)
 
 ```yaml
-# mcp_containers.yaml — EXPERIMENTAL, undocumented outside README "Experimental" section.
-mcp_containers:
+# brain3.yaml — EXPERIMENTAL, undocumented outside README "Experimental" section.
+# General-purpose Brain3 config file. Today only `plugin_mcp_containers` is
+# read; more top-level sections will be added over time.
+plugin_mcp_containers:
   - name: fluensy_learn        # must be snake_case: lowercase letters, digits, underscores only
     platform: docker            # docker | macos_container
     image: ghcr.io/example/fluensy-learn
@@ -111,10 +121,11 @@ mcp_containers:
       # secret_mount_path: /run/secrets/mcp_bearer_token
 ```
 
-- Root key `mcp_containers` is a list so the same file can later carry the
-  core container's config too (each entry could grow an optional `role: core`
-  field then). Not doing that now — just don't paint ourselves into a corner
-  with a root shape that can't hold it.
+- `brain3.yaml`'s root is an **object with named sections** (not a bare
+  list), so future config (core container settings, whatever else migrates
+  out of `.env`) gets its own top-level key alongside `plugin_mcp_containers`
+  without touching this one. `plugin_mcp_containers` itself is a list because
+  there can be any number of plugin containers.
 - `name` must be unique, DNS/label-safe (used as the container name and
   Docker network alias — reuse whatever validation `ContainerConfig.name`
   already implies).
@@ -154,6 +165,14 @@ mcp_containers:
 ### Domain model (`crates/core/src/domain/model.rs`)
 
 ```rust
+/// Root shape of `brain3.yaml`. Only `plugin_mcp_containers` is populated
+/// today; more `#[serde(default)]` sections get added here as `.env` config
+/// migrates over, one section at a time.
+pub struct Brain3YamlConfig {
+    #[serde(default)]
+    pub plugin_mcp_containers: Vec<PluginMcpContainerConfig>,
+}
+
 pub struct PluginMcpContainerConfig {
     pub name: String,             // validated snake_case: [a-z0-9_]+
     pub runtime: ContainerRuntime,
@@ -188,11 +207,14 @@ small builder function, same pattern as `build_container_config` in
 the vault container has enough special-cased fields that a shared struct
 would just grow a pile of `Option`s no one else uses.
 
-### Config loading (`crates/platform/src/config/mcp_containers_config.rs`)
+### Config loading (`crates/platform/src/config/brain3_yaml.rs`)
 
-- New module: parses the YAML file into `Vec<PluginMcpContainerConfig>` (or an
-  empty vec if the file doesn't exist), using `serde-saphyr`.
-- Validation at load time (best-effort, one bad entry doesn't kill the rest):
+- New module: parses `brain3.yaml` into `Brain3YamlConfig` (or the
+  all-defaults value if the file doesn't exist), using `serde-saphyr`. Named
+  after the file, not the section, since this module will grow to parse
+  additional sections later — it is not a plugin-container-specific loader.
+- Validation of `plugin_mcp_containers` entries at load time (best-effort,
+  one bad entry doesn't kill the rest):
   - unique `name` across entries
   - `name` matches `[a-z0-9_]+`
   - `host_directory` exists and is a directory
@@ -244,7 +266,8 @@ the host network by default, consistent with the existing threat model.
 ### Startup sequence in `bootstrap.rs`
 
 1. Ensure core container (unchanged).
-2. Load `mcp_containers.yaml` (if present) via the Phase 1 loader.
+2. Load `brain3.yaml` (if present) via the Phase 1 loader and read its
+   `plugin_mcp_containers` section.
 3. For each entry, `ensure_mcp_container`-equivalent call. On error: log and
    drop that entry from the "live" set — do not abort gateway startup.
 4. Register `stop`s for all successfully-started plugin containers in the
@@ -258,12 +281,15 @@ expose their tools.
 
 Per AGENTS.MD, any new ingress needs a threat-model update before landing.
 This phase is what actually introduces the new ingress: it lets a human with
-filesystem access to `<app_home>/mcp_containers.yaml` cause the gateway to
-`docker run` arbitrary images and mount arbitrary host directories into
-them. Needs at minimum:
-- A new "Assets"/"Attacker Capabilities" note: anyone who can write
-  `mcp_containers.yaml` or the referenced image can execute arbitrary code
-  with Docker-level access to the mounted `host_directory`.
+filesystem access to `<app_home>/brain3.yaml`'s `plugin_mcp_containers`
+section cause the gateway to `docker run` arbitrary images and mount
+arbitrary host directories into them. Needs at minimum:
+- A new "Assets"/"Attacker Capabilities" note: anyone who can write the
+  `plugin_mcp_containers` section of `brain3.yaml` or the referenced image
+  can execute arbitrary code with Docker-level access to the mounted
+  `host_directory`. Note that `brain3.yaml` is expected to grow other,
+  non-ingress sections over time — this finding is scoped to
+  `plugin_mcp_containers` specifically, not the file as a whole.
 - Explicit statement that this is opt-in, local-file-only (no remote/API way
   to add a container), and Experimental/undocumented by design.
 - Note (can be added now even though tool output flows in Phase 3) that
@@ -273,7 +299,8 @@ them. Needs at minimum:
 
 ### Phase 2 exit criteria
 
-- With a valid `mcp_containers.yaml` present, `docker ps` shows the plugin
+- With a valid `brain3.yaml` (`plugin_mcp_containers` section) present,
+  `docker ps` shows the plugin
   container running alongside the core container after gateway startup, with
   the `brain3-mcp-plugin:{name}` role label.
 - A misconfigured/unreachable plugin container logs an error and the gateway
@@ -355,9 +382,10 @@ Proposed approach — generalize instead of special-casing per container:
 
 ## Phase 4 — Documentation
 
-- `README.md` — one short "Experimental" section pointing at the YAML file
-  location and schema, explicitly marked unsupported/subject to change.
-  No setup-wizard mention, since there isn't one for this feature.
+- `README.md` — one short "Experimental" section pointing at `brain3.yaml`'s
+  location and the `plugin_mcp_containers` schema, explicitly marked
+  unsupported/subject to change. No setup-wizard mention, since there isn't
+  one for this feature.
 
 ---
 
@@ -402,12 +430,12 @@ skipped/run independently the same way the other numbered smoke tests can.
      the harness already uses for the vault-tools container, rather than
      having the Rust test shell out to `docker build` itself mid-test.
 
-2. **Wire it into the test's `mcp_containers.yaml`**:
-   - Add a `write_mcp_containers_yaml` helper to `TempTestDir` (alongside the
-     existing `write_env_file`), writing to `self.root.join("mcp_containers.yaml")`
-     — same directory `B3_HOME` already points `.env` at in these tests
-     (`.env("B3_HOME", &temp.root)`), consistent with the `<app_home>/...`
-     convention from Phase 1.
+2. **Wire it into the test's `brain3.yaml`**:
+   - Add a `write_brain3_yaml` helper to `TempTestDir` (alongside the
+     existing `write_env_file`), writing a `plugin_mcp_containers` section to
+     `self.root.join("brain3.yaml")` — same directory `B3_HOME` already
+     points `.env` at in these tests (`.env("B3_HOME", &temp.root)`),
+     consistent with the `<app_home>/...` convention from Phase 1.
    - Write a bearer token to a temp secret file under `temp.root` (e.g.
      `hello_mcp.token`) and reference it from the YAML's `auth.secret_file`.
    - Point `image`/`tag` at the image built in step 1, `port` at whatever the
@@ -417,7 +445,7 @@ skipped/run independently the same way the other numbered smoke tests can.
 
 3. **Test body** (`e2e_smoke_5_plugin_mcp_container`):
    - `TempTestDir::create`, write `.env` (as today) *and* the new
-     `mcp_containers.yaml`.
+     `brain3.yaml`.
    - Spawn `Brain3Process` as usual.
    - Connect the local MCP client (reuse `connect_local_mcp`).
    - `tools/list` and assert the response includes
@@ -449,10 +477,10 @@ together, then get it green.
 
 ## File/module summary
 
-- `crates/core/src/domain/model.rs` — add `PluginMcpContainerConfig`,
-  `PluginMcpContainerAuth`. (Phase 1)
-- `crates/platform/src/config/mcp_containers_config.rs` — new, YAML loader +
-  validation. (Phase 1)
+- `crates/core/src/domain/model.rs` — add `Brain3YamlConfig`,
+  `PluginMcpContainerConfig`, `PluginMcpContainerAuth`. (Phase 1)
+- `crates/platform/src/config/brain3_yaml.rs` — new, `brain3.yaml` loader +
+  `plugin_mcp_containers` validation. (Phase 1)
 - `crates/platform/src/container/startup.rs` — add
   `build_plugin_container_config`, `ensure_plugin_mcp_container`,
   `stop_plugin_mcp_container`, extend orphan-GC role scoping. (Phase 2)
@@ -468,5 +496,5 @@ together, then get it green.
   (Phase 5)
 - `scripts/e2e_smoke.py` — build the hello-mcp image, register the new test
   name. (Phase 5)
-- `apps/gateway/tests/e2e_smoke.rs` — `write_mcp_containers_yaml` helper,
-  new `e2e_smoke_5_plugin_mcp_container` test. (Phase 5)
+- `apps/gateway/tests/e2e_smoke.rs` — `write_brain3_yaml` helper, new
+  `e2e_smoke_5_plugin_mcp_container` test. (Phase 5)
