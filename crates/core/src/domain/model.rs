@@ -107,6 +107,7 @@ pub const BRAIN3_ROLE_LABEL_KEY: &str = "io.brain3.role";
 pub const BRAIN3_INSTALLATION_ID_LABEL_KEY: &str = "io.brain3.installation_id";
 pub const BRAIN3_MANAGED_LABEL_VALUE: &str = "true";
 pub const BRAIN3_MCP_ROLE_LABEL_VALUE: &str = "mcp";
+pub const BRAIN3_EXTRA_MCP_ROLE_LABEL_PREFIX: &str = "brain3-mcp-extra:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContainerLabel {

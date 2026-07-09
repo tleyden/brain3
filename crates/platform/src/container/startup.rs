@@ -1,13 +1,15 @@
+use std::net::TcpListener;
 use std::path::Path;
 use std::sync::Arc;
 
 use brain3_core::application::ensure_container::EnsureContainerUseCase;
 use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{
-    BindMount, ContainerConfig, ContainerLabel, ContainerRuntime, ContainerStartupConfig,
-    ManagedContainerInfo, ManagedContainerScope, PortMapping, BRAIN3_INSTALLATION_ID_LABEL_KEY,
-    BRAIN3_MANAGED_LABEL_KEY, BRAIN3_MANAGED_LABEL_VALUE, BRAIN3_MCP_ROLE_LABEL_VALUE,
-    BRAIN3_ROLE_LABEL_KEY,
+    BindMount, ContainerConfig, ContainerLabel, ContainerNetworkIsolationStrategy,
+    ContainerRuntime, ContainerStartupConfig, ExtraMcpContainerAuth, ExtraMcpContainerConfig,
+    ManagedContainerInfo, ManagedContainerScope, PortMapping, BRAIN3_EXTRA_MCP_ROLE_LABEL_PREFIX,
+    BRAIN3_INSTALLATION_ID_LABEL_KEY, BRAIN3_MANAGED_LABEL_KEY, BRAIN3_MANAGED_LABEL_VALUE,
+    BRAIN3_MCP_ROLE_LABEL_VALUE, BRAIN3_ROLE_LABEL_KEY,
 };
 use brain3_core::domain::setup::RuntimeStartupPolicy;
 use brain3_core::ports::container::{ContainerId, ContainerPort};
@@ -25,6 +27,15 @@ const GC_POLL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(
 const GC_POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_millis(10);
 #[cfg(test)]
 const GC_POLL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_millis(100);
+
+const DEFAULT_EXTRA_MCP_NETWORK_NAME: &str = "brain3-mcp-net";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartedExtraMcpContainer {
+    pub config: ExtraMcpContainerConfig,
+    pub host_port: u16,
+    pub container_ip: Option<String>,
+}
 
 pub fn installation_scope_id(app_home: &Path, env_file: &Path) -> String {
     let app_home = normalize_scope_path(app_home);
@@ -78,12 +89,65 @@ pub async fn ensure_mcp_container(
     );
 
     let port = container_port_for_runtime(startup.runtime);
-    maybe_handle_managed_container_orphans(port.as_ref(), startup, startup_policy, installation_id)
-        .await?;
+    maybe_handle_managed_container_orphans(
+        port.as_ref(),
+        startup.runtime,
+        startup.container_name.as_str(),
+        BRAIN3_MCP_ROLE_LABEL_VALUE,
+        startup_policy,
+        installation_id,
+    )
+    .await?;
 
     let config = build_container_config(startup, installation_id);
     let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
     Ok(container_ip)
+}
+
+pub async fn ensure_extra_mcp_container(
+    extra: &ExtraMcpContainerConfig,
+    startup_policy: RuntimeStartupPolicy,
+    installation_id: &str,
+) -> Result<StartedExtraMcpContainer, ContainerError> {
+    let host_port = resolve_extra_host_port(extra)?;
+    let role = extra_mcp_role_label(extra.name.as_str());
+    tracing::info!(
+        container = %extra.name,
+        image = %extra.image,
+        host_directory = %extra.host_directory.display(),
+        host_port,
+        container_port = extra.container_port,
+        installation_id,
+        auth = extra_auth_kind(&extra.auth),
+        "ensuring extra MCP container is running"
+    );
+    tracing::info!(
+        container = %extra.name,
+        network_isolated = true,
+        isolation_strategy = ?extra_isolation_strategy(extra.runtime),
+        startup_policy = ?startup_policy,
+        role = %role,
+        "resolved extra MCP container network isolation mode"
+    );
+
+    let port = container_port_for_runtime(extra.runtime);
+    maybe_handle_managed_container_orphans(
+        port.as_ref(),
+        extra.runtime,
+        extra.name.as_str(),
+        role.as_str(),
+        startup_policy,
+        installation_id,
+    )
+    .await?;
+
+    let config = build_extra_container_config(extra, host_port, installation_id);
+    let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
+    Ok(StartedExtraMcpContainer {
+        config: extra.clone(),
+        host_port,
+        container_ip,
+    })
 }
 
 pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
@@ -104,6 +168,26 @@ pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), 
     port.stop(&id).await
 }
 
+pub async fn stop_extra_mcp_container(
+    extra: &ExtraMcpContainerConfig,
+) -> Result<(), ContainerError> {
+    let port = container_port_for_runtime(extra.runtime);
+    let id = ContainerId(extra.name.clone());
+
+    if !port.exists(&id).await? {
+        tracing::debug!(container = %extra.name, "managed extra MCP container already absent during shutdown");
+        return Ok(());
+    }
+
+    if !port.is_running(&id).await? {
+        tracing::debug!(container = %extra.name, "managed extra MCP container already stopped during shutdown");
+        return Ok(());
+    }
+
+    tracing::info!(container = %extra.name, runtime = ?extra.runtime, "stopping managed extra MCP container during shutdown");
+    port.stop(&id).await
+}
+
 pub(crate) fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
     match runtime {
         ContainerRuntime::Docker => Arc::new(DockerContainerAdapter),
@@ -111,11 +195,18 @@ pub(crate) fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn C
     }
 }
 
-fn managed_container_scope(installation_id: &str) -> ManagedContainerScope {
-    ManagedContainerScope::mcp(installation_id.to_string())
+fn managed_container_scope(installation_id: &str, role: &str) -> ManagedContainerScope {
+    ManagedContainerScope {
+        installation_id: installation_id.to_string(),
+        role: role.to_string(),
+    }
 }
 
 fn managed_container_labels(installation_id: &str) -> Vec<ContainerLabel> {
+    managed_container_labels_for_role(installation_id, BRAIN3_MCP_ROLE_LABEL_VALUE)
+}
+
+fn managed_container_labels_for_role(installation_id: &str, role: &str) -> Vec<ContainerLabel> {
     vec![
         ContainerLabel {
             key: BRAIN3_MANAGED_LABEL_KEY.into(),
@@ -123,13 +214,17 @@ fn managed_container_labels(installation_id: &str) -> Vec<ContainerLabel> {
         },
         ContainerLabel {
             key: BRAIN3_ROLE_LABEL_KEY.into(),
-            value: BRAIN3_MCP_ROLE_LABEL_VALUE.into(),
+            value: role.into(),
         },
         ContainerLabel {
             key: BRAIN3_INSTALLATION_ID_LABEL_KEY.into(),
             value: installation_id.to_string(),
         },
     ]
+}
+
+fn extra_mcp_role_label(name: &str) -> String {
+    format!("{BRAIN3_EXTRA_MCP_ROLE_LABEL_PREFIX}{name}")
 }
 
 fn build_container_config(
@@ -230,26 +325,126 @@ fn build_container_config(
     }
 }
 
+fn build_extra_container_config(
+    extra: &ExtraMcpContainerConfig,
+    host_port: u16,
+    installation_id: &str,
+) -> ContainerConfig {
+    #[cfg(unix)]
+    let user = Some(format!("{}:{}", unsafe { libc::getuid() }, unsafe {
+        libc::getgid()
+    }));
+    #[cfg(not(unix))]
+    let user: Option<String> = None;
+
+    let mut bind_mounts = vec![BindMount {
+        host_path: extra.host_directory.clone(),
+        container_path: extra.container_directory.clone(),
+        readonly: false,
+    }];
+
+    if let ExtraMcpContainerAuth::BearerToken {
+        secret_file,
+        secret_mount_path,
+    } = &extra.auth
+    {
+        bind_mounts.push(BindMount {
+            host_path: secret_file.clone(),
+            container_path: secret_mount_path.clone(),
+            readonly: true,
+        });
+    }
+
+    let isolation_strategy = Some(extra_isolation_strategy(extra.runtime));
+    tracing::info!(
+        container = %extra.name,
+        installation_id,
+        network_isolated = true,
+        isolation_strategy = ?isolation_strategy,
+        host_probe_target = %format!("127.0.0.1:{host_port}"),
+        isolated_probe_target = %format!("<container-ip>:{}", extra.container_port),
+        auth = extra_auth_kind(&extra.auth),
+        "prepared extra MCP container runtime networking configuration"
+    );
+
+    ContainerConfig {
+        image: extra.image.clone(),
+        name: extra.name.clone(),
+        isolation_strategy,
+        network_name: DEFAULT_EXTRA_MCP_NETWORK_NAME.into(),
+        port_mappings: vec![PortMapping {
+            host_address: "127.0.0.1".into(),
+            host_port,
+            container_port: extra.container_port,
+        }],
+        env_vars: Vec::new(),
+        labels: managed_container_labels_for_role(
+            installation_id,
+            extra_mcp_role_label(extra.name.as_str()).as_str(),
+        ),
+        bind_mounts,
+        user,
+        detach: true,
+        remove_on_exit: matches!(extra.runtime, ContainerRuntime::Docker),
+        workdir: None,
+        command: Vec::new(),
+    }
+}
+
+fn extra_isolation_strategy(runtime: ContainerRuntime) -> ContainerNetworkIsolationStrategy {
+    match runtime {
+        ContainerRuntime::Docker => ContainerNetworkIsolationStrategy::DiscoverContainerIp,
+        ContainerRuntime::MacOSContainer => ContainerNetworkIsolationStrategy::PublishToLoopback,
+    }
+}
+
+fn extra_auth_kind(auth: &ExtraMcpContainerAuth) -> &'static str {
+    match auth {
+        ExtraMcpContainerAuth::None => "none",
+        ExtraMcpContainerAuth::BearerToken { .. } => "bearer_token",
+    }
+}
+
+fn resolve_extra_host_port(extra: &ExtraMcpContainerConfig) -> Result<u16, ContainerError> {
+    match extra.host_port {
+        Some(port) => Ok(port),
+        None => pick_free_loopback_port().map_err(|error| {
+            ContainerError::Other(format!(
+                "failed to pick host port for extra MCP container '{}': {error}",
+                extra.name
+            ))
+        }),
+    }
+}
+
+fn pick_free_loopback_port() -> std::io::Result<u16> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    listener.local_addr().map(|addr| addr.port())
+}
+
 async fn maybe_handle_managed_container_orphans(
     port: &dyn ContainerPort,
-    startup: &ContainerStartupConfig,
+    runtime: ContainerRuntime,
+    container_name: &str,
+    role: &str,
     startup_policy: RuntimeStartupPolicy,
     installation_id: &str,
 ) -> Result<(), ContainerError> {
     if !startup_policy.checks_for_orphans() {
         tracing::debug!(
-            container = %startup.container_name,
+            container = %container_name,
             installation_id,
             "skipping managed-container orphan preflight during setup or reconfiguration"
         );
         return Ok(());
     }
 
-    let scope = managed_container_scope(installation_id);
+    let scope = managed_container_scope(installation_id, role);
     let containers = port.list_managed_containers(&scope).await?;
     if containers.is_empty() {
         tracing::debug!(
             installation_id,
+            role,
             "no managed orphan containers found for this installation scope"
         );
         return Ok(());
@@ -258,6 +453,7 @@ async fn maybe_handle_managed_container_orphans(
     if !startup_policy.gc_containers_enabled() {
         tracing::warn!(
             installation_id,
+            role,
             containers = ?containers,
             "managed orphan containers detected; refusing cleanup without explicit startup approval"
         );
@@ -269,7 +465,7 @@ async fn maybe_handle_managed_container_orphans(
         );
     }
 
-    garbage_collect_managed_containers(port, startup.runtime, installation_id, containers).await
+    garbage_collect_managed_containers(port, runtime, installation_id, containers).await
 }
 
 async fn garbage_collect_managed_containers(
@@ -586,6 +782,105 @@ mod tests {
         );
     }
 
+    fn sample_extra_config() -> ExtraMcpContainerConfig {
+        ExtraMcpContainerConfig {
+            name: "fluensy_learn".into(),
+            runtime: ContainerRuntime::Docker,
+            image: "ghcr.io/example/fluensy-learn:latest".into(),
+            container_port: 8420,
+            host_port: None,
+            host_directory: "/tmp/fluensy-data".into(),
+            container_directory: "/data".into(),
+            auth: ExtraMcpContainerAuth::BearerToken {
+                secret_file: "/tmp/fluensy.token".into(),
+                secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn build_extra_container_config_adds_extra_role_labels_and_mounts() {
+        let config = build_extra_container_config(&sample_extra_config(), 18420, "scope-1");
+
+        assert_eq!(config.name, "fluensy_learn");
+        assert_eq!(config.image, "ghcr.io/example/fluensy-learn:latest");
+        assert_eq!(
+            config.isolation_strategy,
+            Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
+        );
+        assert_eq!(config.network_name, DEFAULT_EXTRA_MCP_NETWORK_NAME);
+        assert_eq!(config.port_mappings.len(), 1);
+        assert_eq!(config.port_mappings[0].host_address, "127.0.0.1");
+        assert_eq!(config.port_mappings[0].host_port, 18420);
+        assert_eq!(config.port_mappings[0].container_port, 8420);
+        assert_eq!(config.env_vars, Vec::<(String, String)>::new());
+        assert_eq!(
+            config.labels,
+            vec![
+                ContainerLabel {
+                    key: BRAIN3_MANAGED_LABEL_KEY.into(),
+                    value: BRAIN3_MANAGED_LABEL_VALUE.into(),
+                },
+                ContainerLabel {
+                    key: BRAIN3_ROLE_LABEL_KEY.into(),
+                    value: "brain3-mcp-extra:fluensy_learn".into(),
+                },
+                ContainerLabel {
+                    key: BRAIN3_INSTALLATION_ID_LABEL_KEY.into(),
+                    value: "scope-1".into(),
+                },
+            ]
+        );
+        assert_eq!(config.bind_mounts.len(), 2);
+        assert_eq!(
+            config.bind_mounts[0].host_path,
+            Path::new("/tmp/fluensy-data")
+        );
+        assert_eq!(config.bind_mounts[0].container_path, Path::new("/data"));
+        assert!(!config.bind_mounts[0].readonly);
+        assert_eq!(
+            config.bind_mounts[1].host_path,
+            Path::new("/tmp/fluensy.token")
+        );
+        assert_eq!(
+            config.bind_mounts[1].container_path,
+            Path::new("/run/secrets/mcp_bearer_token")
+        );
+        assert!(config.bind_mounts[1].readonly);
+        assert!(config.detach);
+        assert!(config.remove_on_exit);
+        assert!(config.workdir.is_none());
+        assert!(config.command.is_empty());
+    }
+
+    #[test]
+    fn build_extra_container_config_omits_secret_mount_for_no_auth() {
+        let mut extra = sample_extra_config();
+        extra.auth = ExtraMcpContainerAuth::None;
+
+        let config = build_extra_container_config(&extra, 18420, "scope-1");
+
+        assert_eq!(config.bind_mounts.len(), 1);
+        assert_eq!(
+            config.bind_mounts[0].host_path,
+            Path::new("/tmp/fluensy-data")
+        );
+        assert_eq!(config.bind_mounts[0].container_path, Path::new("/data"));
+        assert!(!config.bind_mounts[0].readonly);
+    }
+
+    #[test]
+    fn extra_isolation_strategy_matches_runtime() {
+        assert_eq!(
+            extra_isolation_strategy(ContainerRuntime::Docker),
+            ContainerNetworkIsolationStrategy::DiscoverContainerIp
+        );
+        assert_eq!(
+            extra_isolation_strategy(ContainerRuntime::MacOSContainer),
+            ContainerNetworkIsolationStrategy::PublishToLoopback
+        );
+    }
+
     #[tokio::test]
     async fn orphan_preflight_requires_explicit_gc() {
         let port = MockContainerPort::new(MockState {
@@ -600,7 +895,9 @@ mod tests {
 
         let error = maybe_handle_managed_container_orphans(
             &port,
-            &sample_startup(),
+            ContainerRuntime::Docker,
+            "brain3-mcp-vault-tools",
+            BRAIN3_MCP_ROLE_LABEL_VALUE,
             RuntimeStartupPolicy::configured(false),
             "scope-1",
         )
@@ -637,7 +934,9 @@ mod tests {
 
         maybe_handle_managed_container_orphans(
             &port,
-            &sample_startup(), // Docker runtime
+            ContainerRuntime::Docker,
+            "brain3-mcp-vault-tools",
+            BRAIN3_MCP_ROLE_LABEL_VALUE,
             RuntimeStartupPolicy::configured(true),
             "scope-1",
         )
@@ -710,7 +1009,9 @@ mod tests {
 
         maybe_handle_managed_container_orphans(
             &port,
-            &startup,
+            startup.runtime,
+            startup.container_name.as_str(),
+            BRAIN3_MCP_ROLE_LABEL_VALUE,
             RuntimeStartupPolicy::configured(true),
             "scope-1",
         )
