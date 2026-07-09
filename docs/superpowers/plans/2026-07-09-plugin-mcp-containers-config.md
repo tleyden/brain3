@@ -380,7 +380,9 @@ Proposed approach — generalize instead of special-casing per container:
 
 ---
 
-## Phase 4 — Documentation
+## Phase 4 — Documentation and rename
+
+We used "extra container" and "extra mcp container" in the earlier phases.  change to use "Plugin Container" and "Plugin MCP Container" everywerher consistently.
 
 - `README.md` — one short "Experimental" section pointing at `brain3.yaml`'s
   location and the `plugin_mcp_containers` schema, explicitly marked
