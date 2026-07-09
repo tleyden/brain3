@@ -18,17 +18,17 @@
 
 Markdown vaults like Obsidian are extremely powerful, but:
 
-1. **Editing markdown on mobile is tedious**  (moving checkboxes around is the worst)
-2. The **native OS voice dictation isn't great**, at least not on iOS.
-3. **Copying and pasting content** between your AI and your markdowns just slows you down. 
+1. **Copying and pasting content** between your AI and your markdowns is so 2025. 
+2. **Editing markdown on mobile is tedious**  (moving checkboxes around is the worst)
+2. The **native AI voice dictation** is 10x better than the built-in dictation on iOS.  
 
-with brain3 you can:  
+with brain3 you can make AI the new UX for your markdown vault:  
 
 - **Pull in context directly** from your AI chats into your markdown vault, or vice versa: pull from your markdown files into your chats.  
 - Use your AI's **built-in voice dictation** when you'd rather talk than type, and have it summarized or cleaned up however you specify.
 - **Transcribe audio files** directly from your AI chat into a markdown note.
 
-Brain3 just adds another UX layer. You don't need to change anything about your markdown vault structure or storage.
+You don't need to change anything about your markdown vault structure or storage, which stays local and private.
 
 Comptible with Obsidian, including Obsidian Sync. LLMWiki + Open Knowledge Format (OKF) markdown vault support is on the roadmap.
 
