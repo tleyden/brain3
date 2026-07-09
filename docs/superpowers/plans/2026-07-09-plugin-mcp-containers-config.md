@@ -1,8 +1,8 @@
-# Extra MCP Containers (Experimental, Hidden Config)
+# Plugin MCP Containers (Experimental, Hidden Config)
 
 ## Goal
 
-Let a user drop extra Docker/macOS-container MCP servers (e.g. a prototype
+Let a user drop plugin Docker/macOS-container MCP servers (e.g. a prototype
 "fluensy_learn" container) next to the existing core vault container, purely
 via a hand-edited config file. No setup-wizard UI, no docs beyond a README
 "Experimental" section. Brain3 discovers them on startup, manages their
@@ -19,7 +19,7 @@ to start, log an error and continue running with whatever did come up.
   file the user places manually.
 - No multiple bind mounts per container — one host directory, one container
   path.
-- No OAuth between gateway and extra containers — this is an internal,
+- No OAuth between gateway and plugin containers — this is an internal,
   gateway-only trust boundary (see Auth section).
 - Not folding the core vault container into this same list yet. The core
   container keeps its current `.env`-driven config path. This plan only adds
@@ -41,7 +41,7 @@ to start, log an error and continue running with whatever did come up.
    no intermediate `Value` tree, panic-free on malformed input, no unsafe
    code. We only ever read this config, never write it back, so
    deserialize-only is sufficient.
-5. **Role label value**: `brain3-mcp-extra:{name}`.
+5. **Role label value**: `brain3-mcp-plugin:{name}`.
 
 ## How this is broken into phases
 
@@ -51,11 +51,11 @@ phase depends on a later one being done. Roughly:
 
 - **Phase 1** — config schema, domain model, YAML loader. No runtime effect;
   purely parsing + validation, unit-testable in isolation.
-- **Phase 2** — container lifecycle: actually `docker run`/stop extra
+- **Phase 2** — container lifecycle: actually `docker run`/stop plugin
   containers on gateway startup/shutdown. This is the phase that introduces
   the new ingress, so it's also where the required SECURITY_AUDIT.MD update
   happens.
-- **Phase 3** — tool aggregation/routing: extra containers' tools become
+- **Phase 3** — tool aggregation/routing: plugin containers' tools become
   visible and callable through the gateway's MCP endpoint.
 - **Phase 4** — README "Experimental" section.
 - **Phase 5** (final) — end-to-end test proving the whole pipeline works
@@ -139,7 +139,7 @@ mcp_containers:
   simpler pattern.
 - **Header**: use the standard `Authorization: Bearer <token>` header (not
   the vault container's custom `x-brain3-upstream-secret`). Decision driver:
-  extra containers are meant to be drop-in, often third-party or
+  plugin containers are meant to be drop-in, often third-party or
   not-maintained-by-us MCP servers, so the gateway must speak the header
   convention those servers already expect rather than requiring them to
   special-case brain3's internal header.
@@ -154,7 +154,7 @@ mcp_containers:
 ### Domain model (`crates/core/src/domain/model.rs`)
 
 ```rust
-pub struct ExtraMcpContainerConfig {
+pub struct PluginMcpContainerConfig {
     pub name: String,             // validated snake_case: [a-z0-9_]+
     pub runtime: ContainerRuntime,
     pub image: String,            // "image:tag" already joined
@@ -162,10 +162,10 @@ pub struct ExtraMcpContainerConfig {
     pub host_port: Option<u16>,   // None => gateway auto-picks a free loopback port
     pub host_directory: PathBuf,
     pub container_directory: PathBuf, // defaults to "/data" when not set in YAML
-    pub auth: ExtraMcpContainerAuth,
+    pub auth: PluginMcpContainerAuth,
 }
 
-pub enum ExtraMcpContainerAuth {
+pub enum PluginMcpContainerAuth {
     None,
     BearerToken {
         secret_file: PathBuf,
@@ -190,7 +190,7 @@ would just grow a pile of `Option`s no one else uses.
 
 ### Config loading (`crates/platform/src/config/mcp_containers_config.rs`)
 
-- New module: parses the YAML file into `Vec<ExtraMcpContainerConfig>` (or an
+- New module: parses the YAML file into `Vec<PluginMcpContainerConfig>` (or an
   empty vec if the file doesn't exist), using `serde-saphyr`.
 - Validation at load time (best-effort, one bad entry doesn't kill the rest):
   - unique `name` across entries
@@ -222,14 +222,14 @@ probe with timeout, managed-container labels for orphan GC, logs-on-failure.
 None of that is vault-specific except the env vars and vault bind mount
 (isolated in `build_container_config`).
 
-Plan: add a second, small `build_extra_container_config(&ExtraMcpContainerConfig,
+Plan: add a second, small `build_plugin_container_config(&PluginMcpContainerConfig,
 installation_id) -> ContainerConfig` function that reuses
 `EnsureContainerUseCase`, `managed_container_labels`, the orphan-GC pass, and
 the startup TCP probe as-is. Same `BRAIN3_MANAGED_LABEL_KEY`/
 `BRAIN3_ROLE_LABEL_KEY` labeling scheme, but the role label value becomes
-`brain3-mcp-extra:{name}` (e.g. `brain3-mcp-extra:fluensy_learn`) instead of
-`mcp`, so orphan GC and `list_managed_containers` can tell core vs. extra
-containers apart, and tell different extra containers apart from each other,
+`brain3-mcp-plugin:{name}` (e.g. `brain3-mcp-plugin:fluensy_learn`) instead of
+`mcp`, so orphan GC and `list_managed_containers` can tell core vs. plugin
+containers apart, and tell different plugin containers apart from each other,
 per installation.
 
 ### Networking
@@ -237,7 +237,7 @@ per installation.
 Reuse exactly what the core container already does per platform — same
 `ContainerNetworkIsolationStrategy` (`DiscoverContainerIp` for Docker,
 `PublishToLoopback` for macOS containers) via the same `EnsureContainerUseCase`.
-No new isolation concept needed; extra containers join the same
+No new isolation concept needed; plugin containers join the same
 `brain3-mcp-net` internal network as the core container, keeping them off
 the host network by default, consistent with the existing threat model.
 
@@ -247,10 +247,10 @@ the host network by default, consistent with the existing threat model.
 2. Load `mcp_containers.yaml` (if present) via the Phase 1 loader.
 3. For each entry, `ensure_mcp_container`-equivalent call. On error: log and
    drop that entry from the "live" set — do not abort gateway startup.
-4. Register `stop`s for all successfully-started extra containers in the
+4. Register `stop`s for all successfully-started plugin containers in the
    same shutdown path that stops the core container.
 
-Tool routing (Phase 3) is not part of this phase — after Phase 2, extra
+Tool routing (Phase 3) is not part of this phase — after Phase 2, plugin
 containers run and are reachable on their port, but the gateway does not yet
 expose their tools.
 
@@ -267,18 +267,18 @@ them. Needs at minimum:
 - Explicit statement that this is opt-in, local-file-only (no remote/API way
   to add a container), and Experimental/undocumented by design.
 - Note (can be added now even though tool output flows in Phase 3) that
-  extra-container tool output is not sandboxed or vetted before being
+  plugin-container tool output is not sandboxed or vetted before being
   appended to `tools/list` / returned from `tools/call` — same trust level as
   the vault container's tools today.
 
 ### Phase 2 exit criteria
 
-- With a valid `mcp_containers.yaml` present, `docker ps` shows the extra
+- With a valid `mcp_containers.yaml` present, `docker ps` shows the plugin
   container running alongside the core container after gateway startup, with
-  the `brain3-mcp-extra:{name}` role label.
-- A misconfigured/unreachable extra container logs an error and the gateway
+  the `brain3-mcp-plugin:{name}` role label.
+- A misconfigured/unreachable plugin container logs an error and the gateway
   still starts and serves the core vault tools normally.
-- Gateway shutdown stops/removes the extra container the same way it does
+- Gateway shutdown stops/removes the plugin container the same way it does
   the core container.
 - SECURITY_AUDIT.MD updated.
 
@@ -293,7 +293,7 @@ knows two tool sources:
 - **the proxy** — a single upstream URL (the vault container), everything
   else falls through to it.
 
-Extra containers need a **third kind of source**: another MCP server reached
+Plugin containers need a **third kind of source**: another MCP server reached
 over HTTP, just like the proxy target, but there can be N of them and their
 schemas must be merged into `tools/list` the same way native tool schemas
 already are.
@@ -306,47 +306,47 @@ Proposed approach — generalize instead of special-casing per container:
   shape the existing `ProxyMcpUseCase` already round-trips. This is not a
   new HTTP library or a separate client-per-request thing — it's one
   lightweight **struct**, and the gateway holds **one instance of it per
-  configured extra container** (so N extra containers ⇒ N client instances,
+  configured plugin container** (so N plugin containers ⇒ N client instances,
   each pointed at its own host/port/token). Conceptually identical to how
   `ProxyMcpUseCase` already holds one instance for the core container's
   upstream URL — this is just that same shape, made instantiable per
   container instead of hardcoded to one upstream.
-- On gateway startup (after each extra container passes its Phase-2
+- On gateway startup (after each plugin container passes its Phase-2
   TCP-readiness probe), call `initialize` + `tools/list` once per client
   instance, cache the resulting tool schemas in memory (mirrors what
   `NativeMcpToolRegistry` already does for native tools — just fetched over
   HTTP instead of built in-process).
 - **Tool name collisions, and scope of the change**: prefix every
-  extra-container tool name with its container name and a `__` separator,
+  plugin-container tool name with its container name and a `__` separator,
   e.g. `fluensy_learn__search_deck` — always, not just on collision.
   Both the container `name` (validated `[a-z0-9_]+`, Phase 1) and MCP tool
   names are conventionally already snake_case, so `{name}__{tool_name}`
   stays entirely lowercase/underscore — no case conversion needed.
-  **This prefixing applies only to extra-container tools.** Native tools
+  **This prefixing applies only to plugin-container tools.** Native tools
   (whisper transcription etc.) and the core vault container's tools are
   completely untouched — same unprefixed names, same code paths, zero
   behavior change for existing users. The only new code is additive: a third
   source feeding into the same merge point.
 - `McpRouterUseCase::route_request` grows a third branch: on `tools/call`,
   after checking native tools (existing, unchanged), check whether the name
-  starts with `{container_name}__` for any live extra container; if so,
+  starts with `{container_name}__` for any live plugin container; if so,
   forward to that container's client instance with the prefix stripped, same
   pattern as `maybe_call_native_tool`. On `tools/list`, append each live
   container's cached (prefixed) schemas the same way
   `append_native_tool_schemas` already does. The native-tool accumulation
-  code itself does not need to change; extra-container schemas are appended
+  code itself does not need to change; plugin-container schemas are appended
   alongside it, not merged into it.
-- Tool-list caching means an extra container's tools are frozen at gateway
+- Tool-list caching means a plugin container's tools are frozen at gateway
   startup; a container that changes its own tool set requires a gateway
   restart to pick up. Fine for a prototyping feature — flag as a known
   limitation, not solved here.
 
 ### Phase 3 exit criteria
 
-- With Phase 2's extra container running, an MCP client's `tools/list` call
-  against the gateway includes the extra container's tools under their
+- With Phase 2's plugin container running, an MCP client's `tools/list` call
+  against the gateway includes the plugin container's tools under their
   prefixed names, alongside the unchanged native and vault tool names.
-- A `tools/call` for a prefixed extra-container tool name round-trips to the
+- A `tools/call` for a prefixed plugin-container tool name round-trips to the
   right container and returns its result.
 - Existing vault/native tool behavior is provably unchanged (existing unit
   tests in `mcp_router.rs` still pass unmodified).
@@ -367,10 +367,10 @@ We already have an E2E harness (`apps/gateway/tests/e2e_smoke.rs`, driven by
 `scripts/e2e_smoke.py`) that builds the real vault-tools Docker image and
 spawns the actual `brain3` gateway binary against a temp app-home directory,
 then drives it over a real MCP client. This phase adds a new, separate E2E
-test that proves the whole extra-container pipeline (Phases 1–3) end to end
+test that proves the whole plugin-container pipeline (Phases 1–3) end to end
 against a real (test-only) container — not mocks.
 
-Prefer a **new test function** (e.g. `e2e_smoke_5_extra_mcp_container`)
+Prefer a **new test function** (e.g. `e2e_smoke_5_plugin_mcp_container`)
 rather than folding this into `e2e_smoke_1_local_docker`, so a failure here
 doesn't cloud the existing vault-tools smoke test's signal, and so it can be
 skipped/run independently the same way the other numbered smoke tests can.
@@ -415,7 +415,7 @@ skipped/run independently the same way the other numbered smoke tests can.
      throwaway subdirectory of `temp.root` (the tool itself doesn't need to
      use it — just exercises the mount path).
 
-3. **Test body** (`e2e_smoke_5_extra_mcp_container`):
+3. **Test body** (`e2e_smoke_5_plugin_mcp_container`):
    - `TempTestDir::create`, write `.env` (as today) *and* the new
      `mcp_containers.yaml`.
    - Spawn `Brain3Process` as usual.
@@ -428,18 +428,18 @@ skipped/run independently the same way the other numbered smoke tests can.
      result — proves the full round trip: gateway → bearer-token-authed
      HTTP call → container → response → gateway → MCP client.
    - Reuse `assert_no_container_residue()` at the end (extend it if needed to
-     also check the extra container is gone) to prove teardown works for
-     extra containers too, matching the existing core-container check.
+     also check the plugin container is gone) to prove teardown works for
+     plugin containers too, matching the existing core-container check.
 
 ### Passing criteria for this phase (and for the feature as a whole)
 
-- `uv run scripts/e2e_smoke.py e2e_smoke_5_extra_mcp_container` (or the full
+- `uv run scripts/e2e_smoke.py e2e_smoke_5_plugin_mcp_container` (or the full
   default suite) passes: the hello-world container starts, its `hello` tool
   is visible in `tools/list` under its prefixed name, calling it returns the
   expected result, and no container residue remains after the gateway
   process exits.
 - This is the overall correctness gate for the feature — treat it as
-  required before considering the extra-container feature "done," even
+  required before considering the plugin-container feature "done," even
   though Phases 1–4 can each be merged incrementally beforehand.
 
 No TDD needed here — write the container, the config wiring, and the test
@@ -449,18 +449,18 @@ together, then get it green.
 
 ## File/module summary
 
-- `crates/core/src/domain/model.rs` — add `ExtraMcpContainerConfig`,
-  `ExtraMcpContainerAuth`. (Phase 1)
+- `crates/core/src/domain/model.rs` — add `PluginMcpContainerConfig`,
+  `PluginMcpContainerAuth`. (Phase 1)
 - `crates/platform/src/config/mcp_containers_config.rs` — new, YAML loader +
   validation. (Phase 1)
 - `crates/platform/src/container/startup.rs` — add
-  `build_extra_container_config`, `ensure_extra_mcp_container`,
-  `stop_extra_mcp_container`, extend orphan-GC role scoping. (Phase 2)
+  `build_plugin_container_config`, `ensure_plugin_mcp_container`,
+  `stop_plugin_mcp_container`, extend orphan-GC role scoping. (Phase 2)
 - `SECURITY_AUDIT.MD` — Threat Model section update. (Phase 2)
 - `crates/core/src/application/` — new `remote_mcp_container_client.rs`
   (or extend `mcp_proxy.rs`); extend `mcp_router.rs` to route through a list
-  of extra-container tool sources alongside native tools. (Phase 3)
-- `crates/platform/src/runtime/bootstrap.rs` — load config, ensure extra
+  of plugin-container tool sources alongside native tools. (Phase 3)
+- `crates/platform/src/runtime/bootstrap.rs` — load config, ensure plugin
   containers, wire their clients into the router, register shutdown.
   (Phases 2–3)
 - `README.md` — "Experimental" section. (Phase 4)
@@ -469,4 +469,4 @@ together, then get it green.
 - `scripts/e2e_smoke.py` — build the hello-mcp image, register the new test
   name. (Phase 5)
 - `apps/gateway/tests/e2e_smoke.rs` — `write_mcp_containers_yaml` helper,
-  new `e2e_smoke_5_extra_mcp_container` test. (Phase 5)
+  new `e2e_smoke_5_plugin_mcp_container` test. (Phase 5)
