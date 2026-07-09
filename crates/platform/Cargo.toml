@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 brain3-core = { path = "../core" }
 async-trait = "0.1"
+base64 = "0.22"
 libc = "0.2"
 axum = "0.8"
 tower-http = { version = "0.7", features = ["trace"] }

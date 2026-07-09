@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use brain3_core::ports::native_mcp_tool::{NativeMcpTool, NativeMcpToolError, NativeMcpToolOutput};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -21,6 +22,7 @@ const TARGET_SAMPLE_RATE: u32 = 16_000;
 const PCM_SAMPLE_BYTES: u64 = std::mem::size_of::<f32>() as u64;
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const HTTP_TOTAL_TIMEOUT: Duration = Duration::from_secs(300);
+const INLINE_AUDIO_MAX_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WhisperTranscribeConfig {
@@ -77,7 +79,19 @@ impl WhisperTranscribeTool {
     ) -> Result<NativeMcpToolOutput, WhisperTranscribeError> {
         let args: WhisperToolArguments = serde_json::from_value(arguments)
             .map_err(|error| WhisperTranscribeError::InvalidArguments(error.to_string()))?;
-        let download_url = reqwest::Url::parse(&args.audio_file.download_url)
+        match args.audio_file {
+            AudioFileInput::DownloadUrl(audio_file) => {
+                self.execute_download_reference(audio_file).await
+            }
+            AudioFileInput::InlineBase64(audio_file) => self.execute_inline_audio(audio_file).await,
+        }
+    }
+
+    async fn execute_download_reference(
+        &self,
+        audio_file: OpenAIFileReferenceInput,
+    ) -> Result<NativeMcpToolOutput, WhisperTranscribeError> {
+        let download_url = reqwest::Url::parse(&audio_file.download_url)
             .map_err(|error| WhisperTranscribeError::InvalidDownloadUrl(error.to_string()))?;
         if !matches!(download_url.scheme(), "http" | "https") {
             return Err(WhisperTranscribeError::InvalidDownloadUrl(
@@ -87,9 +101,9 @@ impl WhisperTranscribeTool {
 
         let host = download_url.host_str().unwrap_or("unknown").to_string();
         tracing::info!(
-            file_id = %args.audio_file.file_id,
-            file_name = ?args.audio_file.file_name,
-            mime_type = ?args.audio_file.mime_type,
+            file_id = %audio_file.file_id,
+            file_name = ?audio_file.file_name,
+            mime_type = ?audio_file.mime_type,
             host = %host,
             max_audio_bytes = self.config.max_audio_bytes,
             "native whisper transcription: downloading audio"
@@ -97,10 +111,10 @@ impl WhisperTranscribeTool {
 
         let start = Instant::now();
         let (_temp_dir, audio_path, bytes_written) = self
-            .download_to_temp_file(download_url, &args.audio_file)
+            .download_to_temp_file(download_url, &audio_file)
             .await?;
         tracing::info!(
-            file_id = %args.audio_file.file_id,
+            file_id = %audio_file.file_id,
             bytes_written,
             elapsed_ms = start.elapsed().as_millis() as u64,
             "native whisper transcription: audio download complete"
@@ -109,7 +123,7 @@ impl WhisperTranscribeTool {
         let decode_start = Instant::now();
         let samples = decode_audio_file_to_whisper_pcm(&audio_path, self.config.max_audio_bytes)?;
         tracing::info!(
-            file_id = %args.audio_file.file_id,
+            file_id = %audio_file.file_id,
             sample_count = samples.len(),
             duration_ms = samples.len() as u64 * 1000 / TARGET_SAMPLE_RATE as u64,
             elapsed_ms = decode_start.elapsed().as_millis() as u64,
@@ -122,13 +136,78 @@ impl WhisperTranscribeTool {
             .await
             .map_err(|error| WhisperTranscribeError::Inference(error.to_string()))??;
         tracing::info!(
-            file_id = %args.audio_file.file_id,
+            file_id = %audio_file.file_id,
             transcript_chars = transcript.chars().count(),
             elapsed_ms = inference_start.elapsed().as_millis() as u64,
             "native whisper transcription: inference complete"
         );
 
         Ok(NativeMcpToolOutput::text(transcript))
+    }
+
+    async fn execute_inline_audio(
+        &self,
+        audio_file: InlineBase64AudioInput,
+    ) -> Result<NativeMcpToolOutput, WhisperTranscribeError> {
+        let inline_limit = self.inline_audio_byte_limit();
+        if encoded_base64_may_exceed_decoded_limit(audio_file.audio_data.len(), inline_limit) {
+            return Err(WhisperTranscribeError::InlineSizeLimitExceeded {
+                max_audio_bytes: inline_limit,
+            });
+        }
+
+        let audio_bytes = STANDARD
+            .decode(&audio_file.audio_data)
+            .map_err(|error| WhisperTranscribeError::InvalidInlineAudioData(error.to_string()))?;
+        let bytes_written = audio_bytes.len() as u64;
+        if bytes_written > inline_limit {
+            return Err(WhisperTranscribeError::InlineSizeLimitExceeded {
+                max_audio_bytes: inline_limit,
+            });
+        }
+
+        tracing::info!(
+            file_name = ?audio_file.file_name,
+            mime_type = ?audio_file.mime_type,
+            bytes = bytes_written,
+            inline_max_audio_bytes = inline_limit,
+            "native whisper transcription: received inline audio"
+        );
+
+        let start = Instant::now();
+        let (_temp_dir, audio_path) =
+            write_inline_audio_to_temp_file(&audio_file, &audio_bytes).await?;
+        tracing::info!(
+            bytes_written,
+            elapsed_ms = start.elapsed().as_millis() as u64,
+            "native whisper transcription: inline audio staged"
+        );
+
+        let decode_start = Instant::now();
+        let samples = decode_audio_file_to_whisper_pcm(&audio_path, self.config.max_audio_bytes)?;
+        tracing::info!(
+            sample_count = samples.len(),
+            duration_ms = samples.len() as u64 * 1000 / TARGET_SAMPLE_RATE as u64,
+            elapsed_ms = decode_start.elapsed().as_millis() as u64,
+            "native whisper transcription: inline audio decoded and resampled"
+        );
+
+        let transcriber = Arc::clone(&self.transcriber);
+        let inference_start = Instant::now();
+        let transcript = tokio::task::spawn_blocking(move || transcriber.transcribe(samples))
+            .await
+            .map_err(|error| WhisperTranscribeError::Inference(error.to_string()))??;
+        tracing::info!(
+            transcript_chars = transcript.chars().count(),
+            elapsed_ms = inference_start.elapsed().as_millis() as u64,
+            "native whisper transcription: inline audio inference complete"
+        );
+
+        Ok(NativeMcpToolOutput::text(transcript))
+    }
+
+    fn inline_audio_byte_limit(&self) -> u64 {
+        self.config.max_audio_bytes.min(INLINE_AUDIO_MAX_BYTES)
     }
 
     async fn download_to_temp_file(
@@ -206,35 +285,65 @@ impl NativeMcpTool for WhisperTranscribeTool {
             "additionalProperties": false,
             "properties": {
                 "audio_file": {
-                    "type": "object",
-                    "additionalProperties": false,
-                    "description": "OpenAI file reference for the uploaded audio file",
-                    "properties": {
-                        "download_url": {
-                            "type": "string",
-                            "format": "uri",
-                            "description": "Temporary authorized download URL for the uploaded file"
+                    "description": "Uploaded audio file input. Use either a temporary authorized download URL or inline base64 audio bytes.",
+                    "oneOf": [
+                        {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "description": "Reference to an uploaded audio file accessible via a temporary authorized download URL. Populated automatically by OpenAI Apps SDK clients via the openai/fileParams hint; any MCP client that can supply a fetchable download_url may use this shape.",
+                            "properties": {
+                                "download_url": {
+                                    "type": "string",
+                                    "format": "uri",
+                                    "description": "Temporary authorized download URL for the uploaded file"
+                                },
+                                "file_id": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200,
+                                    "description": "Client-issued identifier for the uploaded file. Opaque to this tool and used for logging/correlation only."
+                                },
+                                "mime_type": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200,
+                                    "description": "Optional MIME type for the uploaded file"
+                                },
+                                "file_name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500,
+                                    "description": "Optional original filename for the uploaded file"
+                                }
+                            },
+                            "required": ["download_url", "file_id"]
                         },
-                        "file_id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "OpenAI file identifier"
-                        },
-                        "mime_type": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200,
-                            "description": "Optional MIME type for the uploaded file"
-                        },
-                        "file_name": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 500,
-                            "description": "Optional original filename for the uploaded file"
+                        {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "description": "Inline base64-encoded audio bytes for MCP clients that can read an attached file locally but cannot provide a temporary download URL.",
+                            "properties": {
+                                "audio_data": {
+                                    "type": "string",
+                                    "contentEncoding": "base64",
+                                    "description": "Base64-encoded audio bytes. Limited to 8 MiB before base64 encoding, and also bounded by the configured audio byte limit."
+                                },
+                                "mime_type": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200,
+                                    "description": "Optional MIME type for the uploaded file"
+                                },
+                                "file_name": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500,
+                                    "description": "Optional original filename for the uploaded file"
+                                }
+                            },
+                            "required": ["audio_data"]
                         }
-                    },
-                    "required": ["download_url", "file_id"]
+                    ]
                 }
             },
             "required": ["audio_file"]
@@ -323,7 +432,14 @@ impl AudioTranscriber for CachedWhisperTranscriber {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct WhisperToolArguments {
-    audio_file: OpenAIFileReferenceInput,
+    audio_file: AudioFileInput,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum AudioFileInput {
+    DownloadUrl(OpenAIFileReferenceInput),
+    InlineBase64(InlineBase64AudioInput),
 }
 
 #[derive(Debug, Deserialize)]
@@ -335,16 +451,28 @@ struct OpenAIFileReferenceInput {
     file_name: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InlineBase64AudioInput {
+    audio_data: String,
+    mime_type: Option<String>,
+    file_name: Option<String>,
+}
+
 #[derive(Debug, thiserror::Error)]
 enum WhisperTranscribeError {
     #[error("invalid arguments: {0}")]
     InvalidArguments(String),
     #[error("invalid download_url: {0}")]
     InvalidDownloadUrl(String),
+    #[error("invalid inline audio_data: {0}")]
+    InvalidInlineAudioData(String),
     #[error("audio download failed: {0}")]
     Download(String),
     #[error("audio download exceeds configured limit of {max_audio_bytes} bytes")]
     SizeLimitExceeded { max_audio_bytes: u64 },
+    #[error("inline audio exceeds configured limit of {max_audio_bytes} bytes")]
+    InlineSizeLimitExceeded { max_audio_bytes: u64 },
     #[error("decoded audio exceeds configured limit of {max_audio_bytes} bytes")]
     DecodedAudioLimitExceeded { max_audio_bytes: u64 },
     #[error("temporary audio file error: {0}")]
@@ -361,12 +489,39 @@ impl From<WhisperTranscribeError> for NativeMcpToolError {
     fn from(error: WhisperTranscribeError) -> Self {
         match error {
             WhisperTranscribeError::InvalidArguments(message)
-            | WhisperTranscribeError::InvalidDownloadUrl(message) => {
+            | WhisperTranscribeError::InvalidDownloadUrl(message)
+            | WhisperTranscribeError::InvalidInlineAudioData(message) => {
                 NativeMcpToolError::InvalidArguments(message)
             }
             other => NativeMcpToolError::ExecutionFailed(other.to_string()),
         }
     }
+}
+
+async fn write_inline_audio_to_temp_file(
+    audio_file: &InlineBase64AudioInput,
+    audio_bytes: &[u8],
+) -> Result<(TempDir, PathBuf), WhisperTranscribeError> {
+    let temp_dir = tempfile::Builder::new()
+        .prefix("brain3_audio_inline_")
+        .tempdir()
+        .map_err(|error| WhisperTranscribeError::TempFile(error.to_string()))?;
+    let audio_path = temp_dir.path().join(destination_filename_from_name(
+        audio_file.file_name.as_deref(),
+    ));
+    let mut output = tokio::fs::File::create(&audio_path)
+        .await
+        .map_err(|error| WhisperTranscribeError::TempFile(error.to_string()))?;
+    output
+        .write_all(audio_bytes)
+        .await
+        .map_err(|error| WhisperTranscribeError::TempFile(error.to_string()))?;
+    output
+        .flush()
+        .await
+        .map_err(|error| WhisperTranscribeError::TempFile(error.to_string()))?;
+
+    Ok((temp_dir, audio_path))
 }
 
 fn decode_audio_file_to_whisper_pcm(
@@ -535,9 +690,11 @@ fn resample_linear(samples: &[f32], source_rate: u32, target_rate: u32) -> Vec<f
 }
 
 fn destination_filename(audio_file: &OpenAIFileReferenceInput) -> String {
-    let mut name = audio_file
-        .file_name
-        .as_deref()
+    destination_filename_from_name(audio_file.file_name.as_deref())
+}
+
+fn destination_filename_from_name(file_name: Option<&str>) -> String {
+    let mut name = file_name
         .and_then(|name| Path::new(name).file_name())
         .and_then(|name| name.to_str())
         .unwrap_or("audio")
@@ -547,6 +704,11 @@ fn destination_filename(audio_file: &OpenAIFileReferenceInput) -> String {
         name = "audio".into();
     }
     name
+}
+
+fn encoded_base64_may_exceed_decoded_limit(encoded_len: usize, max_decoded_bytes: u64) -> bool {
+    let max_encoded_len = max_decoded_bytes.div_ceil(3).saturating_mul(4);
+    encoded_len as u64 > max_encoded_len
 }
 
 fn whisper_backend_label() -> &'static str {
@@ -566,6 +728,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use axum::{body::Body, http::StatusCode, response::Response, routing::get, Router};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
     use brain3_core::application::native_mcp_tool_registry::NativeMcpToolRegistry;
     use brain3_core::ports::native_mcp_tool::NativeMcpTool;
     use serde_json::json;
@@ -621,6 +784,73 @@ mod tests {
             .expect("fake transcriber lock should succeed");
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].len(), 1_600);
+    }
+
+    #[tokio::test]
+    async fn call_decodes_inline_base64_audio_and_returns_transcript() {
+        let wav = pcm_wav(8_000, 1, 800);
+        let encoded_audio = STANDARD.encode(wav);
+        let fake = Arc::new(FakeTranscriber::default());
+        let tool = WhisperTranscribeTool::with_transcriber(
+            WhisperTranscribeConfig {
+                model_path: "/tmp/model.bin".into(),
+                max_audio_bytes: 1_000_000,
+            },
+            fake.clone(),
+        );
+
+        let output = tool
+            .call(json!({
+                "audio_file": {
+                    "audio_data": encoded_audio,
+                    "mime_type": "audio/wav",
+                    "file_name": "sample.wav"
+                }
+            }))
+            .await
+            .expect("tool call should succeed");
+
+        assert!(!output.is_error);
+        assert_eq!(output.content[0].text, "hello from native whisper");
+        let calls = fake
+            .calls
+            .lock()
+            .expect("fake transcriber lock should succeed");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].len(), 1_600);
+    }
+
+    #[tokio::test]
+    async fn call_rejects_inline_audio_larger_than_inline_cap() {
+        let encoded_audio = STANDARD.encode(vec![0u8; INLINE_AUDIO_MAX_BYTES as usize + 1]);
+        let fake = Arc::new(FakeTranscriber::default());
+        let tool = WhisperTranscribeTool::with_transcriber(
+            WhisperTranscribeConfig {
+                model_path: "/tmp/model.bin".into(),
+                max_audio_bytes: INLINE_AUDIO_MAX_BYTES + 1_000_000,
+            },
+            fake.clone(),
+        );
+
+        let error = tool
+            .call(json!({
+                "audio_file": {
+                    "audio_data": encoded_audio,
+                    "mime_type": "audio/wav",
+                    "file_name": "oversized.wav"
+                }
+            }))
+            .await
+            .expect_err("oversized inline audio should fail");
+
+        assert!(error
+            .to_string()
+            .contains("inline audio exceeds configured limit"));
+        assert!(fake
+            .calls
+            .lock()
+            .expect("fake transcriber lock should succeed")
+            .is_empty());
     }
 
     #[tokio::test]
@@ -727,7 +957,7 @@ mod tests {
     }
 
     #[test]
-    fn input_schema_declares_openai_audio_file_reference() {
+    fn input_schema_declares_download_url_and_inline_audio_file_references() {
         let fake = Arc::new(FakeTranscriber::default());
         let tool = WhisperTranscribeTool::with_transcriber(
             WhisperTranscribeConfig {
@@ -742,8 +972,12 @@ mod tests {
 
         assert_eq!(schema["required"], json!(["audio_file"]));
         assert_eq!(
-            schema["properties"]["audio_file"]["required"],
+            schema["properties"]["audio_file"]["oneOf"][0]["required"],
             json!(["download_url", "file_id"])
+        );
+        assert_eq!(
+            schema["properties"]["audio_file"]["oneOf"][1]["required"],
+            json!(["audio_data"])
         );
     }
 
