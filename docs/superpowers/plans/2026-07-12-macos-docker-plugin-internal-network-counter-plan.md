@@ -134,38 +134,117 @@ re-litigated later.
 
 ## Counter-plan
 
-1. **Fix the `docker.rs` contract violation first, independent of any other
-   decision.** Change the `--network` gating in
-   `crates/platform/src/container/docker.rs` from "only for
-   `DiscoverContainerIp`" to "whenever `isolation_strategy.is_some()`,"
-   matching `macos_container.rs` and the documented contract in
-   `crates/core/src/domain/model.rs`. This alone fixes plugin-to-sidecar DNS
-   (`fluensy_learn` resolving `postgrest`) regardless of what happens with
-   host reachability.
-2. **Run the minimal scripted repro in point 2 above on the actual Docker
-   Desktop version in use, with output captured verbatim**, before spending
-   any effort on Option B or Option D. This is roughly five minutes and
-   settles the one unverified claim the whole remediation path depends on.
-3. **Branch on the result:**
-   - If the published port does bind: no relay, no threat-model change is
-     needed. Add a regression test asserting the real `docker run` arguments
-     include `--network` for both strategies, add the MCP-initialize
-     readiness check the original RCA proposes in its Phase 4, and close this
-     out.
-   - If the published port does not bind: the original RCA's Option B vs.
-     Option D framing is legitimate and the two-path problem is real. That is
-     a security-policy decision for the user (accept plugin egress vs. build
-     a constrained relay), not something to route around in code, and it
-     should proceed through the original RCA's Phase 1-5 plan with the
-     now-cited, reproducible evidence backing it.
-4. **Separately confirm whether the native `container` runtime needs the same
-   scrutiny.** It doesn't share the Docker adapter's bug, but nothing has
-   independently verified that its "publish + internal network" combination
-   works for reasons other than "it apparently works today for the vault-tools
-   container." Understanding *why* Apple's `container` tool can do this while
-   Docker Desktop apparently cannot (if the repro in step 2 confirms that) is
-   worth a short note for future maintainers, even if it doesn't change any
-   code.
+### Phase 0: fail fast instead of silently misconfiguring (do this immediately)
+
+Today, the primary vault-tools container and plugin MCP containers are
+guarded inconsistently:
+
+- The **primary** container already has a guard.
+  `crates/platform/src/config/env_file.rs:505-515`
+  (`validate_network_isolation_support`) rejects
+  `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION=true` when
+  `B3_CONTAINER_RUNTIME=docker` on macOS, with a clear error message pointing
+  the user at `macos-container` or disabling isolation.
+- **Plugin** MCP containers have no equivalent guard. `brain3_yaml.rs` has no
+  reference to any isolation toggle at all, and
+  `crates/platform/src/container/startup.rs:407-414`
+  (`plugin_isolation_strategy`) unconditionally selects `PublishToLoopback`
+  for every Docker plugin, on every OS, with no opt-out. On macOS this is
+  exactly the combination that silently produces the broken behavior in the
+  original RCA: the plugin starts, looks briefly ready, and only fails later
+  when the gateway can't complete MCP initialize. There is currently no way
+  to configure a plugin such that this check would even run.
+
+This is worth fixing before anything else, independent of which remediation
+option (B or D) is eventually chosen for Docker+macOS+internal-network
+reachability: refusing to start with a clear error is strictly better than
+the current silent fallback to the default bridge network, no matter how
+that deeper problem eventually gets resolved.
+
+Concrete steps:
+
+1. Extend (or add a sibling to) `validate_network_isolation_support` so it
+   also runs for every configured plugin MCP container, not just the primary
+   container. The natural place is at config-load time in
+   `crates/platform/src/config/brain3_yaml.rs`, alongside the existing
+   `network` field validation, so the failure happens at startup/config-parse
+   time — before any container launch is attempted — rather than being
+   discovered mid-launch.
+2. Guard condition: reject any plugin entry where `runtime: docker` (or the
+   config default resolves to Docker) while `cfg(target_os = "macos")`, since
+   every plugin unconditionally requires a `network` and therefore
+   unconditionally requests network isolation — there is no "isolation
+   disabled" case to distinguish for plugins the way there is for the primary
+   container.
+3. Error message should name the specific plugin, state that
+   `runtime: docker` is not supported for network-isolated MCP plugin
+   containers on macOS, and point at `runtime: macos-container` as the
+   supported alternative for that plugin — mirroring the wording and
+   specificity of the existing primary-container error.
+4. Add a unit test mirroring
+   `load_rejects_internal_network_isolation_for_docker_on_macos` in
+   `env_file.rs`, but for plugin config parsing: a plugin with
+   `runtime: docker` on a `cfg(target_os = "macos")` build should fail to
+   load with a clear message; the same plugin with
+   `runtime: macos-container` should load cleanly.
+5. This is a guard, not a new ingress or capability, so it does not require a
+   `SECURITY_AUDIT.MD` threat-model update — it only makes an existing failure
+   mode loud instead of silent.
+
+### Phase 1: fix the `docker.rs` contract violation
+
+Independent of Phase 0, change the `--network` gating in
+`crates/platform/src/container/docker.rs` from "only for
+`DiscoverContainerIp`" to "whenever `isolation_strategy.is_some()`," matching
+`macos_container.rs` and the documented contract in
+`crates/core/src/domain/model.rs`. This fixes plugin-to-sidecar DNS
+(`fluensy_learn` resolving `postgrest`) on Linux Docker today, and is a
+prerequisite for testing the macOS Docker case in Phase 2 once Phase 0's
+guard is lifted or bypassed for that experiment.
+
+### Phase 2: verify the unresolved empirical claim
+
+Run the minimal scripted repro below on the actual Docker Desktop version in
+use, with output captured verbatim, before spending any effort on Option B or
+Option D:
+
+```bash
+docker network create --internal test-net
+docker run -d --name t --network test-net -p 127.0.0.1:9999:80 nginx
+docker inspect t --format '{{json .NetworkSettings.Ports}}'
+curl -m 2 http://127.0.0.1:9999
+docker rm -f t; docker network rm test-net
+```
+
+This is roughly five minutes and settles the one unverified claim the whole
+remediation path depends on.
+
+### Phase 3: branch on the result
+
+- If the published port does bind: no relay, no threat-model change is
+  needed. Lift the Phase 0 guard for Docker+macOS (or narrow it to only the
+  cases still known to be broken), add a regression test asserting the real
+  `docker run` arguments include `--network` for both strategies, add the
+  MCP-initialize readiness check the original RCA proposes in its Phase 4,
+  and close this out.
+- If the published port does not bind: the original RCA's Option B vs.
+  Option D framing is legitimate and the two-path problem is real. That is a
+  security-policy decision for the user (accept plugin egress vs. build a
+  constrained relay), not something to route around in code, and it should
+  proceed through the original RCA's Phase 1-5 plan with the now-cited,
+  reproducible evidence backing it. The Phase 0 guard stays in place until
+  whichever option is implemented and verified.
+
+### Phase 4: confirm the native `container` runtime for the right reasons
+
+Separately confirm whether the native `container` runtime needs the same
+scrutiny. It doesn't share the Docker adapter's bug, but nothing has
+independently verified that its "publish + internal network" combination
+works for reasons other than "it apparently works today for the vault-tools
+container." Understanding *why* Apple's `container` tool can do this while
+Docker Desktop apparently cannot (if the repro in Phase 2 confirms that) is
+worth a short note for future maintainers, even if it doesn't change any
+code.
 
 ## Bottom line
 
