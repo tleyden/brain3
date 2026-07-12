@@ -411,6 +411,7 @@ plugin_mcp_containers:
     network: hello-mcp-net
     host_directory: /Users/you/hello-mcp-data
     container_directory: /data
+    network_isolation: false
     auth:
       type: bearer_token
       secret_file: /Users/you/.brain3/secrets/hello_mcp.token
@@ -418,11 +419,19 @@ plugin_mcp_containers:
 ```
 
 `name` must use lowercase letters, digits, and underscores only. `network` is
-required and names the Docker/`container` network the plugin joins. Brain3
-automatically creates it as an internal-only network with no outbound access if
-it does not exist. Containers on different plugin networks cannot reach each
-other. To let a plugin reach its own sidecar, such as Postgres, attach the
-sidecar to the same network name.
+required and names the Docker/`container` network the plugin joins when network
+isolation is enabled. Brain3 automatically creates it as an internal-only
+network with no outbound access if it does not exist. Containers on different
+plugin networks cannot reach each other. To let a plugin reach its own sidecar,
+such as Postgres, attach the sidecar to the same network name.
+
+`network_isolation` is optional and defaults to `true`. Set it to `false` to
+run this plugin's container on the runtime's normal default network instead of
+an internal-only network, restoring outbound internet access from inside that
+container. This is required for `platform: docker` plugins on macOS, where
+Docker Desktop cannot combine internal-only networking with host-reachable
+published ports. Use `network_isolation: false` there, or switch to
+`platform: macos_container` if the plugin does not need outbound egress.
 
 Brain3 starts each configured Plugin MCP Container with one read-write host
 directory mount, sends `Authorization: Bearer <token>` when `auth.type` is

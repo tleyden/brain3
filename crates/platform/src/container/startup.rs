@@ -121,8 +121,10 @@ pub async fn ensure_plugin_mcp_container(
     );
     tracing::info!(
         container = %plugin.name,
-        network_isolated = true,
-        isolation_strategy = ?plugin_isolation_strategy(plugin.runtime),
+        network_isolated = plugin.network_isolation,
+        isolation_strategy = ?plugin
+            .network_isolation
+            .then(|| plugin_isolation_strategy(plugin.runtime)),
         startup_policy = ?startup_policy,
         role = %role,
         "resolved Plugin MCP Container network isolation mode"
@@ -367,12 +369,14 @@ fn build_plugin_container_config(
         });
     }
 
-    let isolation_strategy = Some(plugin_isolation_strategy(plugin.runtime));
+    let isolation_strategy = plugin
+        .network_isolation
+        .then(|| plugin_isolation_strategy(plugin.runtime));
     tracing::info!(
         container = %plugin.name,
         installation_id,
         network = %plugin.network_name,
-        network_isolated = true,
+        network_isolated = plugin.network_isolation,
         isolation_strategy = ?isolation_strategy,
         host_probe_target = %format!("127.0.0.1:{host_port}"),
         isolated_probe_target = %format!("<container-ip>:{}", plugin.container_port),
@@ -829,6 +833,7 @@ mod tests {
             host_directory: "/tmp/fluensy-data".into(),
             container_directory: "/data".into(),
             network_name: "fluensy-learn-net".into(),
+            network_isolation: true,
             auth: PluginMcpContainerAuth::BearerToken {
                 secret_file: "/tmp/fluensy.token".into(),
                 secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
@@ -911,6 +916,16 @@ mod tests {
         );
         assert_eq!(config.bind_mounts[0].container_path, Path::new("/data"));
         assert!(!config.bind_mounts[0].readonly);
+    }
+
+    #[test]
+    fn build_plugin_container_config_disables_network_isolation() {
+        let mut plugin = sample_plugin_config();
+        plugin.network_isolation = false;
+
+        let config = build_plugin_container_config(&plugin, 18420, "scope-1");
+
+        assert_eq!(config.isolation_strategy, None);
     }
 
     #[test]

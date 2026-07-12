@@ -711,6 +711,7 @@ mod tests {
             host_directory: "/tmp/fluensy-data".into(),
             container_directory: "/data".into(),
             network_name: "fluensy-learn-net".into(),
+            network_isolation: true,
             auth,
         }
     }

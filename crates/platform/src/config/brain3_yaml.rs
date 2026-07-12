@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -27,6 +28,7 @@ struct RawPluginMcpContainerConfig {
     host_directory: Option<PathBuf>,
     container_directory: Option<PathBuf>,
     network: Option<String>,
+    network_isolation: Option<bool>,
     auth: Option<RawPluginMcpContainerAuth>,
 }
 
@@ -107,6 +109,8 @@ fn validate_plugin_mcp_container(
     }
 
     let runtime = parse_runtime(&required_string(entry.platform, "platform")?)?;
+    let network_isolation = entry.network_isolation.unwrap_or(true);
+    validate_plugin_network_isolation_support(runtime, network_isolation)?;
     let image = required_string(entry.image, "image")?;
     let tag = required_string(entry.tag, "tag")?;
     let container_port = entry.port.ok_or_else(|| "missing port".to_string())?;
@@ -130,6 +134,7 @@ fn validate_plugin_mcp_container(
         host_directory,
         container_directory,
         network_name,
+        network_isolation,
         auth,
     })
 }
@@ -176,6 +181,24 @@ fn parse_runtime(value: &str) -> Result<ContainerRuntime, String> {
             "platform must be 'docker' or 'macos_container'; got '{other}'"
         )),
     }
+}
+
+fn validate_plugin_network_isolation_support(
+    runtime: ContainerRuntime,
+    network_isolation: bool,
+) -> Result<(), String> {
+    if network_isolation
+        && matches!(runtime, ContainerRuntime::Docker)
+        && env::consts::OS == "macos"
+    {
+        return Err(
+            "network_isolation: true is not supported with platform: docker on macOS; \
+             set network_isolation: false or platform: macos_container for this plugin"
+                .to_string(),
+        );
+    }
+
+    Ok(())
 }
 
 fn parse_auth(auth: Option<RawPluginMcpContainerAuth>) -> Result<PluginMcpContainerAuth, String> {
@@ -240,7 +263,7 @@ mod tests {
         format!(
             r#"
   - name: {name}
-    platform: docker
+    platform: macos_container
     image: ghcr.io/example/{name}
     tag: latest
     port: 8420
@@ -307,13 +330,14 @@ plugin_mcp_containers:
             configs[0],
             PluginMcpContainerConfig {
                 name: "first_tool".to_string(),
-                runtime: ContainerRuntime::Docker,
+                runtime: ContainerRuntime::MacOSContainer,
                 image: "ghcr.io/example/first_tool:latest".to_string(),
                 container_port: 8420,
                 host_port: None,
                 host_directory: first_dir,
                 container_directory: "/data".into(),
                 network_name: "first-tool-net".into(),
+                network_isolation: true,
                 auth: PluginMcpContainerAuth::BearerToken {
                     secret_file: first_secret,
                     secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
@@ -331,6 +355,7 @@ plugin_mcp_containers:
                 host_directory: second_dir,
                 container_directory: "/workspace".into(),
                 network_name: "second-tool-net".into(),
+                network_isolation: true,
                 auth: PluginMcpContainerAuth::None,
             }
         );
@@ -481,6 +506,113 @@ plugin_mcp_containers:
         let configs = load_plugin_mcp_containers_config(&config_path);
 
         assert!(configs.is_empty());
+    }
+
+    #[test]
+    fn docker_without_network_isolation_loads_on_all_platforms() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let host_dir = temp.path().join("data");
+        fs::create_dir_all(&host_dir).expect("host dir");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"plugin_mcp_containers:
+  - name: egress_plugin
+    platform: docker
+    image: ghcr.io/example/egress-plugin
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: egress-plugin-net
+    network_isolation: false
+    auth:
+      type: none
+"#,
+                host_dir.display()
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].runtime, ContainerRuntime::Docker);
+        assert!(!configs[0].network_isolation);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn docker_with_network_isolation_drops_only_that_entry_on_macos() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let docker_dir = temp.path().join("docker-data");
+        let native_dir = temp.path().join("native-data");
+        fs::create_dir_all(&docker_dir).expect("docker dir");
+        fs::create_dir_all(&native_dir).expect("native dir");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"plugin_mcp_containers:
+  - name: isolated_docker
+    platform: docker
+    image: ghcr.io/example/isolated-docker
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: isolated-docker-net
+    auth:
+      type: none
+  - name: isolated_native
+    platform: macos_container
+    image: ghcr.io/example/isolated-native
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: isolated-native-net
+    auth:
+      type: none
+"#,
+                docker_dir.display(),
+                native_dir.display()
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].name, "isolated_native");
+        assert!(configs[0].network_isolation);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn docker_with_network_isolation_loads_on_linux() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let host_dir = temp.path().join("data");
+        fs::create_dir_all(&host_dir).expect("host dir");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"plugin_mcp_containers:
+  - name: isolated_docker
+    platform: docker
+    image: ghcr.io/example/isolated-docker
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: isolated-docker-net
+    auth:
+      type: none
+"#,
+                host_dir.display()
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert_eq!(configs.len(), 1);
+        assert!(configs[0].network_isolation);
     }
 
     #[test]

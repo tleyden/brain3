@@ -188,6 +188,7 @@ impl TempTestDir {
     network: brain3-e2e-hello-mcp-net
     host_directory: {}
     container_directory: /data
+    network_isolation: false
     auth:
       type: bearer_token
       secret_file: {}
