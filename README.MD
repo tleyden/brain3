@@ -408,6 +408,7 @@ plugin_mcp_containers:
     image: ghcr.io/example/hello-mcp
     tag: latest
     port: 8420
+    network: hello-mcp-net
     host_directory: /Users/you/hello-mcp-data
     container_directory: /data
     auth:
@@ -416,10 +417,16 @@ plugin_mcp_containers:
       secret_mount_path: /run/secrets/mcp_bearer_token
 ```
 
-`name` must use lowercase letters, digits, and underscores only. Brain3 starts
-each configured Plugin MCP Container with one read-write host directory mount,
-sends `Authorization: Bearer <token>` when `auth.type` is `bearer_token`, and
-exposes its tools with a `{name}__` prefix.
+`name` must use lowercase letters, digits, and underscores only. `network` is
+required and names the Docker/`container` network the plugin joins. Brain3
+automatically creates it as an internal-only network with no outbound access if
+it does not exist. Containers on different plugin networks cannot reach each
+other. To let a plugin reach its own sidecar, such as Postgres, attach the
+sidecar to the same network name.
+
+Brain3 starts each configured Plugin MCP Container with one read-write host
+directory mount, sends `Authorization: Bearer <token>` when `auth.type` is
+`bearer_token`, and exposes its tools with a `{name}__` prefix.
 
 </details>
 

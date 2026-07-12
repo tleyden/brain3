@@ -710,6 +710,7 @@ mod tests {
             host_port: None,
             host_directory: "/tmp/fluensy-data".into(),
             container_directory: "/data".into(),
+            network_name: "fluensy-learn-net".into(),
             auth,
         }
     }

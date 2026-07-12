@@ -185,6 +185,7 @@ impl TempTestDir {
     image: brain3-e2e-hello-mcp
     tag: e2e-local
     port: 8420
+    network: brain3-e2e-hello-mcp-net
     host_directory: {}
     container_directory: /data
     auth:

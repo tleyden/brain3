@@ -26,6 +26,7 @@ struct RawPluginMcpContainerConfig {
     host_port: Option<u16>,
     host_directory: Option<PathBuf>,
     container_directory: Option<PathBuf>,
+    network: Option<String>,
     auth: Option<RawPluginMcpContainerAuth>,
 }
 
@@ -116,6 +117,8 @@ fn validate_plugin_mcp_container(
     let container_directory = entry
         .container_directory
         .unwrap_or_else(|| DEFAULT_CONTAINER_DIRECTORY.into());
+    let network_name = required_string(entry.network, "network")?;
+    validate_network_name(&network_name)?;
     let auth = parse_auth(entry.auth)?;
 
     Ok(PluginMcpContainerConfig {
@@ -126,6 +129,7 @@ fn validate_plugin_mcp_container(
         host_port: entry.host_port,
         host_directory,
         container_directory,
+        network_name,
         auth,
     })
 }
@@ -147,6 +151,21 @@ fn validate_name(name: &str) -> Result<(), String> {
     }
 
     Err("name must match [a-z0-9_]+".to_string())
+}
+
+fn validate_network_name(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let first_ok = chars.next().is_some_and(|c| c.is_ascii_alphanumeric());
+    let rest_ok = chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+
+    if first_ok && rest_ok {
+        Ok(())
+    } else {
+        Err(
+            "network must start with a letter/digit and contain only letters, digits, '_', '.', '-'"
+                .to_string(),
+        )
+    }
 }
 
 fn parse_runtime(value: &str) -> Result<ContainerRuntime, String> {
@@ -217,7 +236,7 @@ mod tests {
         fs::write(path, contents).expect("write test file");
     }
 
-    fn valid_entry(name: &str, host_directory: &Path, secret_file: &Path) -> String {
+    fn valid_entry(name: &str, network: &str, host_directory: &Path, secret_file: &Path) -> String {
         format!(
             r#"
   - name: {name}
@@ -226,6 +245,7 @@ mod tests {
     tag: latest
     port: 8420
     host_directory: {}
+    network: {network}
     auth:
       type: bearer_token
       secret_file: {}
@@ -271,10 +291,11 @@ plugin_mcp_containers:
     host_port: 19000
     host_directory: {}
     container_directory: /workspace
+    network: second-tool-net
     auth:
       type: none
 "#,
-                valid_entry("first_tool", &first_dir, &first_secret),
+                valid_entry("first_tool", "first-tool-net", &first_dir, &first_secret),
                 second_dir.display()
             ),
         );
@@ -292,6 +313,7 @@ plugin_mcp_containers:
                 host_port: None,
                 host_directory: first_dir,
                 container_directory: "/data".into(),
+                network_name: "first-tool-net".into(),
                 auth: PluginMcpContainerAuth::BearerToken {
                     secret_file: first_secret,
                     secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
@@ -308,6 +330,7 @@ plugin_mcp_containers:
                 host_port: Some(19000),
                 host_directory: second_dir,
                 container_directory: "/workspace".into(),
+                network_name: "second-tool-net".into(),
                 auth: PluginMcpContainerAuth::None,
             }
         );
@@ -332,8 +355,13 @@ plugin_mcp_containers:
 {}
 {}
 "#,
-                valid_entry("missing_secret", &bad_dir, &missing_secret),
-                valid_entry("good_tool", &good_dir, &good_secret)
+                valid_entry(
+                    "missing_secret",
+                    "missing-secret-net",
+                    &bad_dir,
+                    &missing_secret
+                ),
+                valid_entry("good_tool", "good-tool-net", &good_dir, &good_secret)
             ),
         );
 
@@ -363,8 +391,8 @@ plugin_mcp_containers:
 {}
 {}
 "#,
-                valid_entry("same_name", &first_dir, &first_secret),
-                valid_entry("same_name", &second_dir, &second_secret)
+                valid_entry("same_name", "first-net", &first_dir, &first_secret),
+                valid_entry("same_name", "second-net", &second_dir, &second_secret)
             ),
         );
 
@@ -394,8 +422,8 @@ plugin_mcp_containers:
 {}
 {}
 "#,
-                valid_entry("Bad-Name", &bad_dir, &bad_secret),
-                valid_entry("good_name", &good_dir, &good_secret)
+                valid_entry("Bad-Name", "bad-name-net", &bad_dir, &bad_secret),
+                valid_entry("good_name", "good-name-net", &good_dir, &good_secret)
             ),
         );
 
@@ -403,6 +431,56 @@ plugin_mcp_containers:
 
         assert_eq!(configs.len(), 1);
         assert_eq!(configs[0].name, "good_name");
+    }
+
+    #[test]
+    fn missing_network_is_dropped() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let host_dir = temp.path().join("data");
+        fs::create_dir_all(&host_dir).expect("host dir");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"
+plugin_mcp_containers:
+  - name: missing_network
+    platform: docker
+    image: ghcr.io/example/missing-network
+    tag: latest
+    port: 8420
+    host_directory: {}
+    auth:
+      type: none
+"#,
+                host_dir.display()
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert!(configs.is_empty());
+    }
+
+    #[test]
+    fn invalid_network_name_is_dropped() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let host_dir = temp.path().join("data");
+        fs::create_dir_all(&host_dir).expect("host dir");
+        let secret_file = temp.path().join("token");
+        write_file(&secret_file, "secret");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                "plugin_mcp_containers:\n{}",
+                valid_entry("bad_network", "-leading-hyphen", &host_dir, &secret_file)
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert!(configs.is_empty());
     }
 
     #[test]

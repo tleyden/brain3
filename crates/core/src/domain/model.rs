@@ -74,6 +74,7 @@ pub struct PluginMcpContainerConfig {
     pub host_port: Option<u16>,
     pub host_directory: PathBuf,
     pub container_directory: PathBuf,
+    pub network_name: String,
     pub auth: PluginMcpContainerAuth,
 }
 
