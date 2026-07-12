@@ -622,10 +622,7 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
 
 fn audio_transcription_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
     vec![
-        Line::from(Span::styled(
-            "Audio Transcription",
-            section_heading_style(),
-        )),
+        Line::from(Span::styled("Audio Transcription", section_heading_style())),
         blank_line(),
         muted_line("Audio Transcription is an MCP tool that runs natively in this process."),
         muted_line(

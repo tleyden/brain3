@@ -65,6 +65,27 @@ pub enum ContainerRuntime {
     MacOSContainer,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginMcpContainerConfig {
+    pub name: String,
+    pub runtime: ContainerRuntime,
+    pub image: String,
+    pub container_port: u16,
+    pub host_port: Option<u16>,
+    pub host_directory: PathBuf,
+    pub container_directory: PathBuf,
+    pub auth: PluginMcpContainerAuth,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PluginMcpContainerAuth {
+    None,
+    BearerToken {
+        secret_file: PathBuf,
+        secret_mount_path: PathBuf,
+    },
+}
+
 /// How the gateway reaches the MCP container when it is on an internal-only network.
 ///
 /// The strategy is independent of the container runtime so future runtimes can
@@ -86,6 +107,7 @@ pub const BRAIN3_ROLE_LABEL_KEY: &str = "io.brain3.role";
 pub const BRAIN3_INSTALLATION_ID_LABEL_KEY: &str = "io.brain3.installation_id";
 pub const BRAIN3_MANAGED_LABEL_VALUE: &str = "true";
 pub const BRAIN3_MCP_ROLE_LABEL_VALUE: &str = "mcp";
+pub const BRAIN3_PLUGIN_MCP_ROLE_LABEL_PREFIX: &str = "brain3-mcp-plugin:";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContainerLabel {

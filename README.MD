@@ -392,6 +392,37 @@ brain3.yourdomain.com {
 
 </details>
 
+<details>
+<summary>Experimental: Plugin MCP Containers</summary>
+
+Plugin MCP Containers are unsupported and subject to change. They are configured
+only by hand-editing `brain3.yaml` in your Brain3 home directory, usually
+`~/.brain3/brain3.yaml`.
+
+Today Brain3 reads only the `plugin_mcp_containers` section:
+
+```yaml
+plugin_mcp_containers:
+  - name: hello_mcp
+    platform: docker
+    image: ghcr.io/example/hello-mcp
+    tag: latest
+    port: 8420
+    host_directory: /Users/you/hello-mcp-data
+    container_directory: /data
+    auth:
+      type: bearer_token
+      secret_file: /Users/you/.brain3/secrets/hello_mcp.token
+      secret_mount_path: /run/secrets/mcp_bearer_token
+```
+
+`name` must use lowercase letters, digits, and underscores only. Brain3 starts
+each configured Plugin MCP Container with one read-write host directory mount,
+sends `Authorization: Bearer <token>` when `auth.type` is `bearer_token`, and
+exposes its tools with a `{name}__` prefix.
+
+</details>
+
 ## Privacy & Security
 
 <details>

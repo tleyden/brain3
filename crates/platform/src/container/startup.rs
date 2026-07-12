@@ -1,13 +1,15 @@
+use std::net::TcpListener;
 use std::path::Path;
 use std::sync::Arc;
 
 use brain3_core::application::ensure_container::EnsureContainerUseCase;
 use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{
-    BindMount, ContainerConfig, ContainerLabel, ContainerRuntime, ContainerStartupConfig,
-    ManagedContainerInfo, ManagedContainerScope, PortMapping, BRAIN3_INSTALLATION_ID_LABEL_KEY,
-    BRAIN3_MANAGED_LABEL_KEY, BRAIN3_MANAGED_LABEL_VALUE, BRAIN3_MCP_ROLE_LABEL_VALUE,
-    BRAIN3_ROLE_LABEL_KEY,
+    BindMount, ContainerConfig, ContainerLabel, ContainerNetworkIsolationStrategy,
+    ContainerRuntime, ContainerStartupConfig, ManagedContainerInfo, ManagedContainerScope,
+    PluginMcpContainerAuth, PluginMcpContainerConfig, PortMapping,
+    BRAIN3_INSTALLATION_ID_LABEL_KEY, BRAIN3_MANAGED_LABEL_KEY, BRAIN3_MANAGED_LABEL_VALUE,
+    BRAIN3_MCP_ROLE_LABEL_VALUE, BRAIN3_PLUGIN_MCP_ROLE_LABEL_PREFIX, BRAIN3_ROLE_LABEL_KEY,
 };
 use brain3_core::domain::setup::RuntimeStartupPolicy;
 use brain3_core::ports::container::{ContainerId, ContainerPort};
@@ -25,6 +27,15 @@ const GC_POLL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(
 const GC_POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_millis(10);
 #[cfg(test)]
 const GC_POLL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_millis(100);
+
+const DEFAULT_PLUGIN_MCP_NETWORK_NAME: &str = "brain3-mcp-net";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StartedPluginMcpContainer {
+    pub config: PluginMcpContainerConfig,
+    pub host_port: u16,
+    pub container_ip: Option<String>,
+}
 
 pub fn installation_scope_id(app_home: &Path, env_file: &Path) -> String {
     let app_home = normalize_scope_path(app_home);
@@ -78,12 +89,65 @@ pub async fn ensure_mcp_container(
     );
 
     let port = container_port_for_runtime(startup.runtime);
-    maybe_handle_managed_container_orphans(port.as_ref(), startup, startup_policy, installation_id)
-        .await?;
+    maybe_handle_managed_container_orphans(
+        port.as_ref(),
+        startup.runtime,
+        startup.container_name.as_str(),
+        BRAIN3_MCP_ROLE_LABEL_VALUE,
+        startup_policy,
+        installation_id,
+    )
+    .await?;
 
     let config = build_container_config(startup, installation_id);
     let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
     Ok(container_ip)
+}
+
+pub async fn ensure_plugin_mcp_container(
+    plugin: &PluginMcpContainerConfig,
+    startup_policy: RuntimeStartupPolicy,
+    installation_id: &str,
+) -> Result<StartedPluginMcpContainer, ContainerError> {
+    let host_port = resolve_plugin_host_port(plugin)?;
+    let role = plugin_mcp_role_label(plugin.name.as_str());
+    tracing::info!(
+        container = %plugin.name,
+        image = %plugin.image,
+        host_directory = %plugin.host_directory.display(),
+        host_port,
+        container_port = plugin.container_port,
+        installation_id,
+        auth = plugin_auth_kind(&plugin.auth),
+        "ensuring Plugin MCP Container is running"
+    );
+    tracing::info!(
+        container = %plugin.name,
+        network_isolated = true,
+        isolation_strategy = ?plugin_isolation_strategy(plugin.runtime),
+        startup_policy = ?startup_policy,
+        role = %role,
+        "resolved Plugin MCP Container network isolation mode"
+    );
+
+    let port = container_port_for_runtime(plugin.runtime);
+    maybe_handle_managed_container_orphans(
+        port.as_ref(),
+        plugin.runtime,
+        plugin.name.as_str(),
+        role.as_str(),
+        startup_policy,
+        installation_id,
+    )
+    .await?;
+
+    let config = build_plugin_container_config(plugin, host_port, installation_id);
+    let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
+    Ok(StartedPluginMcpContainer {
+        config: plugin.clone(),
+        host_port,
+        container_ip,
+    })
 }
 
 pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), ContainerError> {
@@ -95,13 +159,47 @@ pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), 
         return Ok(());
     }
 
-    if !port.is_running(&id).await? {
+    if port.is_running(&id).await? {
+        tracing::info!(container = %startup.container_name, runtime = ?startup.runtime, "stopping managed MCP container during shutdown");
+        port.stop(&id).await?;
+    } else {
         tracing::debug!(container = %startup.container_name, "managed MCP container already stopped during shutdown");
+    }
+
+    // macOS containers require explicit removal; Docker containers use --rm
+    if startup.runtime == ContainerRuntime::MacOSContainer {
+        tracing::info!(container = %startup.container_name, "removing managed macOS MCP container during shutdown");
+        port.remove(&id).await?;
+    }
+
+    Ok(())
+}
+
+pub async fn stop_plugin_mcp_container(
+    plugin: &PluginMcpContainerConfig,
+) -> Result<(), ContainerError> {
+    let port = container_port_for_runtime(plugin.runtime);
+    let id = ContainerId(plugin.name.clone());
+
+    if !port.exists(&id).await? {
+        tracing::debug!(container = %plugin.name, "managed Plugin MCP Container already absent during shutdown");
         return Ok(());
     }
 
-    tracing::info!(container = %startup.container_name, runtime = ?startup.runtime, "stopping managed MCP container during shutdown");
-    port.stop(&id).await
+    if port.is_running(&id).await? {
+        tracing::info!(container = %plugin.name, runtime = ?plugin.runtime, "stopping managed Plugin MCP Container during shutdown");
+        port.stop(&id).await?;
+    } else {
+        tracing::debug!(container = %plugin.name, "managed Plugin MCP Container already stopped during shutdown");
+    }
+
+    // macOS containers require explicit removal; Docker containers use --rm
+    if plugin.runtime == ContainerRuntime::MacOSContainer {
+        tracing::info!(container = %plugin.name, "removing managed macOS Plugin MCP Container during shutdown");
+        port.remove(&id).await?;
+    }
+
+    Ok(())
 }
 
 pub(crate) fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
@@ -111,11 +209,18 @@ pub(crate) fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn C
     }
 }
 
-fn managed_container_scope(installation_id: &str) -> ManagedContainerScope {
-    ManagedContainerScope::mcp(installation_id.to_string())
+fn managed_container_scope(installation_id: &str, role: &str) -> ManagedContainerScope {
+    ManagedContainerScope {
+        installation_id: installation_id.to_string(),
+        role: role.to_string(),
+    }
 }
 
 fn managed_container_labels(installation_id: &str) -> Vec<ContainerLabel> {
+    managed_container_labels_for_role(installation_id, BRAIN3_MCP_ROLE_LABEL_VALUE)
+}
+
+fn managed_container_labels_for_role(installation_id: &str, role: &str) -> Vec<ContainerLabel> {
     vec![
         ContainerLabel {
             key: BRAIN3_MANAGED_LABEL_KEY.into(),
@@ -123,13 +228,17 @@ fn managed_container_labels(installation_id: &str) -> Vec<ContainerLabel> {
         },
         ContainerLabel {
             key: BRAIN3_ROLE_LABEL_KEY.into(),
-            value: BRAIN3_MCP_ROLE_LABEL_VALUE.into(),
+            value: role.into(),
         },
         ContainerLabel {
             key: BRAIN3_INSTALLATION_ID_LABEL_KEY.into(),
             value: installation_id.to_string(),
         },
     ]
+}
+
+fn plugin_mcp_role_label(name: &str) -> String {
+    format!("{BRAIN3_PLUGIN_MCP_ROLE_LABEL_PREFIX}{name}")
 }
 
 fn build_container_config(
@@ -230,26 +339,135 @@ fn build_container_config(
     }
 }
 
+fn build_plugin_container_config(
+    plugin: &PluginMcpContainerConfig,
+    host_port: u16,
+    installation_id: &str,
+) -> ContainerConfig {
+    #[cfg(unix)]
+    let user = Some(format!("{}:{}", unsafe { libc::getuid() }, unsafe {
+        libc::getgid()
+    }));
+    #[cfg(not(unix))]
+    let user: Option<String> = None;
+
+    let mut bind_mounts = vec![BindMount {
+        host_path: plugin.host_directory.clone(),
+        container_path: plugin.container_directory.clone(),
+        readonly: false,
+    }];
+
+    if let PluginMcpContainerAuth::BearerToken {
+        secret_file,
+        secret_mount_path,
+    } = &plugin.auth
+    {
+        bind_mounts.push(BindMount {
+            host_path: secret_file.clone(),
+            container_path: secret_mount_path.clone(),
+            readonly: true,
+        });
+    }
+
+    let isolation_strategy = Some(plugin_isolation_strategy(plugin.runtime));
+    tracing::info!(
+        container = %plugin.name,
+        installation_id,
+        network_isolated = true,
+        isolation_strategy = ?isolation_strategy,
+        host_probe_target = %format!("127.0.0.1:{host_port}"),
+        isolated_probe_target = %format!("<container-ip>:{}", plugin.container_port),
+        auth = plugin_auth_kind(&plugin.auth),
+        "prepared Plugin MCP Container runtime networking configuration"
+    );
+
+    ContainerConfig {
+        image: plugin.image.clone(),
+        name: plugin.name.clone(),
+        isolation_strategy,
+        network_name: DEFAULT_PLUGIN_MCP_NETWORK_NAME.into(),
+        port_mappings: vec![PortMapping {
+            host_address: "127.0.0.1".into(),
+            host_port,
+            container_port: plugin.container_port,
+        }],
+        env_vars: Vec::new(),
+        labels: managed_container_labels_for_role(
+            installation_id,
+            plugin_mcp_role_label(plugin.name.as_str()).as_str(),
+        ),
+        bind_mounts,
+        user,
+        detach: true,
+        remove_on_exit: matches!(plugin.runtime, ContainerRuntime::Docker),
+        workdir: None,
+        command: Vec::new(),
+    }
+}
+
+fn plugin_isolation_strategy(runtime: ContainerRuntime) -> ContainerNetworkIsolationStrategy {
+    match runtime {
+        #[cfg(target_os = "macos")]
+        ContainerRuntime::Docker => ContainerNetworkIsolationStrategy::PublishToLoopback,
+        #[cfg(not(target_os = "macos"))]
+        ContainerRuntime::Docker => ContainerNetworkIsolationStrategy::DiscoverContainerIp,
+        ContainerRuntime::MacOSContainer => ContainerNetworkIsolationStrategy::PublishToLoopback,
+    }
+}
+
+fn plugin_auth_kind(auth: &PluginMcpContainerAuth) -> &'static str {
+    match auth {
+        PluginMcpContainerAuth::None => "none",
+        PluginMcpContainerAuth::BearerToken { .. } => "bearer_token",
+    }
+}
+
+fn resolve_plugin_host_port(plugin: &PluginMcpContainerConfig) -> Result<u16, ContainerError> {
+    match plugin.host_port {
+        Some(port) => Ok(port),
+        None => {
+            // KNOWN LIMITATION: There is a small race window between selecting a free port
+            // and the container runtime binding to it. Another process could bind to the
+            // same port in that gap. If this becomes a problem, specify an explicit host_port
+            // in the plugin configuration.
+            pick_free_loopback_port().map_err(|error| {
+                ContainerError::Other(format!(
+                    "failed to pick host port for Plugin MCP Container '{}': {error}",
+                    plugin.name
+                ))
+            })
+        }
+    }
+}
+
+fn pick_free_loopback_port() -> std::io::Result<u16> {
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    listener.local_addr().map(|addr| addr.port())
+}
+
 async fn maybe_handle_managed_container_orphans(
     port: &dyn ContainerPort,
-    startup: &ContainerStartupConfig,
+    runtime: ContainerRuntime,
+    container_name: &str,
+    role: &str,
     startup_policy: RuntimeStartupPolicy,
     installation_id: &str,
 ) -> Result<(), ContainerError> {
     if !startup_policy.checks_for_orphans() {
         tracing::debug!(
-            container = %startup.container_name,
+            container = %container_name,
             installation_id,
             "skipping managed-container orphan preflight during setup or reconfiguration"
         );
         return Ok(());
     }
 
-    let scope = managed_container_scope(installation_id);
+    let scope = managed_container_scope(installation_id, role);
     let containers = port.list_managed_containers(&scope).await?;
     if containers.is_empty() {
         tracing::debug!(
             installation_id,
+            role,
             "no managed orphan containers found for this installation scope"
         );
         return Ok(());
@@ -258,6 +476,7 @@ async fn maybe_handle_managed_container_orphans(
     if !startup_policy.gc_containers_enabled() {
         tracing::warn!(
             installation_id,
+            role,
             containers = ?containers,
             "managed orphan containers detected; refusing cleanup without explicit startup approval"
         );
@@ -269,7 +488,7 @@ async fn maybe_handle_managed_container_orphans(
         );
     }
 
-    garbage_collect_managed_containers(port, startup.runtime, installation_id, containers).await
+    garbage_collect_managed_containers(port, runtime, installation_id, containers).await
 }
 
 async fn garbage_collect_managed_containers(
@@ -430,6 +649,8 @@ mod tests {
         exists_calls: Vec<String>,
         /// Responses returned by `exists()` in order; cycles `false` once exhausted.
         exists_responses: Vec<bool>,
+        /// Responses returned by `is_running()` in order; cycles `false` once exhausted.
+        is_running_responses: Vec<bool>,
     }
 
     struct MockContainerPort {
@@ -473,7 +694,13 @@ mod tests {
         }
 
         async fn is_running(&self, _id: &ContainerId) -> Result<bool, ContainerError> {
-            Ok(false)
+            let mut s = self.state.lock().expect("lock should not be poisoned");
+            let result = if s.is_running_responses.is_empty() {
+                false
+            } else {
+                s.is_running_responses.remove(0)
+            };
+            Ok(result)
         }
 
         async fn logs_tail(
@@ -586,6 +813,117 @@ mod tests {
         );
     }
 
+    fn sample_plugin_config() -> PluginMcpContainerConfig {
+        PluginMcpContainerConfig {
+            name: "fluensy_learn".into(),
+            runtime: ContainerRuntime::Docker,
+            image: "ghcr.io/example/fluensy-learn:latest".into(),
+            container_port: 8420,
+            host_port: None,
+            host_directory: "/tmp/fluensy-data".into(),
+            container_directory: "/data".into(),
+            auth: PluginMcpContainerAuth::BearerToken {
+                secret_file: "/tmp/fluensy.token".into(),
+                secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn build_plugin_container_config_adds_plugin_role_labels_and_mounts() {
+        let config = build_plugin_container_config(&sample_plugin_config(), 18420, "scope-1");
+
+        assert_eq!(config.name, "fluensy_learn");
+        assert_eq!(config.image, "ghcr.io/example/fluensy-learn:latest");
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            config.isolation_strategy,
+            Some(ContainerNetworkIsolationStrategy::PublishToLoopback)
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(
+            config.isolation_strategy,
+            Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
+        );
+        assert_eq!(config.network_name, DEFAULT_PLUGIN_MCP_NETWORK_NAME);
+        assert_eq!(config.port_mappings.len(), 1);
+        assert_eq!(config.port_mappings[0].host_address, "127.0.0.1");
+        assert_eq!(config.port_mappings[0].host_port, 18420);
+        assert_eq!(config.port_mappings[0].container_port, 8420);
+        assert_eq!(config.env_vars, Vec::<(String, String)>::new());
+        assert_eq!(
+            config.labels,
+            vec![
+                ContainerLabel {
+                    key: BRAIN3_MANAGED_LABEL_KEY.into(),
+                    value: BRAIN3_MANAGED_LABEL_VALUE.into(),
+                },
+                ContainerLabel {
+                    key: BRAIN3_ROLE_LABEL_KEY.into(),
+                    value: "brain3-mcp-plugin:fluensy_learn".into(),
+                },
+                ContainerLabel {
+                    key: BRAIN3_INSTALLATION_ID_LABEL_KEY.into(),
+                    value: "scope-1".into(),
+                },
+            ]
+        );
+        assert_eq!(config.bind_mounts.len(), 2);
+        assert_eq!(
+            config.bind_mounts[0].host_path,
+            Path::new("/tmp/fluensy-data")
+        );
+        assert_eq!(config.bind_mounts[0].container_path, Path::new("/data"));
+        assert!(!config.bind_mounts[0].readonly);
+        assert_eq!(
+            config.bind_mounts[1].host_path,
+            Path::new("/tmp/fluensy.token")
+        );
+        assert_eq!(
+            config.bind_mounts[1].container_path,
+            Path::new("/run/secrets/mcp_bearer_token")
+        );
+        assert!(config.bind_mounts[1].readonly);
+        assert!(config.detach);
+        assert!(config.remove_on_exit);
+        assert!(config.workdir.is_none());
+        assert!(config.command.is_empty());
+    }
+
+    #[test]
+    fn build_plugin_container_config_omits_secret_mount_for_no_auth() {
+        let mut plugin = sample_plugin_config();
+        plugin.auth = PluginMcpContainerAuth::None;
+
+        let config = build_plugin_container_config(&plugin, 18420, "scope-1");
+
+        assert_eq!(config.bind_mounts.len(), 1);
+        assert_eq!(
+            config.bind_mounts[0].host_path,
+            Path::new("/tmp/fluensy-data")
+        );
+        assert_eq!(config.bind_mounts[0].container_path, Path::new("/data"));
+        assert!(!config.bind_mounts[0].readonly);
+    }
+
+    #[test]
+    fn plugin_isolation_strategy_matches_runtime() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            plugin_isolation_strategy(ContainerRuntime::Docker),
+            ContainerNetworkIsolationStrategy::PublishToLoopback
+        );
+        #[cfg(not(target_os = "macos"))]
+        assert_eq!(
+            plugin_isolation_strategy(ContainerRuntime::Docker),
+            ContainerNetworkIsolationStrategy::DiscoverContainerIp
+        );
+        assert_eq!(
+            plugin_isolation_strategy(ContainerRuntime::MacOSContainer),
+            ContainerNetworkIsolationStrategy::PublishToLoopback
+        );
+    }
+
     #[tokio::test]
     async fn orphan_preflight_requires_explicit_gc() {
         let port = MockContainerPort::new(MockState {
@@ -600,7 +938,9 @@ mod tests {
 
         let error = maybe_handle_managed_container_orphans(
             &port,
-            &sample_startup(),
+            ContainerRuntime::Docker,
+            "brain3-mcp-vault-tools",
+            BRAIN3_MCP_ROLE_LABEL_VALUE,
             RuntimeStartupPolicy::configured(false),
             "scope-1",
         )
@@ -637,7 +977,9 @@ mod tests {
 
         maybe_handle_managed_container_orphans(
             &port,
-            &sample_startup(), // Docker runtime
+            ContainerRuntime::Docker,
+            "brain3-mcp-vault-tools",
+            BRAIN3_MCP_ROLE_LABEL_VALUE,
             RuntimeStartupPolicy::configured(true),
             "scope-1",
         )
@@ -710,7 +1052,9 @@ mod tests {
 
         maybe_handle_managed_container_orphans(
             &port,
-            &startup,
+            startup.runtime,
+            startup.container_name.as_str(),
+            BRAIN3_MCP_ROLE_LABEL_VALUE,
             RuntimeStartupPolicy::configured(true),
             "scope-1",
         )

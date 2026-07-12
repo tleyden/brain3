@@ -267,7 +267,10 @@ impl ContainerPort for DockerContainerAdapter {
             args.push("--workdir".into());
             args.push(wd.clone());
         }
-        if config.isolation_strategy.is_some() {
+        if matches!(
+            config.isolation_strategy,
+            Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
+        ) {
             args.push("--network".into());
             args.push(config.network_name.clone());
         }

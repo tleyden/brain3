@@ -741,10 +741,11 @@ async fn run_cli_mode(
     let _diag_listener =
         diagnostics::spawn_diagnostics_signal_listener(Arc::clone(&runtime.config));
 
-    server::run_gateway_server_until(
+    server::run_gateway_server_until_with_plugin_containers(
         host,
         Arc::clone(&runtime.config),
         runtime.upstream_secret.clone(),
+        runtime.plugin_mcp_containers.clone(),
         shutdown_signal(),
     )
     .await?;

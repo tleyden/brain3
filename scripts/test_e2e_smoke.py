@@ -25,7 +25,7 @@ class E2ESmokeScriptTests(unittest.TestCase):
         exit_code = module.run(["e2e_smoke_starts_gateway"], run_command=fake_run)
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         self.assertEqual(
             calls[0][0],
             [
@@ -40,6 +40,18 @@ class E2ESmokeScriptTests(unittest.TestCase):
         )
         self.assertEqual(
             calls[1][0],
+            [
+                "docker",
+                "build",
+                "-f",
+                "./testdata/e2e_hello_mcp_container/Containerfile",
+                "-t",
+                "brain3-e2e-hello-mcp:e2e-local",
+                "./testdata/e2e_hello_mcp_container",
+            ],
+        )
+        self.assertEqual(
+            calls[2][0],
             [
                 "cargo",
                 "test",
@@ -67,14 +79,17 @@ class E2ESmokeScriptTests(unittest.TestCase):
         exit_code = module.run([], run_command=fake_run)
 
         self.assertEqual(exit_code, 0)
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(len(calls), 6)
         self.assertEqual(calls[0][0][0:2], ["docker", "build"])
-        self.assertEqual(calls[1][0][-1], "e2e_smoke_1_local_docker")
-        self.assertEqual(calls[2][0][-1], "e2e_smoke_2_oauth_public_flow")
-        self.assertEqual(calls[3][0][-1], "e2e_smoke_3_oauth_quick_tunnel")
-        self.assertNotIn("--fail-fast", calls[1][0])
+        self.assertEqual(calls[1][0][0:2], ["docker", "build"])
         self.assertNotIn("--fail-fast", calls[2][0])
         self.assertNotIn("--fail-fast", calls[3][0])
+        self.assertNotIn("--fail-fast", calls[4][0])
+        self.assertNotIn("--fail-fast", calls[5][0])
+        self.assertEqual(calls[2][0][-1], "e2e_smoke_1_local_docker")
+        self.assertEqual(calls[3][0][-1], "e2e_smoke_2_oauth_public_flow")
+        self.assertEqual(calls[4][0][-1], "e2e_smoke_3_oauth_quick_tunnel")
+        self.assertEqual(calls[5][0][-1], "e2e_smoke_5_plugin_mcp_container")
 
     def test_default_run_aborts_before_oauth_when_local_test_fails(self):
         module = load_script()
@@ -89,9 +104,10 @@ class E2ESmokeScriptTests(unittest.TestCase):
         exit_code = module.run([], run_command=fake_run)
 
         self.assertEqual(exit_code, 23)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0][0][0:2], ["docker", "build"])
-        self.assertEqual(calls[1][0][-1], "e2e_smoke_1_local_docker")
+        self.assertEqual(calls[1][0][0:2], ["docker", "build"])
+        self.assertEqual(calls[2][0][-1], "e2e_smoke_1_local_docker")
 
     def test_build_failure_aborts_before_cargo_runs(self):
         module = load_script()

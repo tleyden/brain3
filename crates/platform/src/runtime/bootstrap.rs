@@ -2,12 +2,18 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 use brain3_core::domain::errors::ContainerError;
-use brain3_core::domain::model::{ContainerNetworkIsolationStrategy, GatewayConfig, TunnelConfig};
+use brain3_core::domain::model::{
+    ContainerNetworkIsolationStrategy, GatewayConfig, PluginMcpContainerConfig, TunnelConfig,
+};
 use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::tunnel::TunnelPort;
 
+use crate::config::brain3_yaml::load_plugin_mcp_containers_config;
 use crate::config::log_config;
-use crate::container::startup::{ensure_mcp_container, installation_scope_id, stop_mcp_container};
+use crate::container::startup::{
+    ensure_mcp_container, ensure_plugin_mcp_container, installation_scope_id, stop_mcp_container,
+    stop_plugin_mcp_container, StartedPluginMcpContainer,
+};
 use crate::tunnel::start_tunnel;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,6 +43,7 @@ pub struct RuntimeBootstrap {
     pub public_url: Option<String>,
     pub container_status: StartupStatus,
     pub tunnel_status: StartupStatus,
+    pub plugin_mcp_containers: Vec<StartedPluginMcpContainer>,
     managed_container_started: bool,
     tunnel: Option<Box<dyn TunnelPort>>,
 }
@@ -58,6 +65,7 @@ impl RuntimeBootstrap {
             public_url,
             container_status,
             tunnel_status,
+            plugin_mcp_containers: Vec::new(),
             managed_container_started,
             tunnel: None,
         }
@@ -73,6 +81,17 @@ impl RuntimeBootstrap {
 
     pub async fn shutdown_managed_runtime(&mut self) {
         self.stop_tunnel().await;
+
+        for plugin in &self.plugin_mcp_containers {
+            if let Err(error) = stop_plugin_mcp_container(&plugin.config).await {
+                tracing::warn!(
+                    container = %plugin.config.name,
+                    runtime = ?plugin.config.runtime,
+                    error = %error,
+                    "failed to stop managed Plugin MCP Container during shutdown; continuing exit"
+                );
+            }
+        }
 
         let Some(startup) = self.config.container.as_ref() else {
             return;
@@ -283,6 +302,21 @@ pub async fn bootstrap_configured_runtime(
     } else {
         container_status
     };
+
+    let plugin_mcp_containers = if container_status.allows_gateway_start() {
+        start_plugin_mcp_containers(
+            &launch_plan.paths.app_home,
+            startup_policy,
+            installation_id.as_str(),
+        )
+        .await
+    } else {
+        tracing::debug!(
+            container_status = ?container_status,
+            "skipping Plugin MCP Containers because core MCP container is not ready"
+        );
+        Vec::new()
+    };
     let pid_file = launch_plan.paths.app_home.join("cloudflared.pid");
 
     let (tunnel_status, public_url, tunnel_guard) = if !container_status.allows_gateway_start() {
@@ -326,9 +360,84 @@ pub async fn bootstrap_configured_runtime(
         public_url,
         container_status,
         tunnel_status,
+        plugin_mcp_containers,
         managed_container_started,
         tunnel: tunnel_guard,
     })
+}
+
+async fn start_plugin_mcp_containers(
+    app_home: &std::path::Path,
+    startup_policy: RuntimeStartupPolicy,
+    installation_id: &str,
+) -> Vec<StartedPluginMcpContainer> {
+    let config_path = app_home.join("brain3.yaml");
+    let configs = load_plugin_mcp_containers_config(&config_path);
+    if configs.is_empty() {
+        tracing::debug!(
+            path = %config_path.display(),
+            "no Plugin MCP Containers configured"
+        );
+        return Vec::new();
+    }
+
+    tracing::info!(
+        path = %config_path.display(),
+        count = configs.len(),
+        "loaded Plugin MCP Container configs"
+    );
+
+    let mut started = Vec::new();
+    for config in configs {
+        match ensure_plugin_mcp_container(&config, startup_policy, installation_id).await {
+            Ok(container) => {
+                tracing::info!(
+                    container = %container.config.name,
+                    host_port = container.host_port,
+                    container_ip = ?container.container_ip,
+                    "Plugin MCP Container ready"
+                );
+                started.push(container);
+            }
+            Err(error) => {
+                log_plugin_container_startup_failure(&config, &error);
+                if error.started_container() {
+                    stop_failed_plugin_container(&config).await;
+                }
+            }
+        }
+    }
+
+    started
+}
+
+fn log_plugin_container_startup_failure(config: &PluginMcpContainerConfig, error: &ContainerError) {
+    let summary = error.summary();
+    if let Some(logs) = error.recent_logs() {
+        tracing::error!(
+            container = %config.name,
+            summary,
+            logs = %logs,
+            "Plugin MCP Container startup failed; continuing without it"
+        );
+    } else {
+        tracing::error!(
+            container = %config.name,
+            summary,
+            "Plugin MCP Container startup failed; continuing without it"
+        );
+    }
+}
+
+async fn stop_failed_plugin_container(config: &PluginMcpContainerConfig) {
+    if let Err(error) = stop_plugin_mcp_container(config).await {
+        tracing::warn!(
+            container = %config.name,
+            runtime = ?config.runtime,
+            error = %error,
+            "failed to stop Plugin MCP Container after startup failure; continuing gateway startup"
+        );
+    }
 }
 
 fn container_failure_status(container_name: &str, error: &ContainerError) -> StartupStatus {
