@@ -78,8 +78,9 @@ pub struct PluginMcpContainerConfig {
     /// Whether this plugin uses an internal-only container network.
     ///
     /// This mirrors `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` for the primary
-    /// container, scoped to this plugin. When false, the runtime's normal
-    /// default network is used and the plugin regains outbound egress.
+    /// container, scoped to this plugin. When false, the plugin joins the named
+    /// network without requiring it to be internal and regains outbound egress
+    /// when that network permits it.
     pub network_isolation: bool,
     pub auth: PluginMcpContainerAuth,
 }

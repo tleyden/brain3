@@ -7,41 +7,112 @@ use brain3_core::domain::model::{
 use brain3_core::ports::container::{ContainerId, ContainerPort, NetworkPreparation};
 use serde_json::Value;
 
-use super::process::{command_succeeds, run_command};
+use super::process::{command_succeeds, format_launch_command, run_command};
 
 pub struct DockerContainerAdapter;
 
-enum InternalNetworkState {
+#[derive(Debug, PartialEq, Eq)]
+enum NetworkState {
     Missing,
     Compatible,
     Incompatible,
 }
 
-async fn inspect_internal_network_state(
-    name: &str,
-) -> Result<InternalNetworkState, ContainerError> {
+fn parse_network_inspect_state(output: &str, internal: bool) -> NetworkState {
+    if !internal || output.trim() == "true" {
+        NetworkState::Compatible
+    } else {
+        NetworkState::Incompatible
+    }
+}
+
+async fn network_is_internal(name: &str) -> Result<bool, ContainerError> {
+    let output = run_command(
+        "docker",
+        &["network", "inspect", "--format", "{{.Internal}}", name],
+    )
+    .await?;
+    Ok(output.trim() == "true")
+}
+
+async fn inspect_network_state(name: &str, internal: bool) -> Result<NetworkState, ContainerError> {
     match run_command(
         "docker",
         &["network", "inspect", "--format", "{{.Internal}}", name],
     )
     .await
     {
-        Ok(out) => {
-            if out.trim() == "true" {
-                Ok(InternalNetworkState::Compatible)
-            } else {
-                Ok(InternalNetworkState::Incompatible)
-            }
-        }
-        Err(ContainerError::CommandFailed { .. }) => Ok(InternalNetworkState::Missing),
+        Ok(out) => Ok(parse_network_inspect_state(&out, internal)),
+        Err(ContainerError::CommandFailed { .. }) => Ok(NetworkState::Missing),
         Err(e) => Err(e),
     }
 }
 
-async fn create_internal_network(name: &str) -> Result<(), ContainerError> {
-    tracing::info!(network = name, "creating fresh internal MCP network");
-    run_command("docker", &["network", "create", "--internal", name]).await?;
+async fn create_network(name: &str, internal: bool) -> Result<(), ContainerError> {
+    tracing::info!(network = name, internal, "creating fresh MCP network");
+    let mut args = vec!["network", "create"];
+    if internal {
+        args.push("--internal");
+    }
+    args.push(name);
+    run_command("docker", &args).await?;
     Ok(())
+}
+
+fn build_run_args(config: &ContainerConfig) -> Vec<String> {
+    let mut args: Vec<String> = vec!["run".into(), "--name".into(), config.name.clone()];
+
+    if config.detach {
+        args.push("--detach".into());
+    }
+    if config.remove_on_exit {
+        args.push("--rm".into());
+    }
+    if let Some(ref user) = config.user {
+        args.push("--user".into());
+        args.push(user.clone());
+    }
+    if !matches!(
+        config.isolation_strategy,
+        Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
+    ) {
+        for pm in &config.port_mappings {
+            args.push("--publish".into());
+            args.push(format!(
+                "{}:{}:{}",
+                pm.host_address, pm.host_port, pm.container_port
+            ));
+        }
+    }
+    for (key, value) in &config.env_vars {
+        args.push("--env".into());
+        args.push(format!("{key}={value}"));
+    }
+    for label in &config.labels {
+        args.push("--label".into());
+        args.push(format!("{}={}", label.key, label.value));
+    }
+    for bm in &config.bind_mounts {
+        let mut spec = format!(
+            "type=bind,source={},target={}",
+            bm.host_path.display(),
+            bm.container_path.display()
+        );
+        if bm.readonly {
+            spec.push_str(",readonly");
+        }
+        args.push("--mount".into());
+        args.push(spec);
+    }
+    if let Some(ref wd) = config.workdir {
+        args.push("--workdir".into());
+        args.push(wd.clone());
+    }
+    args.push("--network".into());
+    args.push(config.network_name.clone());
+    args.push(config.image.clone());
+    args.extend(config.command.iter().cloned());
+    args
 }
 
 fn docker_label_filters(scope: &ManagedContainerScope) -> Vec<String> {
@@ -177,17 +248,18 @@ impl ContainerPort for DockerContainerAdapter {
         Ok(())
     }
 
-    async fn ensure_internal_network(
+    async fn ensure_network(
         &self,
         network_name: &str,
+        internal: bool,
     ) -> Result<NetworkPreparation, ContainerError> {
-        match inspect_internal_network_state(network_name).await? {
-            InternalNetworkState::Missing => {
-                create_internal_network(network_name).await?;
+        match inspect_network_state(network_name, internal).await? {
+            NetworkState::Missing => {
+                create_network(network_name, internal).await?;
                 Ok(NetworkPreparation::Created)
             }
-            InternalNetworkState::Compatible => Ok(NetworkPreparation::Reused),
-            InternalNetworkState::Incompatible => Err(ContainerError::Conflict(format!(
+            NetworkState::Compatible => Ok(NetworkPreparation::Reused),
+            NetworkState::Incompatible => Err(ContainerError::Conflict(format!(
                 "container network name '{}' already exists and is not a compatible internal Brain3 network; choose a different container network name",
                 network_name
             ))),
@@ -240,68 +312,41 @@ impl ContainerPort for DockerContainerAdapter {
     }
 
     async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
-        let mut args: Vec<String> = vec!["run".into(), "--name".into(), config.name.clone()];
-
-        if config.detach {
-            args.push("--detach".into());
-        }
-        if config.remove_on_exit {
-            args.push("--rm".into());
-        }
-        if let Some(ref user) = config.user {
-            args.push("--user".into());
-            args.push(user.clone());
-        }
-        if !matches!(
-            config.isolation_strategy,
-            Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
-        ) {
-            for pm in &config.port_mappings {
-                args.push("--publish".into());
-                args.push(format!(
-                    "{}:{}:{}",
-                    pm.host_address, pm.host_port, pm.container_port
-                ));
-            }
-        }
-        for (key, value) in &config.env_vars {
-            args.push("--env".into());
-            args.push(format!("{key}={value}"));
-        }
-        for label in &config.labels {
-            args.push("--label".into());
-            args.push(format!("{}={}", label.key, label.value));
-        }
-        for bm in &config.bind_mounts {
-            let mut spec = format!(
-                "type=bind,source={},target={}",
-                bm.host_path.display(),
-                bm.container_path.display()
-            );
-            if bm.readonly {
-                spec.push_str(",readonly");
-            }
-            args.push("--mount".into());
-            args.push(spec);
-        }
-        if let Some(ref wd) = config.workdir {
-            args.push("--workdir".into());
-            args.push(wd.clone());
-        }
-        if matches!(
-            config.isolation_strategy,
-            Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
-        ) {
-            args.push("--network".into());
-            args.push(config.network_name.clone());
-        }
-        args.push(config.image.clone());
-        for c in &config.command {
-            args.push(c.clone());
-        }
-
+        let needs_default_bridge = config.isolation_strategy.is_none()
+            && network_is_internal(&config.network_name).await?;
+        let args = build_run_args(config);
         let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        tracing::info!(
+            container = %config.name,
+            command = %format_launch_command("docker", &args),
+            "launching container"
+        );
         run_command("docker", &refs).await?;
+        if needs_default_bridge {
+            let bridge_args = vec![
+                "network".to_string(),
+                "connect".to_string(),
+                "bridge".to_string(),
+                config.name.clone(),
+            ];
+            tracing::info!(
+                container = %config.name,
+                network = %config.network_name,
+                command = %format_launch_command("docker", &bridge_args),
+                "attaching non-isolated container to default bridge"
+            );
+            let bridge_refs = bridge_args.iter().map(String::as_str).collect::<Vec<_>>();
+            if let Err(error) = run_command("docker", &bridge_refs).await {
+                tracing::error!(
+                    container = %config.name,
+                    network = %config.network_name,
+                    error = %error,
+                    "failed to attach non-isolated container to default bridge; removing partial container"
+                );
+                let _ = run_command("docker", &["rm", "-f", &config.name]).await;
+                return Err(error);
+            }
+        }
         Ok(ContainerId(config.name.clone()))
     }
 
@@ -334,6 +379,25 @@ mod tests {
             workdir: None,
             command: Vec::new(),
         }
+    }
+
+    #[test]
+    fn run_args_attach_non_isolated_container_to_configured_network() {
+        let mut config = isolated_config(ContainerNetworkIsolationStrategy::PublishToLoopback);
+        config.isolation_strategy = None;
+
+        let args = build_run_args(&config);
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--network", "test-plugin-net"]));
+    }
+
+    #[test]
+    fn open_network_accepts_existing_internal_network() {
+        assert_eq!(
+            parse_network_inspect_state("true\n", false),
+            NetworkState::Compatible
+        );
     }
 
     #[cfg(target_os = "macos")]

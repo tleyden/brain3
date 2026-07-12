@@ -721,9 +721,10 @@ mod tests {
             Ok(())
         }
 
-        async fn ensure_internal_network(
+        async fn ensure_network(
             &self,
             _network_name: &str,
+            _internal: bool,
         ) -> Result<NetworkPreparation, ContainerError> {
             Ok(NetworkPreparation::Created)
         }

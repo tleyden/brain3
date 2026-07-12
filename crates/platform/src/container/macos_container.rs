@@ -7,12 +7,12 @@ use brain3_core::domain::model::{
 use brain3_core::ports::container::{ContainerId, ContainerPort, NetworkPreparation};
 use serde_json::Value;
 
-use super::process::{command_succeeds, run_command};
+use super::process::{command_succeeds, format_launch_command, run_command};
 
 pub struct MacOsContainerAdapter;
 
 #[derive(Debug, PartialEq, Eq)]
-enum InternalNetworkState {
+enum NetworkState {
     Missing,
     Compatible,
     Incompatible,
@@ -58,7 +58,10 @@ fn macos_network_entry_is_compatible(entry: &Value) -> bool {
     mode.eq_ignore_ascii_case("hostOnly") && plugin == "container-network-vmnet"
 }
 
-fn parse_macos_network_inspect_state(output: &str) -> Result<InternalNetworkState, ContainerError> {
+fn parse_macos_network_inspect_state(
+    output: &str,
+    internal: bool,
+) -> Result<NetworkState, ContainerError> {
     let value: Value = serde_json::from_str(output).map_err(|error| {
         ContainerError::Other(format!(
             "failed to parse macOS container network inspect output: {error}"
@@ -69,36 +72,92 @@ fn parse_macos_network_inspect_state(output: &str) -> Result<InternalNetworkStat
     })?;
 
     if entries.is_empty() {
-        return Ok(InternalNetworkState::Missing);
+        return Ok(NetworkState::Missing);
     }
 
-    if entries.iter().any(macos_network_entry_is_compatible) {
-        Ok(InternalNetworkState::Compatible)
+    if !internal || entries.iter().any(macos_network_entry_is_compatible) {
+        Ok(NetworkState::Compatible)
     } else {
-        Ok(InternalNetworkState::Incompatible)
+        Ok(NetworkState::Incompatible)
     }
 }
 
-async fn inspect_internal_network_state(
-    name: &str,
-) -> Result<InternalNetworkState, ContainerError> {
+async fn inspect_network_state(name: &str, internal: bool) -> Result<NetworkState, ContainerError> {
     match run_command("container", &["network", "inspect", name]).await {
         Ok(out) => {
             // Apple `container network inspect <missing-name>` can exit 0 and
             // print `[]`. Parse the JSON instead of trusting the exit status so
             // a missing network is created instead of reported as a false
             // incompatible-network conflict.
-            parse_macos_network_inspect_state(&out)
+            parse_macos_network_inspect_state(&out, internal)
         }
-        Err(ContainerError::CommandFailed { .. }) => Ok(InternalNetworkState::Missing),
+        Err(ContainerError::CommandFailed { .. }) => Ok(NetworkState::Missing),
         Err(e) => Err(e),
     }
 }
 
-async fn create_internal_network(name: &str) -> Result<(), ContainerError> {
-    tracing::info!(network = name, "creating fresh internal MCP network");
-    run_command("container", &["network", "create", "--internal", name]).await?;
+async fn create_network(name: &str, internal: bool) -> Result<(), ContainerError> {
+    tracing::info!(network = name, internal, "creating fresh MCP network");
+    let mut args = vec!["network", "create"];
+    if internal {
+        args.push("--internal");
+    }
+    args.push(name);
+    run_command("container", &args).await?;
     Ok(())
+}
+
+fn build_run_args(config: &ContainerConfig) -> Vec<String> {
+    let mut args: Vec<String> = vec!["run".into(), "--name".into(), config.name.clone()];
+
+    if config.detach {
+        args.push("--detach".into());
+    }
+    if let Some(ref user) = config.user {
+        args.push("--user".into());
+        args.push(user.clone());
+    }
+    if !matches!(
+        config.isolation_strategy,
+        Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
+    ) {
+        for pm in &config.port_mappings {
+            args.push("--publish".into());
+            args.push(format!(
+                "{}:{}:{}",
+                pm.host_address, pm.host_port, pm.container_port
+            ));
+        }
+    }
+    for (key, value) in &config.env_vars {
+        args.push("--env".into());
+        args.push(format!("{key}={value}"));
+    }
+    for label in &config.labels {
+        args.push("--label".into());
+        args.push(format!("{}={}", label.key, label.value));
+    }
+    for bm in &config.bind_mounts {
+        let mut spec = format!(
+            "type=bind,source={},target={}",
+            bm.host_path.display(),
+            bm.container_path.display()
+        );
+        if bm.readonly {
+            spec.push_str(",readonly");
+        }
+        args.push("--mount".into());
+        args.push(spec);
+    }
+    if let Some(ref wd) = config.workdir {
+        args.push("--workdir".into());
+        args.push(wd.clone());
+    }
+    args.push("--network".into());
+    args.push(config.network_name.clone());
+    args.push(config.image.clone());
+    args.extend(config.command.iter().cloned());
+    args
 }
 
 fn macos_managed_labels_match(labels: &[ContainerLabel], scope: &ManagedContainerScope) -> bool {
@@ -253,17 +312,18 @@ impl ContainerPort for MacOsContainerAdapter {
         Ok(())
     }
 
-    async fn ensure_internal_network(
+    async fn ensure_network(
         &self,
         network_name: &str,
+        internal: bool,
     ) -> Result<NetworkPreparation, ContainerError> {
-        match inspect_internal_network_state(network_name).await? {
-            InternalNetworkState::Missing => {
-                create_internal_network(network_name).await?;
+        match inspect_network_state(network_name, internal).await? {
+            NetworkState::Missing => {
+                create_network(network_name, internal).await?;
                 Ok(NetworkPreparation::Created)
             }
-            InternalNetworkState::Compatible => Ok(NetworkPreparation::Reused),
-            InternalNetworkState::Incompatible => Err(ContainerError::Conflict(format!(
+            NetworkState::Compatible => Ok(NetworkPreparation::Reused),
+            NetworkState::Incompatible => Err(ContainerError::Conflict(format!(
                 "container network name '{}' already exists and is not a compatible internal Brain3 network; choose a different container network name",
                 network_name
             ))),
@@ -319,61 +379,13 @@ impl ContainerPort for MacOsContainerAdapter {
     }
 
     async fn run(&self, config: &ContainerConfig) -> Result<ContainerId, ContainerError> {
-        let mut args: Vec<String> = vec!["run".into(), "--name".into(), config.name.clone()];
-
-        if config.detach {
-            args.push("--detach".into());
-        }
-        if let Some(ref user) = config.user {
-            args.push("--user".into());
-            args.push(user.clone());
-        }
-        if !matches!(
-            config.isolation_strategy,
-            Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
-        ) {
-            for pm in &config.port_mappings {
-                args.push("--publish".into());
-                args.push(format!(
-                    "{}:{}:{}",
-                    pm.host_address, pm.host_port, pm.container_port
-                ));
-            }
-        }
-        for (key, value) in &config.env_vars {
-            args.push("--env".into());
-            args.push(format!("{key}={value}"));
-        }
-        for label in &config.labels {
-            args.push("--label".into());
-            args.push(format!("{}={}", label.key, label.value));
-        }
-        for bm in &config.bind_mounts {
-            let mut spec = format!(
-                "type=bind,source={},target={}",
-                bm.host_path.display(),
-                bm.container_path.display()
-            );
-            if bm.readonly {
-                spec.push_str(",readonly");
-            }
-            args.push("--mount".into());
-            args.push(spec);
-        }
-        if let Some(ref wd) = config.workdir {
-            args.push("--workdir".into());
-            args.push(wd.clone());
-        }
-        if config.isolation_strategy.is_some() {
-            args.push("--network".into());
-            args.push(config.network_name.clone());
-        }
-        args.push(config.image.clone());
-        for c in &config.command {
-            args.push(c.clone());
-        }
-
+        let args = build_run_args(config);
         let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        tracing::info!(
+            container = %config.name,
+            command = %format_launch_command("container", &args),
+            "launching container"
+        );
         run_command("container", &refs).await?;
         Ok(ContainerId(config.name.clone()))
     }
@@ -422,6 +434,41 @@ mod tests {
             .expect("native macOS container isolation should be supported");
     }
 
+    fn non_isolated_config() -> ContainerConfig {
+        ContainerConfig {
+            image: "example:latest".into(),
+            name: "test_plugin".into(),
+            isolation_strategy: None,
+            network_name: "test-plugin-net".into(),
+            port_mappings: Vec::new(),
+            env_vars: Vec::new(),
+            labels: Vec::new(),
+            bind_mounts: Vec::new(),
+            user: None,
+            detach: true,
+            remove_on_exit: false,
+            workdir: None,
+            command: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn run_args_attach_non_isolated_container_to_configured_network() {
+        let args = build_run_args(&non_isolated_config());
+        assert!(args
+            .windows(2)
+            .any(|pair| pair == ["--network", "test-plugin-net"]));
+    }
+
+    #[test]
+    fn open_network_accepts_existing_internal_network() {
+        let output = r#"[{"name":"test-plugin-net","internal":true}]"#;
+        assert_eq!(
+            parse_macos_network_inspect_state(output, false).expect("network inspect should parse"),
+            NetworkState::Compatible
+        );
+    }
+
     #[test]
     fn parse_macos_inspect_output_reads_labels_and_status() {
         let output = r#"
@@ -461,8 +508,8 @@ mod tests {
     #[test]
     fn parse_macos_network_inspect_state_treats_empty_array_as_missing() {
         assert_eq!(
-            parse_macos_network_inspect_state("[]").expect("empty array should parse"),
-            InternalNetworkState::Missing
+            parse_macos_network_inspect_state("[]", true).expect("empty array should parse"),
+            NetworkState::Missing
         );
     }
 
@@ -493,8 +540,8 @@ mod tests {
 "#;
 
         assert_eq!(
-            parse_macos_network_inspect_state(output).expect("network inspect should parse"),
-            InternalNetworkState::Compatible
+            parse_macos_network_inspect_state(output, true).expect("network inspect should parse"),
+            NetworkState::Compatible
         );
     }
 
@@ -503,8 +550,8 @@ mod tests {
         let output = r#"[{"name":"brain3-mcp-net","internal":true}]"#;
 
         assert_eq!(
-            parse_macos_network_inspect_state(output).expect("network inspect should parse"),
-            InternalNetworkState::Compatible
+            parse_macos_network_inspect_state(output, true).expect("network inspect should parse"),
+            NetworkState::Compatible
         );
     }
 
@@ -527,14 +574,14 @@ mod tests {
 "#;
 
         assert_eq!(
-            parse_macos_network_inspect_state(output).expect("network inspect should parse"),
-            InternalNetworkState::Incompatible
+            parse_macos_network_inspect_state(output, true).expect("network inspect should parse"),
+            NetworkState::Incompatible
         );
     }
 
     #[test]
     fn parse_macos_network_inspect_state_rejects_malformed_output() {
-        let error = parse_macos_network_inspect_state("not json")
+        let error = parse_macos_network_inspect_state("not json", true)
             .expect_err("malformed inspect output should be an error");
 
         assert!(matches!(error, ContainerError::Other(_)));
