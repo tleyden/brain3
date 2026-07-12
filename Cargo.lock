@@ -389,6 +389,7 @@ dependencies = [
  "brain3-core",
  "chrono",
  "dotenvy",
+ "futures",
  "governor",
  "libc",
  "oxide-auth",

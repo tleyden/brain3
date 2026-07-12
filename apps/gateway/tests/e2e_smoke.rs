@@ -43,6 +43,7 @@ const OAUTH_USERNAME: &str = "e2e-test-user";
 const OAUTH_PASSWORD: &str = "e2e-test-password";
 const OAUTH_REDIRECT_URI: &str = "https://claude.ai/api/mcp/auth_callback";
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(10);
+const PROCESS_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
 const NETWORKED_E2E_TIMEOUT: Duration = Duration::from_secs(15);
 const HELLO_MCP_CONTAINER_NAME: &str = "hello_mcp";
 const HELLO_MCP_BEARER_TOKEN: &str = "e2e-hello-mcp-token";
@@ -395,6 +396,42 @@ impl Brain3Process {
             let _ = stdout_reader.join();
         }
     }
+
+    async fn shutdown_and_wait(mut self) -> io::Result<Duration> {
+        if matches!(self.child.try_wait(), Ok(Some(_))) {
+            self.join_stdout_reader();
+            return Ok(Duration::ZERO);
+        }
+
+        let started = Instant::now();
+        let pid = self.child.id().to_string();
+        let status = Command::new("kill").arg("-INT").arg(&pid).status()?;
+        if !status.success() {
+            return Err(io::Error::other(format!(
+                "failed to send SIGINT to brain3 pid {pid}: {status}"
+            )));
+        }
+
+        while started.elapsed() < PROCESS_SHUTDOWN_TIMEOUT {
+            if matches!(self.child.try_wait(), Ok(Some(_))) {
+                let elapsed = started.elapsed();
+                self.join_stdout_reader();
+                return Ok(elapsed);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        self.join_stdout_reader();
+        Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "brain3 did not exit within {}s after SIGINT",
+                PROCESS_SHUTDOWN_TIMEOUT.as_secs()
+            ),
+        ))
+    }
 }
 
 fn real_cloudflared_on_path() -> bool {
@@ -484,7 +521,7 @@ impl Drop for Brain3Process {
         let pid = self.child.id().to_string();
         let _ = Command::new("kill").arg("-INT").arg(&pid).status();
 
-        let deadline = Instant::now() + Duration::from_secs(10);
+        let deadline = Instant::now() + PROCESS_SHUTDOWN_TIMEOUT;
         while Instant::now() < deadline {
             if matches!(self.child.try_wait(), Ok(Some(_))) {
                 self.join_stdout_reader();
@@ -824,9 +861,9 @@ async fn e2e_smoke_5_plugin_mcp_container() -> Result<(), Box<dyn std::error::Er
     temp.write_env_file()?;
     temp.write_brain3_yaml_with_hello_mcp()?;
 
-    {
+    let shutdown_duration = {
         let gateway = Brain3Process::spawn(&temp, TunnelMode::Disabled).await?;
-        let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
+        let diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
         assert_container_running_and_vault_visible(&gateway).await?;
         let client = connect_local_mcp().await?;
 
@@ -849,7 +886,14 @@ async fn e2e_smoke_5_plugin_mcp_container() -> Result<(), Box<dyn std::error::Er
         assert_eq!(hello, "hello world");
 
         client.cancel().await?;
-    }
+        drop(diagnostics_guard);
+        gateway.shutdown_and_wait().await?
+    };
+
+    assert!(
+        shutdown_duration < Duration::from_secs(8),
+        "managed container shutdown took {shutdown_duration:?}, expected less than 8s"
+    );
 
     assert_no_container_residue().await?;
     Ok(())

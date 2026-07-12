@@ -60,7 +60,12 @@ async fn create_network(name: &str, internal: bool) -> Result<(), ContainerError
 }
 
 fn build_run_args(config: &ContainerConfig) -> Vec<String> {
-    let mut args: Vec<String> = vec!["run".into(), "--name".into(), config.name.clone()];
+    let mut args: Vec<String> = vec![
+        "run".into(),
+        "--init".into(),
+        "--name".into(),
+        config.name.clone(),
+    ];
 
     if config.detach {
         args.push("--detach".into());
@@ -113,6 +118,10 @@ fn build_run_args(config: &ContainerConfig) -> Vec<String> {
     args.push(config.image.clone());
     args.extend(config.command.iter().cloned());
     args
+}
+
+fn build_stop_args(id: &ContainerId) -> Vec<String> {
+    vec!["stop".into(), "--time".into(), "5".into(), id.0.clone()]
 }
 
 fn docker_label_filters(scope: &ManagedContainerScope) -> Vec<String> {
@@ -351,7 +360,9 @@ impl ContainerPort for DockerContainerAdapter {
     }
 
     async fn stop(&self, id: &ContainerId) -> Result<(), ContainerError> {
-        run_command("docker", &["stop", &id.0]).await.map(|_| ())
+        let args = build_stop_args(id);
+        let refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+        run_command("docker", &refs).await.map(|_| ())
     }
 
     async fn remove(&self, id: &ContainerId) -> Result<(), ContainerError> {
@@ -390,6 +401,23 @@ mod tests {
         assert!(args
             .windows(2)
             .any(|pair| pair == ["--network", "test-plugin-net"]));
+        assert!(args.iter().any(|arg| arg == "--init"));
+    }
+
+    #[test]
+    fn run_args_enable_init_for_isolated_container() {
+        let args = build_run_args(&isolated_config(
+            ContainerNetworkIsolationStrategy::PublishToLoopback,
+        ));
+        assert!(args.iter().any(|arg| arg == "--init"));
+    }
+
+    #[test]
+    fn stop_args_bound_grace_period() {
+        assert_eq!(
+            build_stop_args(&ContainerId("test_plugin".into())),
+            ["stop", "--time", "5", "test_plugin"]
+        );
     }
 
     #[test]
