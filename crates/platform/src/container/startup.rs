@@ -28,8 +28,6 @@ const GC_POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_mill
 #[cfg(test)]
 const GC_POLL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_millis(100);
 
-const DEFAULT_PLUGIN_MCP_NETWORK_NAME: &str = "brain3-mcp-net";
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartedPluginMcpContainer {
     pub config: PluginMcpContainerConfig,
@@ -123,8 +121,10 @@ pub async fn ensure_plugin_mcp_container(
     );
     tracing::info!(
         container = %plugin.name,
-        network_isolated = true,
-        isolation_strategy = ?plugin_isolation_strategy(plugin.runtime),
+        network_isolated = plugin.network_isolation,
+        isolation_strategy = ?plugin
+            .network_isolation
+            .then(|| plugin_isolation_strategy(plugin.runtime)),
         startup_policy = ?startup_policy,
         role = %role,
         "resolved Plugin MCP Container network isolation mode"
@@ -369,11 +369,14 @@ fn build_plugin_container_config(
         });
     }
 
-    let isolation_strategy = Some(plugin_isolation_strategy(plugin.runtime));
+    let isolation_strategy = plugin
+        .network_isolation
+        .then(|| plugin_isolation_strategy(plugin.runtime));
     tracing::info!(
         container = %plugin.name,
         installation_id,
-        network_isolated = true,
+        network = %plugin.network_name,
+        network_isolated = plugin.network_isolation,
         isolation_strategy = ?isolation_strategy,
         host_probe_target = %format!("127.0.0.1:{host_port}"),
         isolated_probe_target = %format!("<container-ip>:{}", plugin.container_port),
@@ -385,7 +388,7 @@ fn build_plugin_container_config(
         image: plugin.image.clone(),
         name: plugin.name.clone(),
         isolation_strategy,
-        network_name: DEFAULT_PLUGIN_MCP_NETWORK_NAME.into(),
+        network_name: plugin.network_name.clone(),
         port_mappings: vec![PortMapping {
             host_address: "127.0.0.1".into(),
             host_port,
@@ -711,9 +714,17 @@ mod tests {
             Ok(String::new())
         }
 
-        async fn ensure_internal_network(
+        fn validate_internal_network_support(
+            &self,
+            _config: &ContainerConfig,
+        ) -> Result<(), ContainerError> {
+            Ok(())
+        }
+
+        async fn ensure_network(
             &self,
             _network_name: &str,
+            _internal: bool,
         ) -> Result<NetworkPreparation, ContainerError> {
             Ok(NetworkPreparation::Created)
         }
@@ -822,6 +833,8 @@ mod tests {
             host_port: None,
             host_directory: "/tmp/fluensy-data".into(),
             container_directory: "/data".into(),
+            network_name: "fluensy-learn-net".into(),
+            network_isolation: true,
             auth: PluginMcpContainerAuth::BearerToken {
                 secret_file: "/tmp/fluensy.token".into(),
                 secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
@@ -845,7 +858,7 @@ mod tests {
             config.isolation_strategy,
             Some(ContainerNetworkIsolationStrategy::DiscoverContainerIp)
         );
-        assert_eq!(config.network_name, DEFAULT_PLUGIN_MCP_NETWORK_NAME);
+        assert_eq!(config.network_name, "fluensy-learn-net");
         assert_eq!(config.port_mappings.len(), 1);
         assert_eq!(config.port_mappings[0].host_address, "127.0.0.1");
         assert_eq!(config.port_mappings[0].host_port, 18420);
@@ -904,6 +917,31 @@ mod tests {
         );
         assert_eq!(config.bind_mounts[0].container_path, Path::new("/data"));
         assert!(!config.bind_mounts[0].readonly);
+    }
+
+    #[test]
+    fn build_plugin_container_config_disables_network_isolation() {
+        let mut plugin = sample_plugin_config();
+        plugin.network_isolation = false;
+
+        let config = build_plugin_container_config(&plugin, 18420, "scope-1");
+
+        assert_eq!(config.isolation_strategy, None);
+    }
+
+    #[test]
+    fn build_plugin_container_config_preserves_distinct_plugin_networks() {
+        let first_plugin = sample_plugin_config();
+        let mut second_plugin = sample_plugin_config();
+        second_plugin.name = "other_plugin".into();
+        second_plugin.network_name = "other-plugin-net".into();
+
+        let first = build_plugin_container_config(&first_plugin, 18420, "scope-1");
+        let second = build_plugin_container_config(&second_plugin, 18421, "scope-1");
+
+        assert_eq!(first.network_name, "fluensy-learn-net");
+        assert_eq!(second.network_name, "other-plugin-net");
+        assert_ne!(first.network_name, second.network_name);
     }
 
     #[test]

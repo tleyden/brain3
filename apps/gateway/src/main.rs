@@ -804,6 +804,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     let runtime_overrides = RuntimeOverrides::from_args(&args);
     let logging = logging::init_logging(args.log_level.as_str(), args.brain3_home.clone()).await?;
+    tracing::info!(version = release::APP_VERSION, "🤖🧠 Starting brain3 ...");
     let resolved_env = resolve_config_env_file(&args)?;
     let interactive_terminal = is_interactive_terminal();
     let mode = choose_launch_mode(&args);

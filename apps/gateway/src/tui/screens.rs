@@ -607,7 +607,7 @@ fn ports_and_settings_lines(state: &FirstRunTuiState) -> Vec<Line<'static>> {
         "Enabled removes the MCP container's default outbound route for maximum isolation.",
     ));
     lines.push(muted_line(
-        "Disabled uses the runtime's normal bridge/default network for VPS compatibility.",
+        "Disabled joins the named network without requiring internal-only isolation.",
     ));
     if state.draft.container_network_isolated {
         lines.push(field_line(

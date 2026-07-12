@@ -83,18 +83,20 @@ impl EnsureContainerUseCase {
 
         tracing::info!(container = %config.name, image = %config.image, "starting container");
         let runtime_config = config.clone();
-        if config.isolation_strategy.is_some() {
-            let preparation = self
-                .port
-                .ensure_internal_network(&config.network_name)
-                .await?;
-            match preparation {
-                NetworkPreparation::Created => {
-                    tracing::info!(network = %config.network_name, "created internal MCP network");
-                }
-                NetworkPreparation::Reused => {
-                    tracing::info!(network = %config.network_name, "reusing existing compatible internal MCP network");
-                }
+        let internal = config.isolation_strategy.is_some();
+        if internal {
+            self.port.validate_internal_network_support(config)?;
+        }
+        let preparation = self
+            .port
+            .ensure_network(&config.network_name, internal)
+            .await?;
+        match preparation {
+            NetworkPreparation::Created => {
+                tracing::info!(network = %config.network_name, internal, "created MCP network");
+            }
+            NetworkPreparation::Reused => {
+                tracing::info!(network = %config.network_name, internal, "reusing existing compatible MCP network");
             }
         }
 
@@ -322,8 +324,11 @@ mod tests {
         running_checks: Vec<bool>,
         container_ip: Option<String>,
         logs_tail_output: Option<String>,
-        ensure_internal_network_result: MockNetworkResult,
-        ensure_internal_network_count: usize,
+        ensure_network_result: MockNetworkResult,
+        internal_network_validation_error: Option<String>,
+        internal_network_validation_count: usize,
+        ensure_network_count: usize,
+        last_ensure_network_internal: Option<bool>,
         last_run_isolation_strategy: Option<Option<ContainerNetworkIsolationStrategy>>,
         pull_count: usize,
         stop_count: usize,
@@ -404,14 +409,29 @@ mod tests {
             Ok(state.logs_tail_output.clone().unwrap_or_default())
         }
 
-        async fn ensure_internal_network(
+        fn validate_internal_network_support(
+            &self,
+            _config: &ContainerConfig,
+        ) -> Result<(), ContainerError> {
+            let mut state = self.state.lock().unwrap();
+            state.actions.push("validate_internal_network_support");
+            state.internal_network_validation_count += 1;
+            match &state.internal_network_validation_error {
+                Some(message) => Err(ContainerError::UnsupportedConfiguration(message.clone())),
+                None => Ok(()),
+            }
+        }
+
+        async fn ensure_network(
             &self,
             network_name: &str,
+            internal: bool,
         ) -> Result<NetworkPreparation, ContainerError> {
             let mut state = self.state.lock().unwrap();
-            state.actions.push("ensure_internal_network");
-            state.ensure_internal_network_count += 1;
-            match state.ensure_internal_network_result {
+            state.actions.push("ensure_network");
+            state.ensure_network_count += 1;
+            state.last_ensure_network_internal = Some(internal);
+            match state.ensure_network_result {
                 MockNetworkResult::Created => Ok(NetworkPreparation::Created),
                 MockNetworkResult::Reused => Ok(NetworkPreparation::Reused),
                 MockNetworkResult::Conflict => Err(ContainerError::Conflict(format!(
@@ -523,6 +543,7 @@ mod tests {
                 "pull_image",
                 "image_exists",
                 "exists",
+                "ensure_network",
                 "run",
                 "is_running"
             ]
@@ -563,7 +584,7 @@ mod tests {
         let port = Arc::new(MockContainerPort::new(MockState {
             image_exists: true,
             container_ip: Some("127.0.0.1".into()),
-            ensure_internal_network_result: MockNetworkResult::Reused,
+            ensure_network_result: MockNetworkResult::Reused,
             ..Default::default()
         }));
         let use_case = short_probe_use_case(port.clone());
@@ -575,14 +596,17 @@ mod tests {
         assert_eq!(id.0, config.name);
 
         let state = port.snapshot();
-        assert_eq!(state.ensure_internal_network_count, 1);
+        assert_eq!(state.ensure_network_count, 1);
+        assert_eq!(state.last_ensure_network_internal, Some(true));
+        assert_eq!(state.internal_network_validation_count, 1);
         assert_eq!(state.run_count, 1);
         assert_eq!(
             state.actions,
             vec![
                 "image_exists",
                 "exists",
-                "ensure_internal_network",
+                "validate_internal_network_support",
+                "ensure_network",
                 "run",
                 "get_container_ip",
                 "is_running"
@@ -623,7 +647,8 @@ mod tests {
             vec![
                 "image_exists",
                 "exists",
-                "ensure_internal_network",
+                "validate_internal_network_support",
+                "ensure_network",
                 "run",
                 "get_container_ip",
                 "logs_tail"
@@ -756,7 +781,7 @@ mod tests {
     async fn returns_conflict_when_internal_network_is_incompatible() {
         let port = Arc::new(MockContainerPort::new(MockState {
             image_exists: true,
-            ensure_internal_network_result: MockNetworkResult::Conflict,
+            ensure_network_result: MockNetworkResult::Conflict,
             ..Default::default()
         }));
         let use_case = short_probe_use_case(port.clone());
@@ -770,11 +795,75 @@ mod tests {
         );
 
         let state = port.snapshot();
-        assert_eq!(state.ensure_internal_network_count, 1);
+        assert_eq!(state.ensure_network_count, 1);
+        assert_eq!(state.internal_network_validation_count, 1);
         assert_eq!(state.run_count, 0);
         assert_eq!(
             state.actions,
-            vec!["image_exists", "exists", "ensure_internal_network"]
+            vec![
+                "image_exists",
+                "exists",
+                "validate_internal_network_support",
+                "ensure_network"
+            ]
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_unsupported_internal_network_before_network_mutation() {
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            internal_network_validation_error: Some(
+                "Docker isolation is unsupported on this platform".into(),
+            ),
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let mut config = sample_config();
+        config.isolation_strategy = Some(ContainerNetworkIsolationStrategy::PublishToLoopback);
+
+        let error = use_case
+            .ensure(&config)
+            .await
+            .expect_err("unsupported network isolation should fail");
+
+        assert!(matches!(
+            error,
+            ContainerError::UnsupportedConfiguration(ref message)
+                if message.contains("Docker isolation")
+        ));
+        let state = port.snapshot();
+        assert_eq!(state.internal_network_validation_count, 1);
+        assert_eq!(state.ensure_network_count, 0);
+        assert_eq!(state.run_count, 0);
+        assert_eq!(
+            state.actions,
+            vec![
+                "image_exists",
+                "exists",
+                "validate_internal_network_support"
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn non_isolated_container_prepares_open_network_without_internal_validation() {
+        let port = Arc::new(MockContainerPort::new(MockState {
+            image_exists: true,
+            ..Default::default()
+        }));
+        let use_case = short_probe_use_case(port.clone());
+        let config = sample_config();
+
+        use_case
+            .ensure(&config)
+            .await
+            .expect("startup should succeed");
+
+        let state = port.snapshot();
+        assert_eq!(state.internal_network_validation_count, 0);
+        assert_eq!(state.ensure_network_count, 1);
+        assert_eq!(state.last_ensure_network_internal, Some(false));
+        assert_eq!(state.run_count, 1);
     }
 }

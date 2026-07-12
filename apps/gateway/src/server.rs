@@ -454,6 +454,7 @@ async fn build_gateway_state(
         native_tools,
         plugin_clients,
     ));
+    mcp_router.log_startup_tool_inventory().await;
 
     let app_state = AppState {
         registrar,
@@ -710,6 +711,8 @@ mod tests {
             host_port: None,
             host_directory: "/tmp/fluensy-data".into(),
             container_directory: "/data".into(),
+            network_name: "fluensy-learn-net".into(),
+            network_isolation: true,
             auth,
         }
     }

@@ -74,6 +74,14 @@ pub struct PluginMcpContainerConfig {
     pub host_port: Option<u16>,
     pub host_directory: PathBuf,
     pub container_directory: PathBuf,
+    pub network_name: String,
+    /// Whether this plugin uses an internal-only container network.
+    ///
+    /// This mirrors `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` for the primary
+    /// container, scoped to this plugin. When false, the plugin joins the named
+    /// network without requiring it to be internal and regains outbound egress
+    /// when that network permits it.
+    pub network_isolation: bool,
     pub auth: PluginMcpContainerAuth,
 }
 

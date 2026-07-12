@@ -17,9 +17,14 @@ pub trait ContainerPort: Send + Sync {
     async fn exists(&self, id: &ContainerId) -> Result<bool, ContainerError>;
     async fn is_running(&self, id: &ContainerId) -> Result<bool, ContainerError>;
     async fn logs_tail(&self, id: &ContainerId, lines: usize) -> Result<String, ContainerError>;
-    async fn ensure_internal_network(
+    fn validate_internal_network_support(
+        &self,
+        config: &ContainerConfig,
+    ) -> Result<(), ContainerError>;
+    async fn ensure_network(
         &self,
         network_name: &str,
+        internal: bool,
     ) -> Result<NetworkPreparation, ContainerError>;
     async fn get_container_ip(&self, id: &ContainerId) -> Result<Option<String>, ContainerError>;
     async fn list_managed_containers(

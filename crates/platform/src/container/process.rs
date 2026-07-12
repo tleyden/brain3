@@ -3,8 +3,45 @@ use std::process::Output;
 use brain3_core::domain::errors::ContainerError;
 use tokio::process::Command;
 
+pub(super) fn format_launch_command(bin: &str, args: &[String]) -> String {
+    let mut redact_next_env = false;
+    std::iter::once(bin.to_string())
+        .chain(args.iter().map(|arg| {
+            if redact_next_env {
+                redact_next_env = false;
+                let key = arg.split_once('=').map_or(arg.as_str(), |(key, _)| key);
+                return format!("{key}=<redacted>");
+            }
+            if arg == "--env" {
+                redact_next_env = true;
+            }
+            arg.clone()
+        }))
+        .map(|part| shell_quote(&part))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || "-._/:=@%+,".contains(ch))
+    {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
+    }
+}
+
 async fn run_command_output(bin: &str, args: &[&str]) -> Result<Output, ContainerError> {
-    tracing::debug!(cmd = bin, args = ?args, "running container command");
+    let owned_args = args
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect::<Vec<_>>();
+    tracing::debug!(
+        command = %format_launch_command(bin, &owned_args),
+        "running container command"
+    );
 
     Command::new(bin)
         .args(args)

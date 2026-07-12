@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json
+import signal
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -7,6 +9,10 @@ from pathlib import Path
 HOST = "0.0.0.0"
 PORT = 8420
 SECRET_FILE = Path("/run/secrets/mcp_bearer_token")
+
+
+def terminate(_signum: int, _frame: object) -> None:
+    sys.exit(0)
 
 
 def bearer_token() -> str:
@@ -101,4 +107,5 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, terminate)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

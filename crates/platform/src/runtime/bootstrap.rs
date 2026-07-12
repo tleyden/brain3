@@ -7,6 +7,7 @@ use brain3_core::domain::model::{
 };
 use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::tunnel::TunnelPort;
+use futures::future::join_all;
 
 use crate::config::brain3_yaml::load_plugin_mcp_containers_config;
 use crate::config::log_config;
@@ -82,7 +83,7 @@ impl RuntimeBootstrap {
     pub async fn shutdown_managed_runtime(&mut self) {
         self.stop_tunnel().await;
 
-        for plugin in &self.plugin_mcp_containers {
+        let plugin_stops = self.plugin_mcp_containers.iter().map(|plugin| async move {
             if let Err(error) = stop_plugin_mcp_container(&plugin.config).await {
                 tracing::warn!(
                     container = %plugin.config.name,
@@ -91,27 +92,31 @@ impl RuntimeBootstrap {
                     "failed to stop managed Plugin MCP Container during shutdown; continuing exit"
                 );
             }
-        }
+        });
 
-        let Some(startup) = self.config.container.as_ref() else {
-            return;
+        let primary_stop = async {
+            let Some(startup) = self.config.container.as_ref() else {
+                return;
+            };
+            if !self.managed_container_started {
+                tracing::debug!(
+                    container = %startup.container_name,
+                    "skipping managed MCP container shutdown because this session did not start it"
+                );
+                return;
+            }
+
+            if let Err(error) = stop_mcp_container(startup).await {
+                tracing::warn!(
+                    container = %startup.container_name,
+                    runtime = ?startup.runtime,
+                    error = %error,
+                    "failed to stop managed MCP container during shutdown; continuing exit"
+                );
+            }
         };
-        if !self.managed_container_started {
-            tracing::debug!(
-                container = %startup.container_name,
-                "skipping managed MCP container shutdown because this session did not start it"
-            );
-            return;
-        }
 
-        if let Err(error) = stop_mcp_container(startup).await {
-            tracing::warn!(
-                container = %startup.container_name,
-                runtime = ?startup.runtime,
-                error = %error,
-                "failed to stop managed MCP container during shutdown; continuing exit"
-            );
-        }
+        let ((), _) = futures::join!(primary_stop, join_all(plugin_stops));
     }
 
     pub fn display_url(&self, local_url: &str) -> String {
