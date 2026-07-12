@@ -107,7 +107,6 @@ fn validate_plugin_mcp_container(
     }
 
     let runtime = parse_runtime(&required_string(entry.platform, "platform")?)?;
-    validate_plugin_network_isolation_support(&name, runtime)?;
     let image = required_string(entry.image, "image")?;
     let tag = required_string(entry.tag, "tag")?;
     let container_port = entry.port.ok_or_else(|| "missing port".to_string())?;
@@ -179,19 +178,6 @@ fn parse_runtime(value: &str) -> Result<ContainerRuntime, String> {
     }
 }
 
-fn validate_plugin_network_isolation_support(
-    name: &str,
-    runtime: ContainerRuntime,
-) -> Result<(), String> {
-    if matches!(runtime, ContainerRuntime::Docker) && std::env::consts::OS == "macos" {
-        return Err(format!(
-            "plugin '{name}' uses platform: docker, which is not supported for network-isolated MCP plugin containers on macOS; use platform: macos_container for this plugin"
-        ));
-    }
-
-    Ok(())
-}
-
 fn parse_auth(auth: Option<RawPluginMcpContainerAuth>) -> Result<PluginMcpContainerAuth, String> {
     let auth = auth.ok_or_else(|| "missing auth".to_string())?;
     match required_string(auth.auth_type, "auth.type")?.as_str() {
@@ -250,27 +236,11 @@ mod tests {
         fs::write(path, contents).expect("write test file");
     }
 
-    fn supported_platform() -> &'static str {
-        if cfg!(target_os = "macos") {
-            "macos_container"
-        } else {
-            "docker"
-        }
-    }
-
-    fn supported_runtime() -> ContainerRuntime {
-        if cfg!(target_os = "macos") {
-            ContainerRuntime::MacOSContainer
-        } else {
-            ContainerRuntime::Docker
-        }
-    }
-
     fn valid_entry(name: &str, network: &str, host_directory: &Path, secret_file: &Path) -> String {
         format!(
             r#"
   - name: {name}
-    platform: {}
+    platform: docker
     image: ghcr.io/example/{name}
     tag: latest
     port: 8420
@@ -280,7 +250,6 @@ mod tests {
       type: bearer_token
       secret_file: {}
 "#,
-            supported_platform(),
             host_directory.display(),
             secret_file.display()
         )
@@ -338,7 +307,7 @@ plugin_mcp_containers:
             configs[0],
             PluginMcpContainerConfig {
                 name: "first_tool".to_string(),
-                runtime: supported_runtime(),
+                runtime: ContainerRuntime::Docker,
                 image: "ghcr.io/example/first_tool:latest".to_string(),
                 container_port: 8420,
                 host_port: None,
@@ -365,70 +334,6 @@ plugin_mcp_containers:
                 auth: PluginMcpContainerAuth::None,
             }
         );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn docker_plugin_is_rejected_on_macos() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let host_dir = temp.path().join("data");
-        fs::create_dir_all(&host_dir).expect("host dir");
-        let config_path = temp.path().join("brain3.yaml");
-        write_file(
-            &config_path,
-            &format!(
-                r#"
-plugin_mcp_containers:
-  - name: docker_tool
-    platform: docker
-    image: ghcr.io/example/docker-tool
-    tag: latest
-    port: 8420
-    host_directory: {}
-    network: docker-tool-net
-    auth:
-      type: none
-"#,
-                host_dir.display()
-            ),
-        );
-
-        let configs = load_plugin_mcp_containers_config(&config_path);
-
-        assert!(configs.is_empty());
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn macos_container_plugin_is_allowed_on_macos() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let host_dir = temp.path().join("data");
-        fs::create_dir_all(&host_dir).expect("host dir");
-        let config_path = temp.path().join("brain3.yaml");
-        write_file(
-            &config_path,
-            &format!(
-                r#"
-plugin_mcp_containers:
-  - name: native_tool
-    platform: macos_container
-    image: ghcr.io/example/native-tool
-    tag: latest
-    port: 8420
-    host_directory: {}
-    network: native-tool-net
-    auth:
-      type: none
-"#,
-                host_dir.display()
-            ),
-        );
-
-        let configs = load_plugin_mcp_containers_config(&config_path);
-
-        assert_eq!(configs.len(), 1);
-        assert_eq!(configs[0].name, "native_tool");
-        assert_eq!(configs[0].runtime, ContainerRuntime::MacOSContainer);
     }
 
     #[test]
