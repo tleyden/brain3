@@ -710,6 +710,13 @@ mod tests {
             Ok(String::new())
         }
 
+        fn validate_internal_network_support(
+            &self,
+            _config: &ContainerConfig,
+        ) -> Result<(), ContainerError> {
+            Ok(())
+        }
+
         async fn ensure_internal_network(
             &self,
             _network_name: &str,

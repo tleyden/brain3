@@ -156,6 +156,27 @@ impl ContainerPort for DockerContainerAdapter {
         run_command("docker", &["logs", "--tail", &lines, &id.0]).await
     }
 
+    fn validate_internal_network_support(
+        &self,
+        config: &ContainerConfig,
+    ) -> Result<(), ContainerError> {
+        if cfg!(target_os = "macos") && config.isolation_strategy.is_some() {
+            tracing::error!(
+                container = %config.name,
+                network = %config.network_name,
+                isolation_strategy = ?config.isolation_strategy,
+                runtime = "docker",
+                "rejecting unsupported internal network configuration"
+            );
+            return Err(ContainerError::UnsupportedConfiguration(format!(
+                "container '{}' uses Docker internal-network isolation on macOS, which is not supported; use the native macos_container runtime instead",
+                config.name
+            )));
+        }
+
+        Ok(())
+    }
+
     async fn ensure_internal_network(
         &self,
         network_name: &str,
@@ -296,6 +317,55 @@ impl ContainerPort for DockerContainerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn isolated_config(strategy: ContainerNetworkIsolationStrategy) -> ContainerConfig {
+        ContainerConfig {
+            image: "example:latest".into(),
+            name: "test_plugin".into(),
+            isolation_strategy: Some(strategy),
+            network_name: "test-plugin-net".into(),
+            port_mappings: Vec::new(),
+            env_vars: Vec::new(),
+            labels: Vec::new(),
+            bind_mounts: Vec::new(),
+            user: None,
+            detach: true,
+            remove_on_exit: true,
+            workdir: None,
+            command: Vec::new(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn rejects_all_internal_network_strategies_on_macos() {
+        let adapter = DockerContainerAdapter;
+
+        for strategy in [
+            ContainerNetworkIsolationStrategy::PublishToLoopback,
+            ContainerNetworkIsolationStrategy::DiscoverContainerIp,
+        ] {
+            let error = adapter
+                .validate_internal_network_support(&isolated_config(strategy))
+                .expect_err("macOS Docker isolation should be rejected");
+
+            assert!(matches!(
+                error,
+                ContainerError::UnsupportedConfiguration(ref message)
+                    if message.contains("test_plugin") && message.contains("macos_container")
+            ));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn accepts_discover_container_ip_on_linux() {
+        DockerContainerAdapter
+            .validate_internal_network_support(&isolated_config(
+                ContainerNetworkIsolationStrategy::DiscoverContainerIp,
+            ))
+            .expect("Linux Docker isolation should be supported");
+    }
 
     #[test]
     fn parse_docker_inspect_output_reads_state_and_labels() {

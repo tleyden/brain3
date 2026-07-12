@@ -26,6 +26,8 @@ pub enum ContainerError {
     ImageNotFound(String),
     #[error("container conflict: {0}")]
     Conflict(String),
+    #[error("unsupported container configuration: {0}")]
+    UnsupportedConfiguration(String),
     #[error("command failed (exit {code}): {stderr}")]
     CommandFailed { code: i32, stderr: String },
     #[error("command could not be spawned: {0}")]

@@ -246,6 +246,13 @@ impl ContainerPort for MacOsContainerAdapter {
         run_command("container", &["logs", "-n", &lines, &id.0]).await
     }
 
+    fn validate_internal_network_support(
+        &self,
+        _config: &ContainerConfig,
+    ) -> Result<(), ContainerError> {
+        Ok(())
+    }
+
     async fn ensure_internal_network(
         &self,
         network_name: &str,
@@ -391,6 +398,29 @@ impl ContainerPort for MacOsContainerAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accepts_publish_to_loopback_internal_network() {
+        let config = ContainerConfig {
+            image: "example:latest".into(),
+            name: "test_plugin".into(),
+            isolation_strategy: Some(ContainerNetworkIsolationStrategy::PublishToLoopback),
+            network_name: "test-plugin-net".into(),
+            port_mappings: Vec::new(),
+            env_vars: Vec::new(),
+            labels: Vec::new(),
+            bind_mounts: Vec::new(),
+            user: None,
+            detach: true,
+            remove_on_exit: false,
+            workdir: None,
+            command: Vec::new(),
+        };
+
+        MacOsContainerAdapter
+            .validate_internal_network_support(&config)
+            .expect("native macOS container isolation should be supported");
+    }
 
     #[test]
     fn parse_macos_inspect_output_reads_labels_and_status() {
