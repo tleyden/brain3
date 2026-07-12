@@ -313,6 +313,25 @@ It proves that the loopback transport works on a non-internal network, but it
 does so by giving up the plugin's internal-only network isolation and routing
 sidecar traffic through a host-published port.
 
+### Non-internal user-defined network control test
+
+A second control run attached Fluensy directly to the existing user-defined,
+non-internal `local-supabase-host-access` network while retaining the rebuilt
+image URL `http://postgrest:3000` and requesting a loopback publication.
+
+Docker inspection showed:
+
+```text
+network=local-supabase-host-access
+ports={"3000/tcp":[{"HostIp":"127.0.0.1","HostPort":"59997"}]}
+```
+
+The plugin resolved `postgrest`, loaded its store, registered all four tools,
+and returned MCP initialize HTTP 200 through the published loopback port. This
+directly validates Option B on the local Docker Desktop installation: one
+non-internal user-defined network can satisfy both traffic directions, at the
+cost of plugin outbound access.
+
 ## Root cause
 
 ### Primary code defect
