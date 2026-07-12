@@ -224,6 +224,100 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
         Ok(None)
     }
 
+    /// Logs the full set of MCP tools brain3 is proxying, split into core
+    /// (upstream vault-tools container + native tools) and plugin (one line
+    /// per Plugin MCP Container) groups. Intended to be called once, right
+    /// after startup, so the tool inventory is visible without a manual
+    /// `tools/list` call.
+    pub async fn log_startup_tool_inventory(&self) {
+        let mut core_tool_names = match self.fetch_core_tool_names().await {
+            Ok(names) => names,
+            Err(error) => {
+                tracing::warn!(
+                    error = %error,
+                    "startup tool inventory: failed to fetch core vault MCP tools"
+                );
+                Vec::new()
+            }
+        };
+        core_tool_names.extend(tool_names(&self.native_tools.list_schemas()));
+
+        tracing::info!(
+            tool_count = core_tool_names.len(),
+            tools = ?core_tool_names,
+            "brain3 tool inventory: core tools (vault-tools + native)"
+        );
+
+        for client in &self.plugin_containers {
+            let plugin_tool_names = tool_names(&client.prefixed_tool_schemas());
+            tracing::info!(
+                container = client.container_name(),
+                tool_count = plugin_tool_names.len(),
+                tools = ?plugin_tool_names,
+                "brain3 tool inventory: plugin tools"
+            );
+        }
+    }
+
+    async fn fetch_core_tool_names(&self) -> Result<Vec<String>, ProxyError> {
+        let initialize_body = serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "id": "brain3-startup-initialize",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "brain3-gateway-startup",
+                    "version": env!("CARGO_PKG_VERSION"),
+                }
+            }
+        }))
+        .expect("startup initialize request should serialize");
+        self.proxy
+            .handle_unvalidated(
+                "localhost",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                initialize_body,
+            )
+            .await?;
+
+        let tools_list_body = serde_json::to_vec(&json!({
+            "jsonrpc": "2.0",
+            "id": "brain3-startup-tools-list",
+            "method": "tools/list",
+            "params": {}
+        }))
+        .expect("startup tools/list request should serialize");
+        let response = self
+            .proxy
+            .handle_unvalidated(
+                "localhost",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                tools_list_body,
+            )
+            .await?;
+
+        let body = serde_json::from_slice::<Value>(&response.body).map_err(|error| {
+            ProxyError::BadGateway(format!("invalid core tools/list JSON: {error}"))
+        })?;
+        let tools = body
+            .get("result")
+            .and_then(|result| result.get("tools"))
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                ProxyError::BadGateway("core tools/list response missing result.tools array".into())
+            })?;
+
+        Ok(tool_names(tools))
+    }
+
     fn append_tool_schemas(&self, response: McpProxyResponse) -> McpProxyResponse {
         let native_schemas = self.native_tools.list_schemas();
         let plugin_schemas = self
@@ -274,6 +368,14 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
             body: new_body,
         }
     }
+}
+
+fn tool_names(schemas: &[Value]) -> Vec<String> {
+    schemas
+        .iter()
+        .filter_map(|schema| schema.get("name").and_then(Value::as_str))
+        .map(str::to_string)
+        .collect()
 }
 
 fn strip_content_length(headers: Vec<(String, String)>) -> Vec<(String, String)> {

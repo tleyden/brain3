@@ -454,6 +454,7 @@ async fn build_gateway_state(
         native_tools,
         plugin_clients,
     ));
+    mcp_router.log_startup_tool_inventory().await;
 
     let app_state = AppState {
         registrar,
