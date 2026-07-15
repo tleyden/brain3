@@ -140,7 +140,17 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             "forwarding tools/call to Plugin MCP Container"
         );
 
-        self.forward_json(body).await
+        let response = self.forward_json(body).await?;
+        tracing::debug!(
+            container = %self.container_name,
+            tool_name = unprefixed_tool_name,
+            request_id = ?request.get("id"),
+            status = response.status,
+            body_bytes = response.body.len(),
+            "received tools/call response from Plugin MCP Container"
+        );
+
+        Ok(response)
     }
 
     pub async fn read_resource(
@@ -169,7 +179,17 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             "forwarding resources/read to Plugin MCP Container"
         );
 
-        self.forward_json(body).await
+        let response = self.forward_json(body).await?;
+        tracing::debug!(
+            container = %self.container_name,
+            resource_uri = original_uri,
+            request_id = ?request.get("id"),
+            status = response.status,
+            body_bytes = response.body.len(),
+            "received resources/read response from Plugin MCP Container"
+        );
+
+        Ok(self.prefix_read_resource_response_uri(response, original_uri))
     }
 
     async fn initialize(&self) -> Result<(), ProxyError> {
@@ -392,7 +412,99 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             return;
         };
 
+        let tool_name = schema
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("<unknown>");
+        tracing::info!(
+            container = %self.container_name,
+            tool_name,
+            resource_uri_before = resource_uri,
+            resource_uri_after = %resource_schema.prefixed_uri,
+            "rewrote Plugin MCP tool UI resource URI"
+        );
         set_tool_resource_uri(schema, &resource_schema.prefixed_uri);
+    }
+
+    fn prefix_read_resource_response_uri(
+        &self,
+        response: McpProxyResponse,
+        original_uri: &str,
+    ) -> McpProxyResponse {
+        let Some(prefixed_uri) =
+            prefix_resource_uri_for_container(&self.container_name, original_uri)
+        else {
+            tracing::warn!(
+                container = %self.container_name,
+                resource_uri = original_uri,
+                "could not prefix Plugin MCP resources/read response URI"
+            );
+            return response;
+        };
+
+        let Ok(mut body) = serde_json::from_slice::<Value>(&response.body) else {
+            tracing::debug!(
+                container = %self.container_name,
+                resource_uri = original_uri,
+                "Plugin MCP resources/read response was not JSON; passing through"
+            );
+            return response;
+        };
+        if body.get("error").is_some() {
+            tracing::debug!(
+                container = %self.container_name,
+                resource_uri = original_uri,
+                "Plugin MCP resources/read returned JSON-RPC error; passing through"
+            );
+            return response;
+        }
+
+        let Some(contents) = body
+            .get_mut("result")
+            .and_then(|result| result.get_mut("contents"))
+            .and_then(Value::as_array_mut)
+        else {
+            tracing::debug!(
+                container = %self.container_name,
+                resource_uri = original_uri,
+                "Plugin MCP resources/read response missing result.contents array; passing through"
+            );
+            return response;
+        };
+
+        let mut rewrite_count = 0usize;
+        for content in contents {
+            let Some(content_object) = content.as_object_mut() else {
+                continue;
+            };
+            if content_object.get("uri").and_then(Value::as_str) == Some(original_uri) {
+                content_object.insert("uri".into(), Value::String(prefixed_uri.clone()));
+                rewrite_count += 1;
+            }
+        }
+
+        let Ok(new_body) = serde_json::to_vec(&body) else {
+            tracing::warn!(
+                container = %self.container_name,
+                resource_uri = original_uri,
+                "could not serialize Plugin MCP resources/read response with prefixed URI"
+            );
+            return response;
+        };
+
+        tracing::debug!(
+            container = %self.container_name,
+            resource_uri_before = original_uri,
+            resource_uri_after = %prefixed_uri,
+            rewrite_count,
+            "rewrote Plugin MCP resources/read response resource URIs"
+        );
+
+        McpProxyResponse {
+            status: response.status,
+            headers: strip_content_length(response.headers),
+            body: new_body,
+        }
     }
 
     async fn forward_json(&self, body: Vec<u8>) -> Result<McpProxyResponse, ProxyError> {
@@ -506,6 +618,13 @@ fn set_tool_resource_uri(schema: &mut Value, resource_uri: &str) {
     }
 }
 
+fn strip_content_length(headers: Vec<(String, String)>) -> Vec<(String, String)> {
+    headers
+        .into_iter()
+        .filter(|(name, _)| !name.eq_ignore_ascii_case("content-length"))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -552,6 +671,18 @@ mod tests {
             status: 200,
             headers: vec![("content-type".into(), "application/json".into())],
             body: serde_json::to_vec(&value).expect("test JSON should serialize"),
+        }
+    }
+
+    fn json_response_with_content_length(value: Value) -> McpProxyResponse {
+        let body = serde_json::to_vec(&value).expect("test JSON should serialize");
+        McpProxyResponse {
+            status: 200,
+            headers: vec![
+                ("content-type".into(), "application/json".into()),
+                ("content-length".into(), body.len().to_string()),
+            ],
+            body,
         }
     }
 
@@ -648,6 +779,83 @@ mod tests {
             .headers
             .iter()
             .any(|(name, _)| name.eq_ignore_ascii_case("authorization")));
+    }
+
+    #[tokio::test]
+    async fn read_resource_prefixes_returned_resource_uri() {
+        let proxy = Arc::new(CapturingProxy::with_responses(vec![
+            json_response(json!({"jsonrpc": "2.0", "id": 1, "result": {}})),
+            json_response(json!({"jsonrpc": "2.0", "id": 2, "result": {"tools": []}})),
+            json_response(json!({
+                "jsonrpc": "2.0",
+                "id": 3,
+                "result": {
+                    "resources": [
+                        {
+                            "uri": "ui://widget-name/index.html",
+                            "name": "Plugin widget",
+                            "mimeType": "text/html"
+                        }
+                    ]
+                }
+            })),
+            json_response_with_content_length(json!({
+                "jsonrpc": "2.0",
+                "id": 9,
+                "result": {
+                    "contents": [
+                        {
+                            "uri": "ui://widget-name/index.html",
+                            "mimeType": "text/html",
+                            "text": "<main>plugin</main>"
+                        }
+                    ]
+                }
+            })),
+        ]));
+        let client = RemoteMcpContainerClient::initialize_and_cache_tools(
+            "fluensy_learn".into(),
+            "http://127.0.0.1:18420/mcp".into(),
+            None,
+            proxy.clone(),
+        )
+        .await
+        .expect("client should initialize");
+
+        let response = client
+            .read_resource(
+                &json!({
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "resources/read",
+                    "params": {
+                        "uri": "ui://fluensy_learn__widget-name/index.html"
+                    }
+                }),
+                "ui://widget-name/index.html",
+            )
+            .await
+            .expect("resource read should forward");
+
+        assert_eq!(response.status, 200);
+        assert!(response
+            .headers
+            .iter()
+            .all(|(name, _)| !name.eq_ignore_ascii_case("content-length")));
+        let response_body: Value =
+            serde_json::from_slice(&response.body).expect("response body should be JSON");
+        assert_eq!(
+            response_body["result"]["contents"][0]["uri"],
+            "ui://fluensy_learn__widget-name/index.html"
+        );
+
+        let requests = proxy.requests.lock().expect("requests lock should succeed");
+        let forwarded_body: Value =
+            serde_json::from_slice(&requests[3].body).expect("forwarded body should be JSON");
+        assert_eq!(
+            forwarded_body["params"]["uri"],
+            "ui://widget-name/index.html"
+        );
     }
 
     #[tokio::test]

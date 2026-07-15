@@ -515,6 +515,9 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
         response: McpProxyResponse,
     ) -> McpProxyResponse {
         if !self.has_resources() {
+            tracing::debug!(
+                "MCP router: initialize response resources capability patch skipped; no resources are registered"
+            );
             return response;
         }
 
@@ -523,6 +526,9 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
             return response;
         };
         if body.get("error").is_some() {
+            tracing::debug!(
+                "MCP router: initialize response resources capability patch skipped; response contains JSON-RPC error"
+            );
             return response;
         }
 
@@ -537,6 +543,9 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
         };
 
         if capabilities.contains_key("resources") {
+            tracing::debug!(
+                "MCP router: initialize response already includes resources capability; no patch needed"
+            );
             return response;
         }
         capabilities.insert("resources".into(), json!({}));
@@ -1669,6 +1678,25 @@ mod tests {
             serde_json::from_slice(&plugin_requests[3].body).expect("request should be JSON");
         assert_eq!(body["method"], "resources/read");
         assert_eq!(body["params"]["uri"], "ui://widget-name/index.html");
+        drop(plugin_requests);
+
+        let response_body: Value =
+            serde_json::from_slice(&response.body).expect("response body should be JSON");
+        assert_eq!(
+            response_body["result"]["contents"][0]["uri"],
+            "ui://fluensy_learn__widget-name/index.html"
+        );
+        assert_eq!(
+            response_body["result"]["contents"][0]["text"],
+            "<main>plugin</main>"
+        );
+        assert!(
+            response
+                .headers
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("content-length")),
+            "rewritten plugin resources/read responses must not retain the upstream content-length"
+        );
     }
 
     #[tokio::test]
