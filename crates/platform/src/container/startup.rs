@@ -394,7 +394,7 @@ fn build_plugin_container_config(
             host_port,
             container_port: plugin.container_port,
         }],
-        env_vars: Vec::new(),
+        env_vars: plugin.env.clone(),
         labels: managed_container_labels_for_role(
             installation_id,
             plugin_mcp_role_label(plugin.name.as_str()).as_str(),
@@ -835,6 +835,7 @@ mod tests {
             container_directory: "/data".into(),
             network_name: "fluensy-learn-net".into(),
             network_isolation: true,
+            env: Vec::new(),
             auth: PluginMcpContainerAuth::BearerToken {
                 secret_file: "/tmp/fluensy.token".into(),
                 secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
@@ -917,6 +918,19 @@ mod tests {
         );
         assert_eq!(config.bind_mounts[0].container_path, Path::new("/data"));
         assert!(!config.bind_mounts[0].readonly);
+    }
+
+    #[test]
+    fn build_plugin_container_config_passes_plugin_env_vars() {
+        let mut plugin = sample_plugin_config();
+        plugin.env = vec![("LOGFIRE_CONSOLE".into(), "true".into())];
+
+        let config = build_plugin_container_config(&plugin, 18420, "scope-1");
+
+        assert_eq!(
+            config.env_vars,
+            vec![("LOGFIRE_CONSOLE".to_string(), "true".to_string())]
+        );
     }
 
     #[test]

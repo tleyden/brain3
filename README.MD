@@ -412,6 +412,9 @@ plugin_mcp_containers:
     host_directory: /Users/you/hello-mcp-data
     container_directory: /data
     network_isolation: false
+    env:
+      LOGFIRE_CONSOLE: "true"
+      MCP_DEBUG_LEVEL: debug
     auth:
       type: bearer_token
       secret_file: /Users/you/.brain3/secrets/hello_mcp.token
@@ -437,6 +440,10 @@ plugins on macOS, where Docker Desktop cannot combine only internal networking
 with host-reachable published ports. Use `network_isolation: false` there, or
 switch to `platform: macos_container` if the plugin does not need outbound
 egress.
+
+`env` is optional and sets plain, non-secret environment variables on the
+plugin container. Keys must be valid environment variable names; secrets belong
+in `auth.secret_file`, not here.
 
 Brain3 starts each configured Plugin MCP Container with one read-write host
 directory mount, sends `Authorization: Bearer <token>` when `auth.type` is

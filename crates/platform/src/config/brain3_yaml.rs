@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -29,6 +29,7 @@ struct RawPluginMcpContainerConfig {
     container_directory: Option<PathBuf>,
     network: Option<String>,
     network_isolation: Option<bool>,
+    env: Option<BTreeMap<String, String>>,
     auth: Option<RawPluginMcpContainerAuth>,
 }
 
@@ -123,6 +124,7 @@ fn validate_plugin_mcp_container(
         .unwrap_or_else(|| DEFAULT_CONTAINER_DIRECTORY.into());
     let network_name = required_string(entry.network, "network")?;
     validate_network_name(&network_name)?;
+    let env = parse_env(entry.env)?;
     let auth = parse_auth(entry.auth)?;
 
     Ok(PluginMcpContainerConfig {
@@ -135,6 +137,7 @@ fn validate_plugin_mcp_container(
         container_directory,
         network_name,
         network_isolation,
+        env,
         auth,
     })
 }
@@ -170,6 +173,34 @@ fn validate_network_name(name: &str) -> Result<(), String> {
             "network must start with a letter/digit and contain only letters, digits, '_', '.', '-'"
                 .to_string(),
         )
+    }
+}
+
+fn parse_env(env: Option<BTreeMap<String, String>>) -> Result<Vec<(String, String)>, String> {
+    let Some(env) = env else {
+        return Ok(Vec::new());
+    };
+
+    for key in env.keys() {
+        validate_env_var_name(key)?;
+    }
+
+    Ok(env.into_iter().collect())
+}
+
+fn validate_env_var_name(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let first_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    let rest_ok = chars.all(|c| c.is_ascii_alphanumeric() || c == '_');
+
+    if first_ok && rest_ok {
+        Ok(())
+    } else {
+        Err(format!(
+            "env variable name '{name}' must match [A-Za-z_][A-Za-z0-9_]*"
+        ))
     }
 }
 
@@ -338,6 +369,7 @@ plugin_mcp_containers:
                 container_directory: "/data".into(),
                 network_name: "first-tool-net".into(),
                 network_isolation: true,
+                env: Vec::new(),
                 auth: PluginMcpContainerAuth::BearerToken {
                     secret_file: first_secret,
                     secret_mount_path: "/run/secrets/mcp_bearer_token".into(),
@@ -356,6 +388,7 @@ plugin_mcp_containers:
                 container_directory: "/workspace".into(),
                 network_name: "second-tool-net".into(),
                 network_isolation: true,
+                env: Vec::new(),
                 auth: PluginMcpContainerAuth::None,
             }
         );
@@ -456,6 +489,119 @@ plugin_mcp_containers:
 
         assert_eq!(configs.len(), 1);
         assert_eq!(configs[0].name, "good_name");
+    }
+
+    #[test]
+    fn env_map_loads_in_deterministic_key_order() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let host_dir = temp.path().join("data");
+        fs::create_dir_all(&host_dir).expect("host dir");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"plugin_mcp_containers:
+  - name: env_plugin
+    platform: macos_container
+    image: ghcr.io/example/env-plugin
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: env-plugin-net
+    env:
+      FOO: bar
+      BAZ: qux
+    auth:
+      type: none
+"#,
+                host_dir.display()
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(
+            configs[0].env,
+            vec![
+                ("BAZ".to_string(), "qux".to_string()),
+                ("FOO".to_string(), "bar".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn invalid_env_key_drops_only_that_entry() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let good_dir = temp.path().join("good-data");
+        let bad_dir = temp.path().join("bad-data");
+        fs::create_dir_all(&good_dir).expect("good dir");
+        fs::create_dir_all(&bad_dir).expect("bad dir");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"plugin_mcp_containers:
+  - name: bad_env
+    platform: macos_container
+    image: ghcr.io/example/bad-env
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: bad-env-net
+    env:
+      1BAD: x
+    auth:
+      type: none
+  - name: good_env
+    platform: macos_container
+    image: ghcr.io/example/good-env
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: good-env-net
+    auth:
+      type: none
+"#,
+                bad_dir.display(),
+                good_dir.display()
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].name, "good_env");
+    }
+
+    #[test]
+    fn missing_env_loads_empty_env() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let host_dir = temp.path().join("data");
+        fs::create_dir_all(&host_dir).expect("host dir");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"plugin_mcp_containers:
+  - name: no_env
+    platform: macos_container
+    image: ghcr.io/example/no-env
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: no-env-net
+    auth:
+      type: none
+"#,
+                host_dir.display()
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].env, Vec::<(String, String)>::new());
     }
 
     #[test]

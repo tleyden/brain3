@@ -713,6 +713,7 @@ mod tests {
             container_directory: "/data".into(),
             network_name: "fluensy-learn-net".into(),
             network_isolation: true,
+            env: Vec::new(),
             auth,
         }
     }
