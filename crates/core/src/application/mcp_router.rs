@@ -9,6 +9,7 @@ use crate::application::validate_request::validate_host;
 use crate::domain::errors::ProxyError;
 use crate::domain::model::HostnameValidationConfig;
 use crate::ports::mcp_proxy::{McpProxyPort, McpProxyResponse};
+use crate::ports::native_mcp_resource::{NativeMcpResourceContent, NativeMcpResourceError};
 use crate::ports::native_mcp_tool::{NativeMcpToolError, NativeMcpToolOutput};
 
 pub struct McpRouterUseCase<P: McpProxyPort> {
@@ -94,9 +95,11 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
                     .initialize_all()
                     .await
                     .map_err(native_tool_error_to_proxy_error)?;
-                self.proxy
+                let response = self
+                    .proxy
                     .handle_unvalidated(request_host, method, path, query, headers, body)
-                    .await
+                    .await?;
+                Ok(self.patch_initialize_resources_capability(response))
             }
             Some("tools/list") => {
                 let response = self
@@ -105,11 +108,36 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
                     .await?;
                 Ok(self.append_tool_schemas(response))
             }
+            Some("resources/list") => {
+                let response = self
+                    .proxy
+                    .handle_unvalidated(request_host, method, path, query, headers, body)
+                    .await?;
+                Ok(self.append_resource_schemas(response))
+            }
             Some("tools/call") => {
                 if let Some(response) = self.maybe_call_native_tool(parsed_body.as_ref()).await? {
                     return Ok(response);
                 }
                 if let Some(response) = self.maybe_call_plugin_tool(parsed_body.as_ref()).await? {
+                    return Ok(response);
+                }
+
+                self.proxy
+                    .handle_unvalidated(request_host, method, path, query, headers, body)
+                    .await
+            }
+            Some("resources/read") => {
+                if let Some(response) = self
+                    .maybe_read_native_resource(parsed_body.as_ref())
+                    .await?
+                {
+                    return Ok(response);
+                }
+                if let Some(response) = self
+                    .maybe_read_plugin_resource(parsed_body.as_ref())
+                    .await?
+                {
                     return Ok(response);
                 }
 
@@ -224,6 +252,104 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
         Ok(None)
     }
 
+    async fn maybe_read_native_resource(
+        &self,
+        request: Option<&Value>,
+    ) -> Result<Option<McpProxyResponse>, ProxyError> {
+        let Some(request) = request else {
+            return Ok(None);
+        };
+        let Some(params) = request.get("params").and_then(Value::as_object) else {
+            return Ok(None);
+        };
+        let Some(uri) = params.get("uri").and_then(Value::as_str) else {
+            return Ok(None);
+        };
+        let Some(resource) = self.native_tools.find_resource(uri) else {
+            return Ok(None);
+        };
+
+        tracing::info!(
+            resource_uri = uri,
+            request_id = ?request.get("id"),
+            "MCP router: handling native resource read"
+        );
+
+        match resource.read().await {
+            Ok(content) => Ok(Some(native_resource_response(
+                request,
+                resource.uri(),
+                resource.mime_type(),
+                content,
+            )?)),
+            Err(error) => {
+                tracing::warn!(
+                    resource_uri = uri,
+                    request_id = ?request.get("id"),
+                    error = %error,
+                    "MCP router: native resource read failed"
+                );
+                Ok(Some(native_resource_error_response(request, uri, &error)))
+            }
+        }
+    }
+
+    async fn maybe_read_plugin_resource(
+        &self,
+        request: Option<&Value>,
+    ) -> Result<Option<McpProxyResponse>, ProxyError> {
+        let Some(request) = request else {
+            return Ok(None);
+        };
+        let Some(params) = request.get("params").and_then(Value::as_object) else {
+            return Ok(None);
+        };
+        let Some(uri) = params.get("uri").and_then(Value::as_str) else {
+            return Ok(None);
+        };
+
+        for client in &self.plugin_containers {
+            if let Some(original_uri) = client.strip_resource_uri_prefix(uri) {
+                if !client.has_resource(&original_uri) {
+                    tracing::warn!(
+                        container = %client.container_name(),
+                        prefixed_resource_uri = uri,
+                        resource_uri = original_uri,
+                        request_id = ?request.get("id"),
+                        "MCP router: rejecting read of unadvertised Plugin MCP resource"
+                    );
+                    return Ok(Some(resource_not_found_response(request, uri)));
+                }
+
+                tracing::info!(
+                    container = %client.container_name(),
+                    prefixed_resource_uri = uri,
+                    resource_uri = original_uri,
+                    request_id = ?request.get("id"),
+                    "MCP router: routing Plugin MCP resource read"
+                );
+
+                match client.read_resource(request, &original_uri).await {
+                    Ok(response) => return Ok(Some(response)),
+                    Err(error) => {
+                        tracing::error!(
+                            container = %client.container_name(),
+                            resource_uri = original_uri,
+                            request_id = ?request.get("id"),
+                            error = %error,
+                            "MCP router: Plugin MCP resource read failed"
+                        );
+                        return Ok(Some(plugin_resource_transport_error_response(
+                            request, uri, &error,
+                        )));
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
     /// Logs the full set of MCP tools brain3 is proxying, split into core
     /// (upstream vault-tools container + native tools) and plugin (one line
     /// per Plugin MCP Container) groups. Intended to be called once, right
@@ -330,28 +456,14 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
             return response;
         }
 
-        let Ok(mut body) = serde_json::from_slice::<Value>(&response.body) else {
-            tracing::warn!("MCP router: could not parse tools/list response body as JSON");
-            return response;
-        };
-
-        let Some(tools) = body
-            .get_mut("result")
-            .and_then(|result| result.get_mut("tools"))
-            .and_then(Value::as_array_mut)
-        else {
-            tracing::warn!("MCP router: tools/list response did not contain result.tools array");
-            return response;
-        };
-
         let native_tool_count = native_schemas.len();
         let plugin_tool_count = plugin_schemas.len();
-        tools.extend(native_schemas);
-        tools.extend(plugin_schemas);
-        let total_tool_count = tools.len();
+        let mut schemas = native_schemas;
+        schemas.extend(plugin_schemas);
 
-        let Ok(new_body) = serde_json::to_vec(&body) else {
-            tracing::warn!("MCP router: could not serialize augmented tools/list response");
+        let (response, total_tool_count) =
+            append_result_array(response, "tools/list", "tools", schemas);
+        let Some(total_tool_count) = total_tool_count else {
             return response;
         };
 
@@ -362,12 +474,142 @@ impl<P: McpProxyPort> McpRouterUseCase<P> {
             "MCP router: appended native and Plugin MCP tools to tools/list response"
         );
 
+        response
+    }
+
+    fn append_resource_schemas(&self, response: McpProxyResponse) -> McpProxyResponse {
+        let native_schemas = self.native_tools.list_resource_schemas();
+        let plugin_schemas = self
+            .plugin_containers
+            .iter()
+            .flat_map(|client| client.prefixed_resource_schemas())
+            .collect::<Vec<_>>();
+
+        if native_schemas.is_empty() && plugin_schemas.is_empty() {
+            return response;
+        }
+
+        let native_resource_count = native_schemas.len();
+        let plugin_resource_count = plugin_schemas.len();
+        let mut schemas = native_schemas;
+        schemas.extend(plugin_schemas);
+
+        let (response, total_resource_count) =
+            append_result_array(response, "resources/list", "resources", schemas);
+        let Some(total_resource_count) = total_resource_count else {
+            return response;
+        };
+
+        tracing::info!(
+            native_resource_count = native_resource_count,
+            plugin_resource_count = plugin_resource_count,
+            total_resource_count = total_resource_count,
+            "MCP router: appended native and Plugin MCP resources to resources/list response"
+        );
+
+        response
+    }
+
+    fn patch_initialize_resources_capability(
+        &self,
+        response: McpProxyResponse,
+    ) -> McpProxyResponse {
+        if !self.has_resources() {
+            return response;
+        }
+
+        let Ok(mut body) = serde_json::from_slice::<Value>(&response.body) else {
+            tracing::warn!("MCP router: could not parse initialize response body as JSON");
+            return response;
+        };
+        if body.get("error").is_some() {
+            return response;
+        }
+
+        let Some(result) = body.get_mut("result").and_then(Value::as_object_mut) else {
+            tracing::warn!("MCP router: initialize response did not contain result object");
+            return response;
+        };
+        let capabilities = result.entry("capabilities").or_insert_with(|| json!({}));
+        let Some(capabilities) = capabilities.as_object_mut() else {
+            tracing::warn!("MCP router: initialize response capabilities was not an object");
+            return response;
+        };
+
+        if capabilities.contains_key("resources") {
+            return response;
+        }
+        capabilities.insert("resources".into(), json!({}));
+
+        let Ok(new_body) = serde_json::to_vec(&body) else {
+            tracing::warn!("MCP router: could not serialize patched initialize response");
+            return response;
+        };
+
+        tracing::info!("MCP router: added resources capability to initialize response");
+
         McpProxyResponse {
             status: response.status,
             headers: strip_content_length(response.headers),
             body: new_body,
         }
     }
+
+    fn has_resources(&self) -> bool {
+        self.native_tools.has_resources()
+            || self
+                .plugin_containers
+                .iter()
+                .any(|client| !client.prefixed_resource_schemas().is_empty())
+    }
+}
+
+fn append_result_array(
+    response: McpProxyResponse,
+    method_name: &str,
+    array_key: &str,
+    additions: Vec<Value>,
+) -> (McpProxyResponse, Option<usize>) {
+    let Ok(mut body) = serde_json::from_slice::<Value>(&response.body) else {
+        tracing::warn!(
+            method = method_name,
+            "MCP router: could not parse response body as JSON"
+        );
+        return (response, None);
+    };
+
+    let Some(values) = body
+        .get_mut("result")
+        .and_then(|result| result.get_mut(array_key))
+        .and_then(Value::as_array_mut)
+    else {
+        tracing::warn!(
+            method = method_name,
+            array_key,
+            "MCP router: response did not contain expected result array"
+        );
+        return (response, None);
+    };
+
+    values.extend(additions);
+    let total_count = values.len();
+
+    let Ok(new_body) = serde_json::to_vec(&body) else {
+        tracing::warn!(
+            method = method_name,
+            "MCP router: could not serialize augmented response"
+        );
+        return (response, None);
+    };
+
+    (
+        McpProxyResponse {
+            status: response.status,
+            headers: strip_content_length(response.headers),
+            body: new_body,
+        },
+        Some(total_count),
+    )
 }
 
 fn tool_names(schemas: &[Value]) -> Vec<String> {
@@ -419,6 +661,47 @@ fn native_tool_response(
     })
 }
 
+fn native_resource_response(
+    request: &Value,
+    uri: &str,
+    mime_type: &str,
+    content: NativeMcpResourceContent,
+) -> Result<McpProxyResponse, ProxyError> {
+    let mut resource_content = json!({
+        "uri": uri,
+        "mimeType": mime_type,
+    });
+    let object = resource_content
+        .as_object_mut()
+        .expect("native resource content should be a JSON object");
+    match content {
+        NativeMcpResourceContent::Text(text) => {
+            object.insert("text".into(), Value::String(text));
+        }
+        NativeMcpResourceContent::Blob(blob) => {
+            object.insert("blob".into(), Value::String(blob));
+        }
+    }
+
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": request.get("id").cloned().unwrap_or(Value::Null),
+        "result": {
+            "contents": [resource_content],
+        }
+    });
+
+    let body = serde_json::to_vec(&body).map_err(|error| {
+        ProxyError::BadGateway(format!("native MCP resource response error: {error}"))
+    })?;
+
+    Ok(McpProxyResponse {
+        status: 200,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body,
+    })
+}
+
 fn native_tool_error_to_proxy_error(error: NativeMcpToolError) -> ProxyError {
     ProxyError::BadGateway(format!("native MCP tool initialization failed: {error}"))
 }
@@ -430,6 +713,48 @@ fn tool_not_found_response(request: &Value, tool_name: &str) -> McpProxyResponse
         "error": {
             "code": -32601,
             "message": format!("Tool not found: {tool_name}"),
+        }
+    });
+
+    let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
+
+    McpProxyResponse {
+        status: 200,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body,
+    }
+}
+
+fn resource_not_found_response(request: &Value, resource_uri: &str) -> McpProxyResponse {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": request.get("id").cloned().unwrap_or(Value::Null),
+        "error": {
+            "code": -32602,
+            "message": format!("Resource not found: {resource_uri}"),
+        }
+    });
+
+    let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
+
+    McpProxyResponse {
+        status: 200,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body,
+    }
+}
+
+fn native_resource_error_response(
+    request: &Value,
+    resource_uri: &str,
+    error: &NativeMcpResourceError,
+) -> McpProxyResponse {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": request.get("id").cloned().unwrap_or(Value::Null),
+        "error": {
+            "code": -32603,
+            "message": format!("Native resource error reading {resource_uri}: {error}"),
         }
     });
 
@@ -465,6 +790,29 @@ fn plugin_transport_error_response(
     }
 }
 
+fn plugin_resource_transport_error_response(
+    request: &Value,
+    resource_uri: &str,
+    error: &ProxyError,
+) -> McpProxyResponse {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": request.get("id").cloned().unwrap_or(Value::Null),
+        "error": {
+            "code": -32603,
+            "message": format!("Plugin container error reading {resource_uri}: {error}"),
+        }
+    });
+
+    let body = serde_json::to_vec(&body).unwrap_or_else(|_| b"{}".to_vec());
+
+    McpProxyResponse {
+        status: 200,
+        headers: vec![("content-type".into(), "application/json".into())],
+        body,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::{Arc, Mutex};
@@ -478,13 +826,29 @@ mod tests {
     use crate::domain::errors::ProxyError;
     use crate::domain::model::HostnameValidationConfig;
     use crate::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
+    use crate::ports::native_mcp_resource::{
+        NativeMcpResource, NativeMcpResourceContent, NativeMcpResourceError,
+    };
     use crate::ports::native_mcp_tool::{NativeMcpTool, NativeMcpToolError, NativeMcpToolOutput};
 
     use super::*;
 
     struct CapturingProxy {
         captured: Arc<Mutex<Vec<McpProxyRequest>>>,
-        response_body: Vec<u8>,
+        response_bodies: Arc<Mutex<Vec<Vec<u8>>>>,
+    }
+
+    impl CapturingProxy {
+        fn new(response_body: Vec<u8>) -> Self {
+            Self::new_sequence(vec![response_body])
+        }
+
+        fn new_sequence(response_bodies: Vec<Vec<u8>>) -> Self {
+            Self {
+                captured: Arc::new(Mutex::new(Vec::new())),
+                response_bodies: Arc::new(Mutex::new(response_bodies)),
+            }
+        }
     }
 
     #[async_trait]
@@ -494,16 +858,27 @@ mod tests {
                 .lock()
                 .expect("capture lock should succeed")
                 .push(request);
+            let response_body = {
+                let mut response_bodies = self
+                    .response_bodies
+                    .lock()
+                    .expect("response bodies lock should succeed");
+                if response_bodies.len() > 1 {
+                    response_bodies.remove(0)
+                } else {
+                    response_bodies
+                        .first()
+                        .expect("test proxy should have a response body")
+                        .clone()
+                }
+            };
             Ok(McpProxyResponse {
                 status: 200,
                 headers: vec![
                     ("content-type".into(), "application/json".into()),
-                    (
-                        "content-length".into(),
-                        self.response_body.len().to_string(),
-                    ),
+                    ("content-length".into(), response_body.len().to_string()),
                 ],
-                body: self.response_body.clone(),
+                body: response_body,
             })
         }
     }
@@ -559,6 +934,38 @@ mod tests {
         }
     }
 
+    struct FakeNativeResource {
+        reads: Arc<Mutex<usize>>,
+    }
+
+    impl FakeNativeResource {
+        fn new() -> Self {
+            Self {
+                reads: Arc::new(Mutex::new(0)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl NativeMcpResource for FakeNativeResource {
+        fn uri(&self) -> &str {
+            "ui://brain3-native/fake/index.html"
+        }
+
+        fn name(&self) -> &str {
+            "Fake native resource"
+        }
+
+        fn mime_type(&self) -> &str {
+            "text/html"
+        }
+
+        async fn read(&self) -> Result<NativeMcpResourceContent, NativeMcpResourceError> {
+            *self.reads.lock().expect("reads lock should succeed") += 1;
+            Ok(NativeMcpResourceContent::text("<main>native widget</main>"))
+        }
+    }
+
     fn router_with_tool(
         proxy_body: Vec<u8>,
     ) -> (
@@ -566,13 +973,9 @@ mod tests {
         Arc<Mutex<Vec<McpProxyRequest>>>,
         Arc<FakeNativeTool>,
     ) {
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let proxy = Arc::new(CapturingProxy {
-            captured: Arc::clone(&captured),
-            response_body: proxy_body,
-        });
+        let proxy = Arc::new(CapturingProxy::new(proxy_body));
         let proxy_use_case = Arc::new(ProxyMcpUseCase::new(
-            proxy,
+            Arc::clone(&proxy),
             "http://127.0.0.1:8420".into(),
             "shared-secret".into(),
             HostnameValidationConfig {
@@ -584,8 +987,77 @@ mod tests {
         let registry = NativeMcpToolRegistry::new(vec![tool.clone() as Arc<dyn NativeMcpTool>]);
         (
             McpRouterUseCase::new(proxy_use_case, Arc::new(registry)),
-            captured,
+            Arc::clone(&proxy.captured),
             tool,
+        )
+    }
+
+    fn router_with_tool_and_resource(
+        proxy_body: Vec<u8>,
+    ) -> (
+        McpRouterUseCase<CapturingProxy>,
+        Arc<Mutex<Vec<McpProxyRequest>>>,
+        Arc<FakeNativeResource>,
+    ) {
+        let proxy = Arc::new(CapturingProxy::new(proxy_body));
+        let proxy_use_case = Arc::new(ProxyMcpUseCase::new(
+            Arc::clone(&proxy),
+            "http://127.0.0.1:8420".into(),
+            "shared-secret".into(),
+            HostnameValidationConfig {
+                expected_host: None,
+                enforce: true,
+            },
+        ));
+        let tool = Arc::new(FakeNativeTool::new());
+        let resource = Arc::new(FakeNativeResource::new());
+        let registry = NativeMcpToolRegistry::new_with_resources(
+            vec![tool as Arc<dyn NativeMcpTool>],
+            vec![resource.clone() as Arc<dyn NativeMcpResource>],
+        );
+        (
+            McpRouterUseCase::new(proxy_use_case, Arc::new(registry)),
+            Arc::clone(&proxy.captured),
+            resource,
+        )
+    }
+
+    fn router_with_tool_resource_and_plugin(
+        proxy_body: Vec<u8>,
+        plugin_proxy: Arc<CapturingProxy>,
+        plugin_client: Arc<RemoteMcpContainerClient<CapturingProxy>>,
+    ) -> (
+        McpRouterUseCase<CapturingProxy>,
+        Arc<Mutex<Vec<McpProxyRequest>>>,
+        Arc<FakeNativeResource>,
+        Arc<Mutex<Vec<McpProxyRequest>>>,
+    ) {
+        let proxy = Arc::new(CapturingProxy::new(proxy_body));
+        let proxy_use_case = Arc::new(ProxyMcpUseCase::new(
+            Arc::clone(&proxy),
+            "http://127.0.0.1:8420".into(),
+            "shared-secret".into(),
+            HostnameValidationConfig {
+                expected_host: None,
+                enforce: true,
+            },
+        ));
+        let tool = Arc::new(FakeNativeTool::new());
+        let resource = Arc::new(FakeNativeResource::new());
+        let registry = NativeMcpToolRegistry::new_with_resources(
+            vec![tool as Arc<dyn NativeMcpTool>],
+            vec![resource.clone() as Arc<dyn NativeMcpResource>],
+        );
+        let plugin_captured = Arc::clone(&plugin_proxy.captured);
+        (
+            McpRouterUseCase::new_with_plugin_containers(
+                proxy_use_case,
+                Arc::new(registry),
+                vec![plugin_client],
+            ),
+            Arc::clone(&proxy.captured),
+            resource,
+            plugin_captured,
         )
     }
 
@@ -599,13 +1071,9 @@ mod tests {
         Arc<FakeNativeTool>,
         Arc<Mutex<Vec<McpProxyRequest>>>,
     ) {
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let proxy = Arc::new(CapturingProxy {
-            captured: Arc::clone(&captured),
-            response_body: proxy_body,
-        });
+        let proxy = Arc::new(CapturingProxy::new(proxy_body));
         let proxy_use_case = Arc::new(ProxyMcpUseCase::new(
-            proxy,
+            Arc::clone(&proxy),
             "http://127.0.0.1:8420".into(),
             "shared-secret".into(),
             HostnameValidationConfig {
@@ -622,7 +1090,7 @@ mod tests {
                 Arc::new(registry),
                 vec![plugin_client],
             ),
-            captured,
+            Arc::clone(&proxy.captured),
             tool,
             plugin_captured,
         )
@@ -634,11 +1102,36 @@ mod tests {
         Arc<CapturingProxy>,
         Arc<RemoteMcpContainerClient<CapturingProxy>>,
     ) {
-        let captured = Arc::new(Mutex::new(Vec::new()));
-        let proxy = Arc::new(CapturingProxy {
-            captured,
+        let proxy = Arc::new(CapturingProxy::new_sequence(vec![
+            br#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_vec(),
             response_body,
-        });
+            br#"{"jsonrpc":"2.0","id":2,"result":{"resources":[]}}"#.to_vec(),
+        ]));
+        let client = RemoteMcpContainerClient::initialize_and_cache_tools(
+            "fluensy_learn".into(),
+            "http://127.0.0.1:18420/mcp".into(),
+            None,
+            Arc::clone(&proxy),
+        )
+        .await
+        .expect("plugin client should initialize");
+        (proxy, Arc::new(client))
+    }
+
+    async fn initialized_plugin_client_with_resources(
+        resources_body: Vec<u8>,
+        tools_body: Vec<u8>,
+        read_body: Vec<u8>,
+    ) -> (
+        Arc<CapturingProxy>,
+        Arc<RemoteMcpContainerClient<CapturingProxy>>,
+    ) {
+        let proxy = Arc::new(CapturingProxy::new_sequence(vec![
+            br#"{"jsonrpc":"2.0","id":1,"result":{}}"#.to_vec(),
+            tools_body,
+            resources_body,
+            read_body,
+        ]));
         let client = RemoteMcpContainerClient::initialize_and_cache_tools(
             "fluensy_learn".into(),
             "http://127.0.0.1:18420/mcp".into(),
@@ -826,8 +1319,8 @@ mod tests {
                 .lock()
                 .expect("plugin capture lock should succeed")
                 .len(),
-            2,
-            "plugin client should only have startup initialize and tools/list calls"
+            3,
+            "plugin client should only have startup initialize, tools/list, and resources/list calls"
         );
 
         let body: Value =
@@ -893,9 +1386,9 @@ mod tests {
         let plugin_requests = plugin_captured
             .lock()
             .expect("plugin capture lock should succeed");
-        assert_eq!(plugin_requests.len(), 3);
+        assert_eq!(plugin_requests.len(), 4);
         let body: Value =
-            serde_json::from_slice(&plugin_requests[2].body).expect("request should be JSON");
+            serde_json::from_slice(&plugin_requests[3].body).expect("request should be JSON");
         assert_eq!(body["params"]["name"], "search_deck");
         assert_eq!(body["params"]["arguments"]["query"], "rust");
     }
@@ -983,8 +1476,281 @@ mod tests {
             .expect("plugin capture lock should succeed");
         assert_eq!(
             plugin_requests.len(),
-            2,
-            "plugin should only receive initialize and tools/list, not the rejected tool call"
+            3,
+            "plugin should only receive startup calls, not the rejected tool call"
+        );
+    }
+
+    #[tokio::test]
+    async fn resources_list_forwards_to_proxy_and_appends_native_and_plugin_resources() {
+        let (plugin_proxy, plugin_client) = initialized_plugin_client_with_resources(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 2,
+                "result": {
+                    "resources": [
+                        {
+                            "uri": "ui://widget-name/index.html",
+                            "name": "Plugin widget",
+                            "mimeType": "text/html"
+                        }
+                    ]
+                }
+            })
+            .to_string()
+            .into_bytes(),
+            br#"{"jsonrpc":"2.0","id":3,"result":{"tools":[]}}"#.to_vec(),
+            br#"{"jsonrpc":"2.0","id":4,"result":{"contents":[]}}"#.to_vec(),
+        )
+        .await;
+        let (router, captured, _, plugin_captured) = router_with_tool_resource_and_plugin(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 5,
+                "result": {
+                    "resources": [
+                        {
+                            "uri": "ui://core/resource.html",
+                            "name": "Core resource",
+                            "mimeType": "text/html"
+                        }
+                    ]
+                }
+            })
+            .to_string()
+            .into_bytes(),
+            plugin_proxy,
+            plugin_client,
+        );
+
+        let response = router
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 5,
+                    "method": "resources/list"
+                })
+                .to_string()
+                .into_bytes(),
+            )
+            .await
+            .expect("resources/list should succeed");
+
+        assert_eq!(
+            captured.lock().expect("capture lock should succeed").len(),
+            1,
+            "vault proxy should still receive resources/list"
+        );
+        assert_eq!(
+            plugin_captured
+                .lock()
+                .expect("plugin capture lock should succeed")
+                .len(),
+            3,
+            "plugin client should only have startup calls"
+        );
+
+        let body: Value =
+            serde_json::from_slice(&response.body).expect("response body should be JSON");
+        let resources = body["result"]["resources"]
+            .as_array()
+            .expect("resources should be an array");
+        assert_eq!(resources.len(), 3);
+        assert_eq!(resources[0]["uri"], "ui://core/resource.html");
+        assert_eq!(resources[1]["uri"], "ui://brain3-native/fake/index.html");
+        assert_eq!(
+            resources[2]["uri"],
+            "ui://fluensy_learn__widget-name/index.html"
+        );
+        assert!(
+            response
+                .headers
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("content-length")),
+            "augmented resources/list responses must not retain the upstream content-length"
+        );
+    }
+
+    #[tokio::test]
+    async fn resources_read_for_native_resource_bypasses_proxy() {
+        let (router, captured, resource) =
+            router_with_tool_and_resource(br#"{"jsonrpc":"2.0","result":{}}"#.to_vec());
+
+        let response = router
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 8,
+                    "method": "resources/read",
+                    "params": { "uri": "ui://brain3-native/fake/index.html" }
+                })
+                .to_string()
+                .into_bytes(),
+            )
+            .await
+            .expect("native resource read should succeed");
+
+        assert!(captured
+            .lock()
+            .expect("capture lock should succeed")
+            .is_empty());
+        assert_eq!(
+            *resource.reads.lock().expect("reads lock should succeed"),
+            1
+        );
+
+        let body: Value =
+            serde_json::from_slice(&response.body).expect("response body should be JSON");
+        assert_eq!(body["id"], 8);
+        assert_eq!(
+            body["result"]["contents"][0]["uri"],
+            "ui://brain3-native/fake/index.html"
+        );
+        assert_eq!(body["result"]["contents"][0]["mimeType"], "text/html");
+        assert_eq!(
+            body["result"]["contents"][0]["text"],
+            "<main>native widget</main>"
+        );
+    }
+
+    #[tokio::test]
+    async fn resources_read_for_prefixed_plugin_resource_routes_to_container_and_strips_prefix() {
+        let (plugin_proxy, plugin_client) = initialized_plugin_client_with_resources(
+            br#"{"jsonrpc":"2.0","id":2,"result":{"resources":[{"uri":"ui://widget-name/index.html","name":"Plugin widget","mimeType":"text/html"}]}}"#.to_vec(),
+            br#"{"jsonrpc":"2.0","id":3,"result":{"tools":[]}}"#.to_vec(),
+            br#"{"jsonrpc":"2.0","id":9,"result":{"contents":[{"uri":"ui://widget-name/index.html","mimeType":"text/html","text":"<main>plugin</main>"}]}}"#.to_vec(),
+        )
+        .await;
+        let (router, captured, _, plugin_captured) = router_with_tool_and_plugin(
+            br#"{"jsonrpc":"2.0","result":{}}"#.to_vec(),
+            plugin_proxy,
+            plugin_client,
+        );
+
+        let response = router
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 9,
+                    "method": "resources/read",
+                    "params": { "uri": "ui://fluensy_learn__widget-name/index.html" }
+                })
+                .to_string()
+                .into_bytes(),
+            )
+            .await
+            .expect("plugin resource read should succeed");
+
+        assert!(captured
+            .lock()
+            .expect("vault capture lock should succeed")
+            .is_empty());
+        assert_eq!(response.status, 200);
+        let plugin_requests = plugin_captured
+            .lock()
+            .expect("plugin capture lock should succeed");
+        assert_eq!(plugin_requests.len(), 4);
+        let body: Value =
+            serde_json::from_slice(&plugin_requests[3].body).expect("request should be JSON");
+        assert_eq!(body["method"], "resources/read");
+        assert_eq!(body["params"]["uri"], "ui://widget-name/index.html");
+    }
+
+    #[tokio::test]
+    async fn resources_read_falls_through_to_core_proxy_for_unrecognized_uri() {
+        let (router, captured, _) =
+            router_with_tool_and_resource(br#"{"jsonrpc":"2.0","id":10,"result":{}}"#.to_vec());
+
+        let response = router
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 10,
+                    "method": "resources/read",
+                    "params": { "uri": "ui://unknown/resource.html" }
+                })
+                .to_string()
+                .into_bytes(),
+            )
+            .await
+            .expect("unrecognized resource should fall through");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(
+            captured.lock().expect("capture lock should succeed").len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn initialize_response_gains_resources_capability_when_resources_exist() {
+        let (router, captured, _) = router_with_tool_and_resource(
+            json!({
+                "jsonrpc": "2.0",
+                "id": 11,
+                "result": {
+                    "capabilities": {
+                        "tools": {}
+                    }
+                }
+            })
+            .to_string()
+            .into_bytes(),
+        );
+
+        let response = router
+            .handle(
+                "brain3.example.com",
+                "POST",
+                "/mcp",
+                None,
+                vec![("content-type".into(), "application/json".into())],
+                json!({
+                    "jsonrpc": "2.0",
+                    "id": 11,
+                    "method": "initialize",
+                    "params": {}
+                })
+                .to_string()
+                .into_bytes(),
+            )
+            .await
+            .expect("initialize should succeed");
+
+        assert_eq!(
+            captured.lock().expect("capture lock should succeed").len(),
+            1
+        );
+        let body: Value =
+            serde_json::from_slice(&response.body).expect("response body should be JSON");
+        assert_eq!(body["result"]["capabilities"]["tools"], json!({}));
+        assert_eq!(body["result"]["capabilities"]["resources"], json!({}));
+        assert!(
+            response
+                .headers
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("content-length")),
+            "patched initialize response must not retain upstream content-length"
         );
     }
 }
