@@ -131,6 +131,14 @@ pub async fn ensure_plugin_mcp_container(
     );
 
     let port = container_port_for_runtime(plugin.runtime);
+    recreate_existing_managed_plugin_container_if_present(
+        port.as_ref(),
+        plugin.runtime,
+        plugin,
+        role.as_str(),
+        installation_id,
+    )
+    .await?;
     maybe_handle_managed_container_orphans(
         port.as_ref(),
         plugin.runtime,
@@ -446,6 +454,88 @@ fn resolve_plugin_host_port(plugin: &PluginMcpContainerConfig) -> Result<u16, Co
 fn pick_free_loopback_port() -> std::io::Result<u16> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     listener.local_addr().map(|addr| addr.port())
+}
+
+async fn recreate_existing_managed_plugin_container_if_present(
+    port: &dyn ContainerPort,
+    runtime: ContainerRuntime,
+    plugin: &PluginMcpContainerConfig,
+    role: &str,
+    installation_id: &str,
+) -> Result<(), ContainerError> {
+    let id = ContainerId(plugin.name.clone());
+    if !port.exists(&id).await? {
+        return Ok(());
+    }
+
+    let scope = managed_container_scope(installation_id, role);
+    let managed_containers = port.list_managed_containers(&scope).await?;
+    if !managed_containers
+        .iter()
+        .any(|container| container.name == plugin.name)
+    {
+        tracing::debug!(
+            container = %plugin.name,
+            installation_id,
+            role,
+            "same-name Plugin MCP Container exists but is not managed by this installation; leaving conflict handling to container startup"
+        );
+        return Ok(());
+    }
+
+    tracing::info!(
+        container = %plugin.name,
+        runtime = ?runtime,
+        installation_id,
+        role,
+        "recreating existing managed Plugin MCP Container to apply current configuration"
+    );
+
+    if port.is_running(&id).await? {
+        match port.stop(&id).await {
+            Ok(()) => {}
+            Err(ContainerError::CommandFailed { ref stderr, .. })
+                if container_not_found_stderr(stderr) =>
+            {
+                tracing::debug!(
+                    container = %plugin.name,
+                    "managed Plugin MCP Container disappeared during stop"
+                );
+                return Ok(());
+            }
+            Err(error) => {
+                return Err(ContainerError::Other(format!(
+                    "failed to stop existing managed Plugin MCP Container '{}': {}",
+                    plugin.name,
+                    error.summary()
+                )));
+            }
+        }
+    }
+
+    match port.remove(&id).await {
+        Ok(()) => Ok(()),
+        Err(ContainerError::CommandFailed { ref stderr, .. })
+            if container_not_found_stderr(stderr) =>
+        {
+            tracing::debug!(
+                container = %plugin.name,
+                "managed Plugin MCP Container already removed before explicit removal"
+            );
+            Ok(())
+        }
+        Err(error) => Err(ContainerError::Other(format!(
+            "failed to remove existing managed Plugin MCP Container '{}': {}",
+            plugin.name,
+            error.summary()
+        ))),
+    }
+}
+
+fn container_not_found_stderr(stderr: &str) -> bool {
+    stderr.contains("No such container")
+        || stderr.contains("notFound")
+        || stderr.contains("not found")
 }
 
 async fn maybe_handle_managed_container_orphans(
@@ -931,6 +1021,61 @@ mod tests {
             config.env_vars,
             vec![("LOGFIRE_CONSOLE".to_string(), "true".to_string())]
         );
+    }
+
+    #[tokio::test]
+    async fn recreates_existing_managed_plugin_container() {
+        let plugin = sample_plugin_config();
+        let role = plugin_mcp_role_label(plugin.name.as_str());
+        let port = MockContainerPort::new(MockState {
+            managed_containers: vec![ManagedContainerInfo {
+                name: plugin.name.clone(),
+                running: true,
+                state: "running".into(),
+                labels: managed_container_labels_for_role("scope-1", role.as_str()),
+            }],
+            exists_responses: vec![true],
+            is_running_responses: vec![true],
+            ..Default::default()
+        });
+
+        recreate_existing_managed_plugin_container_if_present(
+            &port,
+            ContainerRuntime::Docker,
+            &plugin,
+            role.as_str(),
+            "scope-1",
+        )
+        .await
+        .expect("managed plugin container should be recreated");
+
+        let state = port.snapshot();
+        assert_eq!(state.stop_calls, vec![plugin.name.clone()]);
+        assert_eq!(state.remove_calls, vec![plugin.name]);
+    }
+
+    #[tokio::test]
+    async fn does_not_remove_unmanaged_same_name_plugin_container() {
+        let plugin = sample_plugin_config();
+        let role = plugin_mcp_role_label(plugin.name.as_str());
+        let port = MockContainerPort::new(MockState {
+            exists_responses: vec![true],
+            ..Default::default()
+        });
+
+        recreate_existing_managed_plugin_container_if_present(
+            &port,
+            ContainerRuntime::Docker,
+            &plugin,
+            role.as_str(),
+            "scope-1",
+        )
+        .await
+        .expect("unmanaged container should be left in place");
+
+        let state = port.snapshot();
+        assert!(state.stop_calls.is_empty());
+        assert!(state.remove_calls.is_empty());
     }
 
     #[test]

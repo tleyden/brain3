@@ -1,11 +1,13 @@
 use std::collections::{BTreeMap, HashSet};
 use std::env;
+use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use brain3_core::domain::model::{
     ContainerRuntime, PluginMcpContainerAuth, PluginMcpContainerConfig,
 };
+use serde::de::{self, Visitor};
 use serde::Deserialize;
 
 const DEFAULT_CONTAINER_DIRECTORY: &str = "/data";
@@ -29,8 +31,86 @@ struct RawPluginMcpContainerConfig {
     container_directory: Option<PathBuf>,
     network: Option<String>,
     network_isolation: Option<bool>,
-    env: Option<BTreeMap<String, String>>,
+    env: Option<BTreeMap<String, RawEnvValue>>,
     auth: Option<RawPluginMcpContainerAuth>,
+}
+
+#[derive(Debug)]
+struct RawEnvValue(String);
+
+impl<'de> Deserialize<'de> for RawEnvValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_any(RawEnvValueVisitor)
+    }
+}
+
+struct RawEnvValueVisitor;
+
+impl Visitor<'_> for RawEnvValueVisitor {
+    type Value = RawEnvValue;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a scalar environment variable value")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(RawEnvValue(value.to_string()))
+    }
+
+    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(RawEnvValue(value))
+    }
+
+    fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(RawEnvValue(value.to_string()))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(RawEnvValue(value.to_string()))
+    }
+
+    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(RawEnvValue(value.to_string()))
+    }
+
+    fn visit_f64<E>(self, value: f64) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(RawEnvValue(value.to_string()))
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(RawEnvValue(String::new()))
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: de::Error,
+    {
+        Ok(RawEnvValue(String::new()))
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -176,7 +256,7 @@ fn validate_network_name(name: &str) -> Result<(), String> {
     }
 }
 
-fn parse_env(env: Option<BTreeMap<String, String>>) -> Result<Vec<(String, String)>, String> {
+fn parse_env(env: Option<BTreeMap<String, RawEnvValue>>) -> Result<Vec<(String, String)>, String> {
     let Some(env) = env else {
         return Ok(Vec::new());
     };
@@ -185,7 +265,7 @@ fn parse_env(env: Option<BTreeMap<String, String>>) -> Result<Vec<(String, Strin
         validate_env_var_name(key)?;
     }
 
-    Ok(env.into_iter().collect())
+    Ok(env.into_iter().map(|(key, value)| (key, value.0)).collect())
 }
 
 fn validate_env_var_name(name: &str) -> Result<(), String> {
@@ -526,6 +606,49 @@ plugin_mcp_containers:
             vec![
                 ("BAZ".to_string(), "qux".to_string()),
                 ("FOO".to_string(), "bar".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn env_scalar_values_load_as_strings() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let host_dir = temp.path().join("data");
+        fs::create_dir_all(&host_dir).expect("host dir");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"plugin_mcp_containers:
+  - name: typed_env
+    platform: macos_container
+    image: ghcr.io/example/typed-env
+    tag: latest
+    port: 8420
+    host_directory: {}
+    network: typed-env-net
+    env:
+      LOGFIRE_CONSOLE: true
+      RETRY_COUNT: 3
+      RATE_LIMIT: 0.5
+      EMPTY_VALUE:
+    auth:
+      type: none
+"#,
+                host_dir.display()
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(
+            configs[0].env,
+            vec![
+                ("EMPTY_VALUE".to_string(), String::new()),
+                ("LOGFIRE_CONSOLE".to_string(), "true".to_string()),
+                ("RATE_LIMIT".to_string(), "0.5".to_string()),
+                ("RETRY_COUNT".to_string(), "3".to_string()),
             ]
         );
     }
