@@ -25,6 +25,7 @@
 - E2E smoke tests verify end-to-end behaviour but are slower and run on CI, so by default only run them when the user explicitly asks. However, run them yourself without being asked when the change is big or risky (e.g. touches the gateway server, MCP proxy, container startup, or vault-tools), or when the E2E tests themselves changed.
   - Run with: `uv run scripts/e2e_smoke.py`. Raw equivalent for transparency: `docker build -f ./brain3-mcp-vault-tools/Containerfile -t brain3-mcp-vault-tools:e2e-local ./brain3-mcp-vault-tools` followed by `cargo test -p brain3 --test e2e_smoke --features e2e -- --nocapture`.
 - Never run linux containers for building or verifying.  Any linux testing will happen on the CI platform via GH Actions that run docker.  Ditto for Windows, all testing happens on CI. 
+- When adding new functionality, look for existing e2e tests that can be extended, or suggest adding new e2e tests to cover the new functionality. 
 
 # Rust Development & Hexagonal Architecture: Best Practices
 

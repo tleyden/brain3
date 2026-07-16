@@ -82,6 +82,7 @@ pub struct PluginMcpContainerConfig {
     /// network without requiring it to be internal and regains outbound egress
     /// when that network permits it.
     pub network_isolation: bool,
+    pub env: Vec<(String, String)>,
     pub auth: PluginMcpContainerAuth,
 }
 
