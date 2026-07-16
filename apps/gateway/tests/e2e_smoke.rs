@@ -190,6 +190,10 @@ impl TempTestDir {
     host_directory: {}
     container_directory: /data
     network_isolation: false
+    env:
+      BRAIN3_E2E_HELLO_MESSAGE: hello from plugin env
+      BRAIN3_E2E_HELLO_ENABLED: true
+      BRAIN3_E2E_HELLO_RETRY_COUNT: 3
     auth:
       type: bearer_token
       secret_file: {}
@@ -883,7 +887,7 @@ async fn e2e_smoke_5_plugin_mcp_container() -> Result<(), Box<dyn std::error::Er
         );
 
         let hello = call_tool_text(&client, "hello_mcp__hello", json!({})).await?;
-        assert_eq!(hello, "hello world");
+        assert_eq!(hello, "hello from plugin env|true|3");
 
         client.cancel().await?;
         drop(diagnostics_guard);

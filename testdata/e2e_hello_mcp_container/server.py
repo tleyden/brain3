@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import signal
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,6 +10,9 @@ from pathlib import Path
 HOST = "0.0.0.0"
 PORT = 8420
 SECRET_FILE = Path("/run/secrets/mcp_bearer_token")
+HELLO_MESSAGE_ENV = "BRAIN3_E2E_HELLO_MESSAGE"
+HELLO_ENABLED_ENV = "BRAIN3_E2E_HELLO_ENABLED"
+HELLO_RETRY_COUNT_ENV = "BRAIN3_E2E_HELLO_RETRY_COUNT"
 
 
 def terminate(_signum: int, _frame: object) -> None:
@@ -77,8 +81,15 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
                 return
+            text = "|".join(
+                [
+                    os.environ.get(HELLO_MESSAGE_ENV, ""),
+                    os.environ.get(HELLO_ENABLED_ENV, ""),
+                    os.environ.get(HELLO_RETRY_COUNT_ENV, ""),
+                ]
+            )
             result = {
-                "content": [{"type": "text", "text": "hello world"}],
+                "content": [{"type": "text", "text": text}],
                 "isError": False,
             }
         else:
