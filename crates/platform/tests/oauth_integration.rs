@@ -13,16 +13,17 @@ use tokio::sync::Mutex;
 use brain3_core::application::mcp_router::McpRouterUseCase;
 use brain3_core::application::native_mcp_tool_registry::NativeMcpToolRegistry;
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
+use brain3_core::application::remote_mcp_container_client::RemoteMcpContainerClient;
 use brain3_core::domain::errors::ProxyError;
 use brain3_core::domain::model::{
-    AccessMode, GatewayConfig, HostnameValidationConfig, LocalMcpConfig, MCPReverseProxyConfig,
-    NativeAudioTranscriptionConfig, OAuthConfig,
+    plugin_mcp_container_asset_mount, AccessMode, GatewayConfig, HostnameValidationConfig,
+    LocalMcpConfig, MCPReverseProxyConfig, NativeAudioTranscriptionConfig, OAuthConfig,
 };
 use brain3_core::ports::mcp_proxy::{McpProxyPort, McpProxyRequest, McpProxyResponse};
 
 use brain3_platform::http::registrar::GatewayRegistrar;
 use brain3_platform::http::router::{build_local_router, build_router};
-use brain3_platform::http::state::AppState;
+use brain3_platform::http::state::{AppState, PluginAssetMount};
 use brain3_platform::token_store::sqlite::SqliteTokenStore;
 
 const CLIENT_ID: &str = "brain3-oauth2-client";
@@ -200,6 +201,7 @@ impl TestHarness {
             proxy_mcp,
             config,
             rate_limiter: Arc::new(brain3_platform::http::rate_limit::OAuthRateLimiter::new()),
+            plugin_asset_mounts: Arc::new(Vec::new()),
         };
 
         BuiltServer {
@@ -266,6 +268,7 @@ impl TestHarness {
             proxy_mcp,
             config,
             rate_limiter: Arc::new(brain3_platform::http::rate_limit::OAuthRateLimiter::new()),
+            plugin_asset_mounts: Arc::new(Vec::new()),
         };
 
         BuiltServer {
@@ -273,6 +276,85 @@ impl TestHarness {
             issuer,
         }
     }
+}
+
+async fn build_server_with_plugin_asset_mount(proxy: Arc<MockMcpProxy>) -> TestServer {
+    let registrar = Arc::new(GatewayRegistrar::new(
+        CLIENT_ID,
+        CLIENT_SECRET.as_bytes().to_vec(),
+    ));
+    let authorizer = Arc::new(Mutex::new(AuthMap::new(RandomGenerator::new(32))));
+    let issuer = Arc::new(Mutex::new(
+        SqliteTokenStore::in_memory(3600, 90 * 24 * 60 * 60)
+            .expect("in-memory issuer should initialize"),
+    ));
+    let proxy_mcp = Arc::new(ProxyMcpUseCase::new(
+        Arc::clone(&proxy),
+        "http://127.0.0.1:2765".into(),
+        "shared-secret".into(),
+        HostnameValidationConfig {
+            expected_host: None,
+            enforce: true,
+        },
+    ));
+    let proxy_mcp = empty_native_router(proxy_mcp);
+    let config = Arc::new(GatewayConfig {
+        port: 0,
+        host: "127.0.0.1".into(),
+        token_db_path: "/tmp/brain3-test-brain3.db".into(),
+        oauth: OAuthConfig {
+            client_id: CLIENT_ID.into(),
+            client_secret: CLIENT_SECRET.into(),
+            access_token_lifetime_secs: 3600,
+            refresh_token_lifetime_secs: 90 * 24 * 60 * 60,
+            pkce_required: true,
+            username: LOGIN_USERNAME.into(),
+            password: LOGIN_PASSWORD.into(),
+        },
+        mcp_reverse_proxy: MCPReverseProxyConfig {
+            mcp_upstream_url: "http://127.0.0.1:2765".into(),
+            upstream_secret: "shared-secret".into(),
+        },
+        hostname_validation: HostnameValidationConfig {
+            expected_host: None,
+            enforce: true,
+        },
+        access_mode: AccessMode::Both,
+        local_mcp: None,
+        container: None,
+        tunnel: None,
+        native_audio_transcription: NativeAudioTranscriptionConfig {
+            enabled: false,
+            model: "base.en".into(),
+            model_path: "/tmp/brain3-whisper-models/ggml-base.en.bin".into(),
+            max_audio_bytes: 52_428_800,
+        },
+    });
+
+    let client = Arc::new(
+        RemoteMcpContainerClient::initialize_and_cache_tools(
+            "fluensy_learn".into(),
+            "http://127.0.0.1:59020/mcp".into(),
+            None,
+            Arc::clone(&proxy),
+        )
+        .await
+        .expect("plugin client should initialize"),
+    );
+    let state = AppState {
+        registrar,
+        authorizer,
+        issuer,
+        proxy_mcp,
+        config,
+        rate_limiter: Arc::new(brain3_platform::http::rate_limit::OAuthRateLimiter::new()),
+        plugin_asset_mounts: Arc::new(vec![PluginAssetMount {
+            mount: plugin_mcp_container_asset_mount(client.container_name()),
+            client,
+        }]),
+    };
+
+    TestServer::new(build_router(state))
 }
 
 fn authorize_form() -> Vec<(&'static str, &'static str)> {
@@ -406,6 +488,161 @@ async fn call_local_mcp(server: &TestServer, token: Option<&str>) -> axum_test::
         );
     }
     request.await
+}
+
+fn plugin_asset_mock(captured: Arc<std::sync::Mutex<Vec<McpProxyRequest>>>) -> MockMcpProxy {
+    MockMcpProxy {
+        handler: Box::new(move |request| {
+            captured.lock().unwrap().push(McpProxyRequest {
+                method: request.method.clone(),
+                url: request.url.clone(),
+                headers: request.headers.clone(),
+                body: request.body.clone(),
+            });
+
+            if request.method == "GET" {
+                return Ok(McpProxyResponse {
+                    status: 200,
+                    headers: vec![("content-type".into(), "application/javascript".into())],
+                    body: b"console.log('widget');".to_vec(),
+                });
+            }
+
+            let body: Value = serde_json::from_slice(&request.body)
+                .expect("plugin init request body should be JSON");
+            let method = body
+                .get("method")
+                .and_then(Value::as_str)
+                .expect("plugin init request should include method");
+            let result = match method {
+                "initialize" => serde_json::json!({"capabilities": {}}),
+                "tools/list" => serde_json::json!({"tools": []}),
+                "resources/list" => serde_json::json!({"resources": []}),
+                other => panic!("unexpected Plugin MCP init method: {other}"),
+            };
+            Ok(McpProxyResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "application/json".into())],
+                body: serde_json::to_vec(&serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": body.get("id").cloned().unwrap_or(Value::Null),
+                    "result": result,
+                }))
+                .unwrap(),
+            })
+        }),
+    }
+}
+
+#[tokio::test]
+async fn plugin_asset_get_proxies_to_mounted_container_with_cors() {
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let proxy = Arc::new(plugin_asset_mock(Arc::clone(&captured)));
+    let server = build_server_with_plugin_asset_mount(proxy).await;
+
+    let response = server
+        .get("/fluensy-learn/mcp-use/widgets/practice-widget/assets/index.js")
+        .add_query_param("v", "abc123")
+        .add_header(
+            axum::http::header::AUTHORIZATION,
+            axum::http::HeaderValue::from_static("Bearer browser-token"),
+        )
+        .await;
+
+    response.assert_status_ok();
+    assert_eq!(response.text(), "console.log('widget');");
+    assert_eq!(
+        response
+            .header("content-type")
+            .to_str()
+            .expect("content-type header should be valid"),
+        "application/javascript"
+    );
+    assert_eq!(
+        response
+            .header("access-control-allow-origin")
+            .to_str()
+            .expect("CORS header should be valid"),
+        "*"
+    );
+
+    let requests = captured.lock().unwrap();
+    let asset_request = requests.last().expect("asset request should be captured");
+    assert_eq!(asset_request.method, "GET");
+    assert_eq!(
+        asset_request.url,
+        "http://127.0.0.1:59020/mcp-use/widgets/practice-widget/assets/index.js?v=abc123"
+    );
+    assert!(asset_request
+        .headers
+        .iter()
+        .all(|(name, _)| !name.eq_ignore_ascii_case("authorization")
+            && !name.eq_ignore_ascii_case("host")
+            && !name.eq_ignore_ascii_case("content-length")));
+}
+
+#[tokio::test]
+async fn plugin_asset_options_returns_preflight_cors() {
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let proxy = Arc::new(plugin_asset_mock(Arc::clone(&captured)));
+    let server = build_server_with_plugin_asset_mount(proxy).await;
+
+    let response = server
+        .method(
+            axum::http::Method::OPTIONS,
+            "/fluensy-learn/mcp-use/widgets/practice-widget/assets/index.css",
+        )
+        .await;
+
+    response.assert_status(axum::http::StatusCode::NO_CONTENT);
+    assert_eq!(
+        response
+            .header("access-control-allow-methods")
+            .to_str()
+            .expect("CORS methods header should be valid"),
+        "GET, OPTIONS"
+    );
+    let requests = captured.lock().unwrap();
+    assert_eq!(requests.len(), 3, "preflight should not call upstream");
+}
+
+#[tokio::test]
+async fn plugin_asset_route_rejects_paths_outside_mcp_use_subtree() {
+    let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let proxy = Arc::new(plugin_asset_mock(Arc::clone(&captured)));
+    let server = build_server_with_plugin_asset_mount(proxy).await;
+
+    let response = server.get("/fluensy-learn/mcp").await;
+
+    response.assert_status_not_found();
+    assert_eq!(
+        response
+            .header("access-control-allow-origin")
+            .to_str()
+            .expect("CORS header should be valid"),
+        "*"
+    );
+    let requests = captured.lock().unwrap();
+    assert_eq!(requests.len(), 3, "rejected path should not call upstream");
+}
+
+#[tokio::test]
+async fn local_router_does_not_expose_plugin_asset_mounts() {
+    let built = TestHarness {
+        local_mcp: Some(LocalMcpConfig {
+            port: 2764,
+            bearer_token: "local-token".into(),
+        }),
+        ..Default::default()
+    }
+    .build_local_server(MockMcpProxy::should_not_be_called());
+
+    let response = built
+        .server
+        .get("/fluensy-learn/mcp-use/widgets/practice-widget/assets/index.js")
+        .await;
+
+    response.assert_status_not_found();
 }
 
 #[tokio::test]

@@ -9,7 +9,10 @@ use brain3_core::ports::mcp_proxy::McpProxyPort;
 
 use super::assets::{login_logo, login_stylesheet};
 use super::health::health;
-use super::mcp_handlers::{local_mcp_proxy, mcp_reverse_proxy, protected_resource_metadata};
+use super::mcp_handlers::{
+    local_mcp_proxy, mcp_reverse_proxy, plugin_asset_options, plugin_asset_proxy,
+    protected_resource_metadata,
+};
 use super::oauth_handlers::{
     oauth_authorize_get, oauth_authorize_post, oauth_metadata, oauth_token,
 };
@@ -26,7 +29,7 @@ async fn fallback(req: Request) -> impl IntoResponse {
 }
 
 pub fn build_router<P: McpProxyPort + 'static>(state: AppState<P>) -> Router {
-    Router::new()
+    let mut router = Router::new()
         .route("/health", get(health))
         .route(
             "/.well-known/oauth-authorization-server",
@@ -60,7 +63,23 @@ pub fn build_router<P: McpProxyPort + 'static>(state: AppState<P>) -> Router {
             get(mcp_reverse_proxy::<P>)
                 .post(mcp_reverse_proxy::<P>)
                 .delete(mcp_reverse_proxy::<P>),
-        )
+        );
+
+    for asset_mount in state.plugin_asset_mounts.iter() {
+        let route = format!("/{}/{{*path}}", asset_mount.mount);
+        tracing::info!(
+            mount = %asset_mount.mount,
+            container = %asset_mount.client.container_name(),
+            route = %route,
+            "registering Plugin MCP Container asset route"
+        );
+        router = router.route(
+            &route,
+            get(plugin_asset_proxy::<P>).options(plugin_asset_options::<P>),
+        );
+    }
+
+    router
         .fallback(fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

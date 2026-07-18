@@ -86,6 +86,10 @@ pub struct PluginMcpContainerConfig {
     pub auth: PluginMcpContainerAuth,
 }
 
+pub fn plugin_mcp_container_asset_mount(name: &str) -> String {
+    name.replace('_', "-")
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PluginMcpContainerAuth {
     None,
