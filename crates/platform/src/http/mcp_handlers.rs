@@ -1,6 +1,6 @@
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::{HeaderMap, Method, StatusCode, Uri};
+use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use oxide_auth::primitives::issuer::Issuer;
@@ -14,6 +14,13 @@ use brain3_core::domain::redact::elide_secret;
 use brain3_core::ports::mcp_proxy::McpProxyPort;
 
 use super::state::AppState;
+
+const ACCESS_CONTROL_ALLOW_ORIGIN: HeaderName =
+    HeaderName::from_static("access-control-allow-origin");
+const ACCESS_CONTROL_ALLOW_METHODS: HeaderName =
+    HeaderName::from_static("access-control-allow-methods");
+const ACCESS_CONTROL_ALLOW_HEADERS: HeaderName =
+    HeaderName::from_static("access-control-allow-headers");
 
 fn resolve_base_url(headers: &HeaderMap) -> String {
     let proto = headers
@@ -271,6 +278,116 @@ fn upstream_response_to_axum_response<P: McpProxyPort + 'static>(
         Err(error) if oauth_error_hints => proxy_error_response(error, headers),
         Err(error) => local_proxy_error_response(error),
     }
+}
+
+fn apply_plugin_asset_cors(headers: &mut HeaderMap) {
+    headers.insert(ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
+    headers.insert(
+        ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, OPTIONS"),
+    );
+    headers.insert(ACCESS_CONTROL_ALLOW_HEADERS, HeaderValue::from_static("*"));
+}
+
+fn plugin_asset_path_parts(path: &str) -> Option<(&str, &str)> {
+    let rest = path.strip_prefix('/')?;
+    let (mount, stripped_path) = rest.split_once('/')?;
+    if mount.is_empty() || stripped_path.is_empty() {
+        return None;
+    }
+    Some((mount, stripped_path))
+}
+
+fn plugin_asset_response_with_cors(response: Response) -> Response {
+    let mut response = response;
+    apply_plugin_asset_cors(response.headers_mut());
+    response
+}
+
+pub async fn plugin_asset_options<P: McpProxyPort + 'static>(
+    State(state): State<AppState<P>>,
+    uri: Uri,
+) -> Response {
+    let Some((mount, path)) = plugin_asset_path_parts(uri.path()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let mount_known = state
+        .plugin_asset_mounts
+        .iter()
+        .any(|asset_mount| asset_mount.mount == mount);
+    if !mount_known || !path.starts_with("mcp-use/") {
+        return plugin_asset_response_with_cors(StatusCode::NOT_FOUND.into_response());
+    }
+
+    plugin_asset_response_with_cors(StatusCode::NO_CONTENT.into_response())
+}
+
+pub async fn plugin_asset_proxy<P: McpProxyPort + 'static>(
+    State(state): State<AppState<P>>,
+    uri: Uri,
+    headers: HeaderMap,
+) -> Response {
+    let Some((mount, path)) = plugin_asset_path_parts(uri.path()) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    let Some(asset_mount) = state
+        .plugin_asset_mounts
+        .iter()
+        .find(|asset_mount| asset_mount.mount == mount)
+    else {
+        return plugin_asset_response_with_cors(StatusCode::NOT_FOUND.into_response());
+    };
+    if !path.starts_with("mcp-use/") {
+        tracing::warn!(
+            container = %asset_mount.client.container_name(),
+            mount,
+            path,
+            "rejecting Plugin MCP Container asset request outside mcp-use subtree"
+        );
+        return plugin_asset_response_with_cors(StatusCode::NOT_FOUND.into_response());
+    }
+
+    let result = asset_mount
+        .client
+        .get_http_path(path, uri.query(), header_pairs(&headers))
+        .await;
+
+    let response = match result {
+        Ok(upstream_response) => {
+            let status = StatusCode::from_u16(upstream_response.status)
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            tracing::info!(
+                container = %asset_mount.client.container_name(),
+                mount,
+                path,
+                upstream_status = status.as_u16(),
+                body_bytes = upstream_response.body.len(),
+                "proxying Plugin MCP Container asset"
+            );
+
+            let filtered_headers =
+                ProxyMcpUseCase::<P>::filter_response_headers(upstream_response.headers);
+            let mut response_builder = Response::builder().status(status);
+            for (name, value) in filtered_headers {
+                response_builder = response_builder.header(name.as_str(), value.as_str());
+            }
+            response_builder
+                .body(axum::body::Body::from(upstream_response.body))
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        }
+        Err(error) => {
+            tracing::warn!(
+                container = %asset_mount.client.container_name(),
+                mount,
+                path,
+                error = %error,
+                "Plugin MCP Container asset upstream unavailable"
+            );
+            StatusCode::BAD_GATEWAY.into_response()
+        }
+    };
+
+    plugin_asset_response_with_cors(response)
 }
 
 pub async fn protected_resource_metadata<P: McpProxyPort + 'static>(

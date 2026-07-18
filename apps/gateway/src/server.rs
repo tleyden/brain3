@@ -14,7 +14,9 @@ use tokio::task::JoinHandle;
 
 use brain3_core::application::proxy_mcp::ProxyMcpUseCase;
 use brain3_core::application::remote_mcp_container_client::RemoteMcpContainerClient;
-use brain3_core::domain::model::{AccessMode, GatewayConfig, PluginMcpContainerAuth};
+use brain3_core::domain::model::{
+    plugin_mcp_container_asset_mount, AccessMode, GatewayConfig, PluginMcpContainerAuth,
+};
 use brain3_core::domain::setup::{RuntimeLaunchPlan, RuntimeStartupPolicy};
 use brain3_core::ports::config::ConfigPort;
 use brain3_core::ports::native_mcp_tool::NativeMcpTool;
@@ -449,6 +451,13 @@ async fn build_gateway_state(
     )?));
     let plugin_clients =
         build_plugin_mcp_clients(Arc::clone(&mcp_proxy), plugin_mcp_containers).await;
+    let plugin_asset_mounts = plugin_clients
+        .iter()
+        .map(|client| brain3_platform::http::state::PluginAssetMount {
+            mount: plugin_mcp_container_asset_mount(client.container_name()),
+            client: Arc::clone(client),
+        })
+        .collect::<Vec<_>>();
     let mcp_router = Arc::new(McpRouterUseCase::new_with_plugin_containers(
         proxy_mcp,
         native_tools,
@@ -463,6 +472,7 @@ async fn build_gateway_state(
         proxy_mcp: mcp_router,
         config,
         rate_limiter: Arc::new(OAuthRateLimiter::new()),
+        plugin_asset_mounts: Arc::new(plugin_asset_mounts),
     };
 
     Ok(app_state)

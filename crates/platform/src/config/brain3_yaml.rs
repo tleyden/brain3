@@ -5,7 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use brain3_core::domain::model::{
-    ContainerRuntime, PluginMcpContainerAuth, PluginMcpContainerConfig,
+    plugin_mcp_container_asset_mount, ContainerRuntime, PluginMcpContainerAuth,
+    PluginMcpContainerConfig,
 };
 use serde::de::{self, Visitor};
 use serde::Deserialize;
@@ -230,15 +231,22 @@ fn required_string(value: Option<String>, field: &str) -> Result<String, String>
 }
 
 fn validate_name(name: &str) -> Result<(), String> {
-    if !name.is_empty()
-        && name
+    if name.is_empty()
+        || !name
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
     {
-        return Ok(());
+        return Err("name must match [a-z0-9_]+".to_string());
     }
 
-    Err("name must match [a-z0-9_]+".to_string())
+    let mount = plugin_mcp_container_asset_mount(name);
+    if matches!(mount.as_str(), "health" | "mcp" | "oauth") {
+        return Err(format!(
+            "name '{name}' maps to reserved gateway mount '{mount}'"
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate_network_name(name: &str) -> Result<(), String> {
@@ -561,6 +569,37 @@ plugin_mcp_containers:
 {}
 "#,
                 valid_entry("Bad-Name", "bad-name-net", &bad_dir, &bad_secret),
+                valid_entry("good_name", "good-name-net", &good_dir, &good_secret)
+            ),
+        );
+
+        let configs = load_plugin_mcp_containers_config(&config_path);
+
+        assert_eq!(configs.len(), 1);
+        assert_eq!(configs[0].name, "good_name");
+    }
+
+    #[test]
+    fn reserved_gateway_mount_name_is_dropped() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let reserved_dir = temp.path().join("reserved-data");
+        let good_dir = temp.path().join("good-data");
+        fs::create_dir_all(&reserved_dir).expect("reserved dir");
+        fs::create_dir_all(&good_dir).expect("good dir");
+        let reserved_secret = temp.path().join("reserved.token");
+        let good_secret = temp.path().join("good.token");
+        write_file(&reserved_secret, "reserved-secret");
+        write_file(&good_secret, "good-secret");
+        let config_path = temp.path().join("brain3.yaml");
+        write_file(
+            &config_path,
+            &format!(
+                r#"
+plugin_mcp_containers:
+{}
+{}
+"#,
+                valid_entry("mcp", "reserved-net", &reserved_dir, &reserved_secret),
                 valid_entry("good_name", "good-name-net", &good_dir, &good_secret)
             ),
         );

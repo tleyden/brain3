@@ -55,6 +55,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - Gateway public origin, Cloudflare tunnel identity, and container network isolation state
 - Native Whisper model files loaded by the gateway process for audio transcription
 - Experimental Plugin MCP Container config at `<app_home>/brain3.yaml`, referenced container images, referenced bearer-token secret files, and host directories mounted into those containers
+- Static MCP widget assets exposed by opted-in Plugin MCP Containers under gateway-managed per-container mount paths
 
 ### Trust Boundaries
 
@@ -64,6 +65,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - Local process-control principals that can signal the running gateway process
 - The boundary between the Rust gateway and the `brain3-mcp-vault-tools` container
 - The boundary between the Rust gateway and any opt-in Plugin MCP Containers started from `<app_home>/brain3.yaml`
+- The unauthenticated static-asset path from the public gateway origin to a configured Plugin MCP Container's `mcp-use/**` widget assets
 - The native transcription boundary where the Rust gateway downloads and parses untrusted audio bytes in-process instead of forwarding them to the container
 - Gateway-initiated internet egress for temporary audio `download_url` fetches and setup-time Whisper model downloads
 - Vault content that may be user-controlled or, in some deployments, third-party-controlled
@@ -84,6 +86,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - Local secrets and vault contents should not leak through logs or insecure default storage/permissions
 - Container networking should keep the MCP server private by default
 - Plugin MCP Containers should remain an opt-in, local-file-only experimental surface; there must be no remote API, setup wizard path, or dynamic client registration path that can add or modify these containers.
+- Plugin MCP widget asset ingress should be limited to `GET`/`OPTIONS`, scoped to explicit per-container mounts derived from configured plugin names, and must not provide bearer-token-free access to `/mcp` or vault data.
 - Native transcription should enforce bounded downloads and reject bytes that cannot be decoded as audio before running Whisper inference
 
 ### Assumptions
@@ -97,6 +100,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - The gateway's SIGUSR1 diagnostics trigger is local-only: a sender must already be able to signal the gateway process, and the dump is written only to that process's stdout plus a log-file marker. The dump includes the MCP container's own logs, so the container must continue to avoid logging secrets; trace-level body logging remains covered by Finding 4.
 - Plugin MCP Containers are Experimental and intentionally undocumented outside the README experimental section. They are configured only by hand-editing local files under `<app_home>` and are trusted at the same level as the core vault MCP container once started. Individual plugins may opt out of internal-only networking with `network_isolation: false` in `brain3.yaml`, restoring outbound egress without adding remote ingress or changing this local-file-only trust boundary.
 - Plugin MCP Container tool metadata and tool results are not sandboxed or semantically vetted by Brain3 before being appended to `tools/list` or returned from `tools/call`. This matches the current trust model for the vault container's tools and must be treated as trusted local-container output, not as untrusted internet content.
+- Plugin MCP widget static assets are exposed without OAuth under `/<mount>/mcp-use/**` on the public gateway router so browser widget sandboxes can load JavaScript and CSS. Each mount maps to exactly one initialized managed Plugin MCP Container; the gateway strips only the mount prefix and rejects paths outside `mcp-use/**`. `Access-Control-Allow-Origin: *` applies to these credential-free static asset responses only, not to authenticated `/mcp` routes.
 - Docker-backed Plugin MCP Containers on macOS are reached through a loopback-published host port because Docker Desktop does not expose published ports from internal-only networks. This remains local-only ingress, but it is not the same internal-network-only posture used by Linux Docker Plugin MCP Containers.
 
 ## Findings

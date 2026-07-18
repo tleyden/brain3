@@ -74,6 +74,14 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
         &self.container_name
     }
 
+    pub fn http_base_url(&self) -> String {
+        self.mcp_url
+            .strip_suffix("/mcp")
+            .unwrap_or(&self.mcp_url)
+            .trim_end_matches('/')
+            .to_string()
+    }
+
     pub fn prefixed_tool_schemas(&self) -> Vec<Value> {
         self.tool_schemas
             .iter()
@@ -190,6 +198,32 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
         );
 
         Ok(self.prefix_read_resource_response_uri(response, original_uri))
+    }
+
+    pub async fn get_http_path(
+        &self,
+        path: &str,
+        query: Option<&str>,
+        headers: Vec<(String, String)>,
+    ) -> Result<McpProxyResponse, ProxyError> {
+        let upstream_url = self.build_http_url(path, query);
+        let filtered_headers = filter_static_asset_request_headers(headers);
+
+        tracing::info!(
+            container = %self.container_name,
+            upstream_url = %upstream_url,
+            path = path,
+            "forwarding Plugin MCP Container HTTP GET"
+        );
+
+        self.proxy
+            .forward(McpProxyRequest {
+                method: "GET".into(),
+                url: upstream_url,
+                headers: filtered_headers,
+                body: Vec::new(),
+            })
+            .await
     }
 
     async fn initialize(&self) -> Result<(), ProxyError> {
@@ -537,6 +571,15 @@ impl<P: McpProxyPort> RemoteMcpContainerClient<P> {
             .await
     }
 
+    fn build_http_url(&self, path: &str, query: Option<&str>) -> String {
+        let normalized_path = path.trim_start_matches('/');
+        let query_part = match query {
+            Some(q) if !q.is_empty() => format!("?{q}"),
+            _ => String::new(),
+        };
+        format!("{}/{}{}", self.http_base_url(), normalized_path, query_part)
+    }
+
     fn require_success(
         &self,
         operation: &str,
@@ -622,6 +665,29 @@ fn strip_content_length(headers: Vec<(String, String)>) -> Vec<(String, String)>
     headers
         .into_iter()
         .filter(|(name, _)| !name.eq_ignore_ascii_case("content-length"))
+        .collect()
+}
+
+fn filter_static_asset_request_headers(headers: Vec<(String, String)>) -> Vec<(String, String)> {
+    headers
+        .into_iter()
+        .filter(|(name, _)| {
+            !matches!(
+                name.to_ascii_lowercase().as_str(),
+                "authorization"
+                    | "connection"
+                    | "content-length"
+                    | "host"
+                    | "keep-alive"
+                    | "proxy-authenticate"
+                    | "proxy-authorization"
+                    | "te"
+                    | "trailer"
+                    | "trailers"
+                    | "transfer-encoding"
+                    | "upgrade"
+            )
+        })
         .collect()
 }
 
@@ -728,6 +794,54 @@ mod tests {
             .iter()
             .any(|(name, value)| name.eq_ignore_ascii_case("authorization")
                 && value == "Bearer secret-token"));
+    }
+
+    #[tokio::test]
+    async fn get_http_path_uses_container_http_base_and_filters_browser_auth_headers() {
+        let proxy = Arc::new(CapturingProxy::with_responses(vec![
+            json_response(json!({"jsonrpc": "2.0", "id": 1, "result": {}})),
+            json_response(json!({"jsonrpc": "2.0", "id": 2, "result": {"tools": []}})),
+            json_response(json!({"jsonrpc": "2.0", "id": 3, "result": {"resources": []}})),
+            McpProxyResponse {
+                status: 200,
+                headers: vec![("content-type".into(), "application/javascript".into())],
+                body: b"console.log('ok')".to_vec(),
+            },
+        ]));
+        let client = RemoteMcpContainerClient::initialize_and_cache_tools(
+            "fluensy_learn".into(),
+            "http://127.0.0.1:18420/mcp".into(),
+            None,
+            proxy.clone(),
+        )
+        .await
+        .expect("client should initialize");
+
+        let response = client
+            .get_http_path(
+                "mcp-use/widgets/practice-widget/assets/index.js",
+                Some("v=1"),
+                vec![
+                    ("authorization".into(), "Bearer browser-token".into()),
+                    ("host".into(), "brain3.example.dev".into()),
+                    ("accept".into(), "*/*".into()),
+                ],
+            )
+            .await
+            .expect("asset GET should forward");
+
+        assert_eq!(response.status, 200);
+        assert_eq!(client.http_base_url(), "http://127.0.0.1:18420");
+        let requests = proxy.requests.lock().expect("requests lock should succeed");
+        assert_eq!(requests[3].method, "GET");
+        assert_eq!(
+            requests[3].url,
+            "http://127.0.0.1:18420/mcp-use/widgets/practice-widget/assets/index.js?v=1"
+        );
+        assert_eq!(
+            requests[3].headers,
+            vec![("accept".to_string(), "*/*".to_string())]
+        );
     }
 
     #[tokio::test]

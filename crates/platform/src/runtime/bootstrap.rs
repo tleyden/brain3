@@ -308,20 +308,6 @@ pub async fn bootstrap_configured_runtime(
         container_status
     };
 
-    let plugin_mcp_containers = if container_status.allows_gateway_start() {
-        start_plugin_mcp_containers(
-            &launch_plan.paths.app_home,
-            startup_policy,
-            installation_id.as_str(),
-        )
-        .await
-    } else {
-        tracing::debug!(
-            container_status = ?container_status,
-            "skipping Plugin MCP Containers because core MCP container is not ready"
-        );
-        Vec::new()
-    };
     let pid_file = launch_plan.paths.app_home.join("cloudflared.pid");
 
     let (tunnel_status, public_url, tunnel_guard) = if !container_status.allows_gateway_start() {
@@ -358,6 +344,26 @@ pub async fn bootstrap_configured_runtime(
         (StartupStatus::NotConfigured, None, None)
     };
 
+    let gateway_public_origin = public_url
+        .clone()
+        .or_else(|| configured_public_origin(&config))
+        .unwrap_or_else(|| format!("http://127.0.0.1:{}", config.port));
+    let plugin_mcp_containers = if container_status.allows_gateway_start() {
+        start_plugin_mcp_containers(
+            &launch_plan.paths.app_home,
+            gateway_public_origin.as_str(),
+            startup_policy,
+            installation_id.as_str(),
+        )
+        .await
+    } else {
+        tracing::debug!(
+            container_status = ?container_status,
+            "skipping Plugin MCP Containers because core MCP container is not ready"
+        );
+        Vec::new()
+    };
+
     Ok(RuntimeBootstrap {
         config,
         upstream_secret,
@@ -373,6 +379,7 @@ pub async fn bootstrap_configured_runtime(
 
 async fn start_plugin_mcp_containers(
     app_home: &std::path::Path,
+    public_origin: &str,
     startup_policy: RuntimeStartupPolicy,
     installation_id: &str,
 ) -> Vec<StartedPluginMcpContainer> {
@@ -394,10 +401,13 @@ async fn start_plugin_mcp_containers(
 
     let mut started = Vec::new();
     for config in configs {
-        match ensure_plugin_mcp_container(&config, startup_policy, installation_id).await {
+        match ensure_plugin_mcp_container(&config, public_origin, startup_policy, installation_id)
+            .await
+        {
             Ok(container) => {
                 tracing::info!(
                     container = %container.config.name,
+                    public_origin = %public_origin,
                     host_port = container.host_port,
                     container_ip = ?container.container_ip,
                     "Plugin MCP Container ready"
@@ -414,6 +424,22 @@ async fn start_plugin_mcp_containers(
     }
 
     started
+}
+
+fn configured_public_origin(config: &GatewayConfig) -> Option<String> {
+    match &config.tunnel {
+        Some(TunnelConfig::CloudflareNamed {
+            tunnel_name,
+            domain,
+            ..
+        }) => Some(format!("https://{tunnel_name}.{domain}")),
+        Some(TunnelConfig::CloudflareQuick { .. }) => None,
+        None => config
+            .hostname_validation
+            .expected_host
+            .as_ref()
+            .map(|host| format!("https://{host}")),
+    }
 }
 
 fn log_plugin_container_startup_failure(config: &PluginMcpContainerConfig, error: &ContainerError) {

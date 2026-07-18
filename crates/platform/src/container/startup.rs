@@ -5,11 +5,12 @@ use std::sync::Arc;
 use brain3_core::application::ensure_container::EnsureContainerUseCase;
 use brain3_core::domain::errors::ContainerError;
 use brain3_core::domain::model::{
-    BindMount, ContainerConfig, ContainerLabel, ContainerNetworkIsolationStrategy,
-    ContainerRuntime, ContainerStartupConfig, ManagedContainerInfo, ManagedContainerScope,
-    PluginMcpContainerAuth, PluginMcpContainerConfig, PortMapping,
-    BRAIN3_INSTALLATION_ID_LABEL_KEY, BRAIN3_MANAGED_LABEL_KEY, BRAIN3_MANAGED_LABEL_VALUE,
-    BRAIN3_MCP_ROLE_LABEL_VALUE, BRAIN3_PLUGIN_MCP_ROLE_LABEL_PREFIX, BRAIN3_ROLE_LABEL_KEY,
+    plugin_mcp_container_asset_mount, BindMount, ContainerConfig, ContainerLabel,
+    ContainerNetworkIsolationStrategy, ContainerRuntime, ContainerStartupConfig,
+    ManagedContainerInfo, ManagedContainerScope, PluginMcpContainerAuth, PluginMcpContainerConfig,
+    PortMapping, BRAIN3_INSTALLATION_ID_LABEL_KEY, BRAIN3_MANAGED_LABEL_KEY,
+    BRAIN3_MANAGED_LABEL_VALUE, BRAIN3_MCP_ROLE_LABEL_VALUE, BRAIN3_PLUGIN_MCP_ROLE_LABEL_PREFIX,
+    BRAIN3_ROLE_LABEL_KEY,
 };
 use brain3_core::domain::setup::RuntimeStartupPolicy;
 use brain3_core::ports::container::{ContainerId, ContainerPort};
@@ -104,6 +105,7 @@ pub async fn ensure_mcp_container(
 
 pub async fn ensure_plugin_mcp_container(
     plugin: &PluginMcpContainerConfig,
+    public_origin: &str,
     startup_policy: RuntimeStartupPolicy,
     installation_id: &str,
 ) -> Result<StartedPluginMcpContainer, ContainerError> {
@@ -149,7 +151,7 @@ pub async fn ensure_plugin_mcp_container(
     )
     .await?;
 
-    let config = build_plugin_container_config(plugin, host_port, installation_id);
+    let config = build_plugin_container_config(plugin, public_origin, host_port, installation_id);
     let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
     Ok(StartedPluginMcpContainer {
         config: plugin.clone(),
@@ -349,6 +351,7 @@ fn build_container_config(
 
 fn build_plugin_container_config(
     plugin: &PluginMcpContainerConfig,
+    public_origin: &str,
     host_port: u16,
     installation_id: &str,
 ) -> ContainerConfig {
@@ -377,11 +380,23 @@ fn build_plugin_container_config(
         });
     }
 
+    let mount = plugin_mcp_container_asset_mount(&plugin.name);
+    let public_base_url = format!("{}/{}", public_origin.trim_end_matches('/'), mount);
+    let mut env_vars: Vec<(String, String)> = plugin
+        .env
+        .iter()
+        .filter(|(key, _)| key != "PUBLIC_BASE_URL")
+        .cloned()
+        .collect();
+    env_vars.push(("PUBLIC_BASE_URL".into(), public_base_url.clone()));
+
     let isolation_strategy = plugin
         .network_isolation
         .then(|| plugin_isolation_strategy(plugin.runtime));
     tracing::info!(
         container = %plugin.name,
+        mount = %mount,
+        public_base_url = %public_base_url,
         installation_id,
         network = %plugin.network_name,
         network_isolated = plugin.network_isolation,
@@ -402,7 +417,7 @@ fn build_plugin_container_config(
             host_port,
             container_port: plugin.container_port,
         }],
-        env_vars: plugin.env.clone(),
+        env_vars,
         labels: managed_container_labels_for_role(
             installation_id,
             plugin_mcp_role_label(plugin.name.as_str()).as_str(),
@@ -935,7 +950,12 @@ mod tests {
 
     #[test]
     fn build_plugin_container_config_adds_plugin_role_labels_and_mounts() {
-        let config = build_plugin_container_config(&sample_plugin_config(), 18420, "scope-1");
+        let config = build_plugin_container_config(
+            &sample_plugin_config(),
+            "https://brain3.example.dev",
+            18420,
+            "scope-1",
+        );
 
         assert_eq!(config.name, "fluensy_learn");
         assert_eq!(config.image, "ghcr.io/example/fluensy-learn:latest");
@@ -954,7 +974,13 @@ mod tests {
         assert_eq!(config.port_mappings[0].host_address, "127.0.0.1");
         assert_eq!(config.port_mappings[0].host_port, 18420);
         assert_eq!(config.port_mappings[0].container_port, 8420);
-        assert_eq!(config.env_vars, Vec::<(String, String)>::new());
+        assert_eq!(
+            config.env_vars,
+            vec![(
+                "PUBLIC_BASE_URL".to_string(),
+                "https://brain3.example.dev/fluensy-learn".to_string()
+            )]
+        );
         assert_eq!(
             config.labels,
             vec![
@@ -999,7 +1025,8 @@ mod tests {
         let mut plugin = sample_plugin_config();
         plugin.auth = PluginMcpContainerAuth::None;
 
-        let config = build_plugin_container_config(&plugin, 18420, "scope-1");
+        let config =
+            build_plugin_container_config(&plugin, "https://brain3.example.dev", 18420, "scope-1");
 
         assert_eq!(config.bind_mounts.len(), 1);
         assert_eq!(
@@ -1015,11 +1042,44 @@ mod tests {
         let mut plugin = sample_plugin_config();
         plugin.env = vec![("LOGFIRE_CONSOLE".into(), "true".into())];
 
-        let config = build_plugin_container_config(&plugin, 18420, "scope-1");
+        let config =
+            build_plugin_container_config(&plugin, "https://brain3.example.dev/", 18420, "scope-1");
 
         assert_eq!(
             config.env_vars,
-            vec![("LOGFIRE_CONSOLE".to_string(), "true".to_string())]
+            vec![
+                ("LOGFIRE_CONSOLE".to_string(), "true".to_string()),
+                (
+                    "PUBLIC_BASE_URL".to_string(),
+                    "https://brain3.example.dev/fluensy-learn".to_string()
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn build_plugin_container_config_overrides_stale_public_base_url_env_var() {
+        let mut plugin = sample_plugin_config();
+        plugin.env = vec![
+            ("MCP_URL".into(), "https://stale.example.dev".into()),
+            ("PUBLIC_BASE_URL".into(), "https://wrong.example.dev".into()),
+        ];
+
+        let config =
+            build_plugin_container_config(&plugin, "https://brain3.example.dev", 18420, "scope-1");
+
+        assert_eq!(
+            config.env_vars,
+            vec![
+                (
+                    "MCP_URL".to_string(),
+                    "https://stale.example.dev".to_string()
+                ),
+                (
+                    "PUBLIC_BASE_URL".to_string(),
+                    "https://brain3.example.dev/fluensy-learn".to_string()
+                ),
+            ]
         );
     }
 
@@ -1083,7 +1143,8 @@ mod tests {
         let mut plugin = sample_plugin_config();
         plugin.network_isolation = false;
 
-        let config = build_plugin_container_config(&plugin, 18420, "scope-1");
+        let config =
+            build_plugin_container_config(&plugin, "https://brain3.example.dev", 18420, "scope-1");
 
         assert_eq!(config.isolation_strategy, None);
     }
@@ -1095,8 +1156,18 @@ mod tests {
         second_plugin.name = "other_plugin".into();
         second_plugin.network_name = "other-plugin-net".into();
 
-        let first = build_plugin_container_config(&first_plugin, 18420, "scope-1");
-        let second = build_plugin_container_config(&second_plugin, 18421, "scope-1");
+        let first = build_plugin_container_config(
+            &first_plugin,
+            "https://brain3.example.dev",
+            18420,
+            "scope-1",
+        );
+        let second = build_plugin_container_config(
+            &second_plugin,
+            "https://brain3.example.dev",
+            18421,
+            "scope-1",
+        );
 
         assert_eq!(first.network_name, "fluensy-learn-net");
         assert_eq!(second.network_name, "other-plugin-net");
