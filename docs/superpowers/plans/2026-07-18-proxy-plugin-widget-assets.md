@@ -39,18 +39,18 @@ container**, not by Brain3 or the MCP host. Two pieces combine
    from the tool's `widget: { name: "practice-widget" }`; `/assets/index-*.js|css`
    comes from the widget's own Vite build.
 2. `baseUrl` = the `MCPServer({ baseUrl })` option = `mcpBaseUrl` =
-   `process.env.MCP_URL` (`index.ts:35`), currently
+   `process.env.PUBLIC_BASE_URL` (`index.ts:37`), currently
    `https://brain3-macos.mcpnative.dev`.
 
-Result: `{MCP_URL}/mcp-use/widgets/{slug}/assets/index-*.js`. The `/mcp-use`
-prefix is fixed, but **`MCP_URL` is ours to set** — mcp-use builds the asset URL
-by string concatenation, so a path suffix on `MCP_URL` flows through to the
+Result: `{PUBLIC_BASE_URL}/mcp-use/widgets/{slug}/assets/index-*.js`. The `/mcp-use`
+prefix is fixed, but **`PUBLIC_BASE_URL` is ours to set** — mcp-use builds the asset URL
+by string concatenation, so a path suffix on `PUBLIC_BASE_URL` flows through to the
 asset URLs. This is the lever the design below uses.
 
 ## Root cause
 
 The widget shell HTML (served via `resources/read`) references its bundle at
-**absolute URLs on the public origin**, because the container bakes `MCP_URL`
+**absolute URLs on the public origin**, because the container bakes `PUBLIC_BASE_URL`
 (`https://brain3-macos.mcpnative.dev`) into the asset/base URLs:
 
 ```
@@ -110,13 +110,13 @@ URLs.
 The routing key goes back into the URL path, mirroring how MCP tool/resource
 routing already namespaces by container name.
 
-### 1. Bake the mount into the container's asset URLs (via `MCP_URL`)
+### 1. Bake the mount into the container's asset URLs (via `PUBLIC_BASE_URL`)
 
 mcp-use hardcodes the `/mcp-use/` prefix but concatenates it onto `baseUrl`
-(= `MCP_URL`). So set the container's `MCP_URL` to include its mount root:
+(= `PUBLIC_BASE_URL`). So set the container's `PUBLIC_BASE_URL` to include its mount root:
 
 ```
-MCP_URL = https://brain3-macos.mcpnative.dev/<mount>
+PUBLIC_BASE_URL = https://brain3-macos.mcpnative.dev/<mount>
 ```
 
 e.g. `<mount>` = `fluensy-learn`. mcp-use then emits asset URLs like
@@ -127,11 +127,29 @@ mount.
 
 The mount should be **config-derived**, not hand-set: Brain3 already knows each
 plugin container's `name` in `brain3.yaml`. Brain3 should own the mount value
-and inject the suffixed `MCP_URL` into the container env itself (deriving mount
+and inject the suffixed `PUBLIC_BASE_URL` into the container env itself (deriving mount
 from `name`, or a new optional `mount_path` field), rather than relying on the
-operator to keep a hand-written `MCP_URL` in sync. Pick one canonical spelling
+operator to keep a hand-written `PUBLIC_BASE_URL` in sync. Pick one canonical spelling
 (the config `name` is `fluensy_learn`; the user wants `/fluensy-learn`) and use
-it consistently for both the injected `MCP_URL` suffix and the gateway route.
+it consistently for both the injected `PUBLIC_BASE_URL` suffix and the gateway route.
+
+> **Env-var rename (fluensy-learn #583, `ce422a03`).** `MCP_URL` was renamed to
+> `PUBLIC_BASE_URL` (`index.ts:37`, default `http://localhost:3000`). Two
+> consequences:
+> - **`~/.brain3/brain3.yaml` is now stale** — it still injects `MCP_URL:` (line
+>   17), which the container no longer reads. The container currently falls back
+>   to the `http://localhost:3000` default, so remote hosts get a blank widget
+>   regardless of this plan. The env Brain3 injects must be renamed to
+>   `PUBLIC_BASE_URL` (and, per this design, own the `/<mount>` suffix).
+> - **Fluensy now self-checks `PUBLIC_BASE_URL` at startup** (`src/selfCheck.ts`):
+>   it fetches its own `PUBLIC_BASE_URL` and verifies the response comes back
+>   from the same server instance ("routes to a DIFFERENT server instance" /
+>   "unreachable" on failure). With the mount suffix, that self-check exercises
+>   the **full mount round-trip through Brain3** — a nice free end-to-end
+>   validation, but it also means the gateway mount route must be live and
+>   correctly proxying or the container will log a startup self-check
+>   failure/warning. Sequencing: the mount route needs to be serving before (or
+>   promptly after) the container's self-check runs.
 
 ### 2. Gateway route + handler
 
@@ -181,9 +199,9 @@ we ever need credentialed asset requests (then reflect the `Origin` instead).
 1. Config: decide the canonical mount value per plugin container (derive from
    `name`, or add optional `mount_path` in `brain3.yaml`). Build a
    mount → container map at startup.
-2. Container env: have Brain3 inject `MCP_URL = <public_origin>/<mount>` into the
+2. Container env: have Brain3 inject `PUBLIC_BASE_URL = <public_origin>/<mount>` into the
    plugin container env at launch (so the operator no longer hand-writes
-   `MCP_URL`; it stays in sync with the mount by construction).
+   `PUBLIC_BASE_URL`; it stays in sync with the mount by construction).
 3. `remote_mcp_container_client.rs`: add `http_base_url()` (strip trailing `/mcp`
    from `mcp_url`) so the asset proxy knows the container's HTTP base. Host port
    is dynamic — always read from the client, never hardcode.
@@ -219,7 +237,7 @@ what makes this defensible — document these constraints:
   returns 200 with body, correct `Content-Type`, and
   `Access-Control-Allow-Origin: *`; `OPTIONS` returns 204 with CORS headers;
   unknown mount → 404.
-- Manual E2E: set the suffixed `MCP_URL`, reload tools in the MCP host, run a
+- Manual E2E: set the suffixed `PUBLIC_BASE_URL`, reload tools in the MCP host, run a
   Fluensy drill, confirm the widget paints and the console shows no 404/CORS
   errors under `/<mount>/mcp-use/**`.
 
@@ -228,13 +246,13 @@ what makes this defensible — document these constraints:
 - **`buildWidgetUrl` caveat.** mcp-use has a second code path
   (`buildWidgetUrl`, used for `externalUrl`/iframe widgets) that does
   `new URL('/mcp-use/widgets/<slug>', '${baseUrl}:${port}')`. With a
-  path-suffixed `MCP_URL` this both mis-forms the base (`https://host/fluensy-learn:3000`)
+  path-suffixed `PUBLIC_BASE_URL` this both mis-forms the base (`https://host/fluensy-learn:3000`)
   and, because a leading-slash path is absolute, would **drop** the mount
   prefix. Our practice widget uses the `rawHtml`/appsSDK resource path
   (`processWidgetHtml`, string-concat) — confirmed by the observed asset URLs —
   so it is unaffected. Verify Fluensy never uses an `externalUrl` widget before
-  relying on the `MCP_URL` suffix; if it does, we'd need mcp-use to support a
-  proper path-prefixed asset base rather than overloading `MCP_URL`.
+  relying on the `PUBLIC_BASE_URL` suffix; if it does, we'd need mcp-use to support a
+  proper path-prefixed asset base rather than overloading `PUBLIC_BASE_URL`.
 - Canonical mount spelling: `fluensy_learn` (config `name`) vs `fluensy-learn`
   (nicer URL). Pick one and use it for both env injection and the route.
 - Do any MCP hosts require `Access-Control-Allow-Origin` to reflect a specific
