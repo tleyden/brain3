@@ -68,6 +68,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - The unauthenticated static-asset path from the public gateway origin to a configured Plugin MCP Container's `mcp-use/**` widget assets
 - The native transcription boundary where the Rust gateway downloads and parses untrusted audio bytes in-process instead of forwarding them to the container
 - Gateway-initiated internet egress for temporary audio `download_url` fetches and setup-time Whisper model downloads
+- Inline base64 audio bytes sent by authorized MCP clients over the existing OAuth-protected JSON-RPC channel for native transcription
 - Vault content that may be user-controlled or, in some deployments, third-party-controlled
 
 ### Attacker Capabilities
@@ -75,6 +76,7 @@ Brain3’s highest-risk boundary is the optional public gateway/tunnel that fron
 - Send arbitrary HTTP requests and headers to public gateway routes when tunneling is enabled
 - Operate or compromise the preregistered OAuth client after it is provisioned with Brain3 credentials
 - Supply a `transcribe_audio_file` audio `download_url` through an authorized MCP client, causing the gateway to issue an outbound GET and parse the returned bytes as audio
+- Supply bounded inline base64 audio bytes to `transcribe_audio_file` through an authorized MCP client, causing the gateway to parse those bytes as audio
 - Read local files or logs available to the current OS principal or broader local principals
 - Write `<app_home>/brain3.yaml`, any referenced bearer-token secret file, or any referenced Plugin MCP Container image/tag. A principal with that capability can cause Brain3 to run arbitrary Docker/macOS-container images and mount the configured `host_directory` read-write into those containers, with the effective privileges of the selected container runtime and the user running Brain3.
 - Supply hostile vault content when the user does not fully control imported or shared notes
