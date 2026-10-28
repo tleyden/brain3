@@ -1,7 +1,6 @@
 
 <p align="center">
     <a href="https://discord.gg/SPKtm5ACn"><img src="https://img.shields.io/discord/1522679654149001236?label=Discord&logo=discord" alt="Discord"></a>
-  <a href="https://deepwiki.com/tleyden/brain3"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/tleyden/brain3"><img src="https://api.scorecard.dev/projects/github.com/tleyden/brain3/badge" alt="OpenSSF Scorecard"></a>
   <a href="https://mcpsafe.io/scan/pubfast7d6fa5a2c28d801f2a93"><img src="https://api.mcpsafe.io/api/badge/pubfast7d6fa5a2c28d801f2a93" alt="MCPSafe"></a>
 </p>
