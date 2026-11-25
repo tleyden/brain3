@@ -4,7 +4,7 @@
 - Also the other point of the app is to open it up to remote access since that what Claude and ChatGPT demand for access from mobile and web.
 - This works on both linux and macos.  On macos, we can use macos native containers or docker.  On linux, docker only.
 - Don't suggest subagents.  We will always do this in smaller steps in serial to manage context window rather than spawning subagents.
-- Don't commit to git, I will commit.
+- Brain3 is an open-source project. Treat tracked source code, documentation, and plans as public. Commit and push changes when the user requests it.
 - Security rule: this gateway is intentionally closed to preregistered clients only. Do not enable CIMD, DCR, public-client OAuth (`token_endpoint_auth_method=none`), or any other flow that allows access without the hardcoded client ID and client secret, unless explicitly requested by the user. Do not advertise OAuth capabilities the server is not supposed to allow, and do not expose `/oauth/register` in a way that hands out usable credentials or broadens access. Any auth change must preserve the policy that only explicitly preregistered clients can obtain tokens and reach protected MCP data.
 - Keep apps/gateway/src/main.rs as lean as possible.  Only add code that would otherwise be awkward in platform or core crates. 
 - To support  remote mcp with https and oauth2.1, as many AI apps require, the gateway must have a public ingress via a cloudflare tunnel or otherwise.
