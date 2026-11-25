@@ -40,6 +40,30 @@ jobs:
       - name: Test
         run: cargo test
 
+      - name: Verify README systemd unit
+        run: |
+          cargo build -p brain3
+          unit="$RUNNER_TEMP/brain3.service"
+          awk '/^<!-- brain3[.]service -->$/ { getline; in_unit = 1; next }
+               in_unit && /^```$/ { exit }
+               in_unit { print }' README.MD > "$unit"
+          test -s "$unit"
+          export BRAIN3_CI_HOME="$HOME" BRAIN3_CI_USER="$(id -un)" BRAIN3_CI_BIN="$PWD/target/debug/brain3"
+          python - "$unit" <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          unit = path.read_text().replace(
+              "/home/brain3user/.local/bin/brain3", os.environ["BRAIN3_CI_BIN"]
+          ).replace("/home/brain3user", os.environ["BRAIN3_CI_HOME"]).replace(
+              "User=brain3user", "User=" + os.environ["BRAIN3_CI_USER"]
+          )
+          path.write_text(unit)
+          PY
+          systemd-analyze --recursive-errors=one verify "$unit"
+
       - name: Release signing smoke test
         run: bash scripts/test-release-signing.sh
 

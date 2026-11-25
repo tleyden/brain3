@@ -289,11 +289,7 @@ impl Brain3Process {
         Self::spawn_with_health_port(temp, TunnelMode::Disabled, LOCAL_MCP_PORT).await
     }
 
-    async fn spawn_with_health_port(
-        temp: &TempTestDir,
-        tunnel_mode: TunnelMode,
-        health_port: u16,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    fn command(temp: &TempTestDir, tunnel_mode: TunnelMode) -> Command {
         let binary = env!("CARGO_BIN_EXE_brain3");
         let mut command = Command::new(binary);
         command
@@ -335,7 +331,15 @@ impl Brain3Process {
             command.env("PATH", temp.path_with_shim());
         }
 
-        let mut child = command.spawn()?;
+        command
+    }
+
+    async fn spawn_with_health_port(
+        temp: &TempTestDir,
+        tunnel_mode: TunnelMode,
+        health_port: u16,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut child = Self::command(temp, tunnel_mode).spawn()?;
 
         let stdout = child
             .stdout
@@ -907,6 +911,22 @@ async fn e2e_smoke_5_plugin_mcp_container() -> Result<(), Box<dyn std::error::Er
 async fn e2e_smoke_2_oauth_public_flow() -> Result<(), Box<dyn std::error::Error>> {
     let temp = TempTestDir::create(TunnelMode::Disabled)?;
     temp.write_env_file()?;
+
+    // A failed gateway bind must release the managed container for the next start.
+    let occupied_port = StdTcpListener::bind(("127.0.0.1", OAUTH_PORT))?;
+    let mut failed_start =
+        tokio::process::Command::from(Brain3Process::command(&temp, TunnelMode::Disabled));
+    let status = tokio::time::timeout(
+        Duration::from_secs(60),
+        failed_start
+            .kill_on_drop(true)
+            .stdout(Stdio::null())
+            .status(),
+    )
+    .await??;
+    assert!(!status.success(), "Brain3 started with its port occupied");
+    assert_no_container_residue().await?;
+    drop(occupied_port);
 
     {
         let gateway = Brain3Process::spawn(&temp, TunnelMode::Disabled).await?;
