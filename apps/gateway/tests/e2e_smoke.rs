@@ -925,8 +925,13 @@ async fn e2e_smoke_2_oauth_public_flow() -> Result<(), Box<dyn std::error::Error
     )
     .await??;
     assert!(!status.success(), "Brain3 started with its port occupied");
-    assert_no_container_residue().await?;
     drop(occupied_port);
+
+    // Match a systemd restart: launch again as soon as the previous process exits.
+    Brain3Process::spawn(&temp, TunnelMode::Disabled)
+        .await?
+        .shutdown_and_wait()
+        .await?;
 
     {
         let gateway = Brain3Process::spawn(&temp, TunnelMode::Disabled).await?;

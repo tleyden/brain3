@@ -214,8 +214,9 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-`Type=exec` reports failures to launch the binary. On systems without support
-for it, use `Type=simple`. If the vault or app home is on a separate mount,
+`Type=exec` reports failures to launch the binary. Upstream systemd added it in
+version 240. Use `Type=simple` if your system does not support `exec`. If the
+vault or app home is on a separate mount,
 add `RequiresMountsFor=/absolute/path/to/mount` under `[Unit]`. If pulls fail
 only at boot, check DNS and whether your distribution's network wait service
 is enabled. `cloudflared` must be on the unit's `PATH` for Brain3's dependency
@@ -648,7 +649,7 @@ Brain3 runs an MCP server on your own machine. It supports two access modes:
 - **Remote MCP** — major AI apps like Claude and ChatGPT require remote MCP connectors to be publicly accessible on the internet via TLS + OAuth2.1/PKCE in order to be configured via their UI and accessible across all supported apps (web, mobile, desktop). A Cloudflare tunnel gives Brain3 a reachable TLS endpoint, and OAuth2.1/PKCE is used for auth, with a locally configured username and password.
 
 - ⚠️ If you use remote MCP via a Cloudflare tunnel, you should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
-- Tunnels are cleaned up automatically when Brain3 stops.
+- Brain3 stops the tunnels it starts. A systemd-managed tunnel has its own service lifecycle.
 
 ### Security Audit and Known Security Risks
 
