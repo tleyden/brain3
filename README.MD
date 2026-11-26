@@ -830,9 +830,10 @@ cargo test
 <details>
 <summary><strong>Running E2E tests</strong></summary>
 
-E2E tests start a real Brain3 gateway against a locally-built Docker container.
-They require Docker and are not run by default. The smoke wrapper builds the
-local MCP container image first, then runs the test only if the build succeeds:
+E2E tests start a real Brain3 gateway against a Docker container. To request a
+GitHub Actions run, add the `run-e2e-test` label to a pull request targeting
+`main`. For a later commit, remove and re-add the label. The CI smoke wrapper
+builds the MCP container image before running the tests.
 
 ```bash
 uv run scripts/e2e_smoke.py
