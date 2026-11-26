@@ -149,6 +149,190 @@ The vault path is the only required decision. The other steps have defaults you 
 - **Network Security** — review ports, container name, token lifetimes, PKCE, hostname checks, and container networking.
 - **Audio Transcription** — enable the native `transcribe_audio_file` MCP tool and choose the Whisper model Brain3 should download and checksum-verify.
 
+### Start at boot on Linux
+
+Run Brain3 and its named Cloudflare Tunnel as separate systemd services. Brain3
+listens on loopback and Cloudflare forwards the public hostname to its OAuth gateway.
+Both services start before you log in.
+
+#### Prepare the Brain3 account
+
+Install Docker Engine and `cloudflared` using your distribution's packages (see
+the Linux install commands above). Complete the Brain3 setup wizard as the
+account that will run the service, or reuse that account's existing installation.
+As that account, run `command -v brain3 docker cloudflared` and `docker info`.
+Check that the account can access the vault and read and write its Brain3 app
+directory at boot. [Membership in the `docker` group grants root-level privileges.](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user)
+
+Back up the existing `.env` privately and set these values before switching to
+the external tunnel. Keep the existing vault path, gateway port, credentials,
+and token database. Use absolute paths for any path settings in `.env`.
+
+| Setting | Value for a systemd-managed tunnel |
+|---|---|
+| `B3_ACCESS_MODE` | Keep `both` if you also use local MCP, or use `remote` for OAuth only |
+| `B3_CF_QUICK_TUNNEL` | `false` |
+| `B3_CF_TUNNEL_NAME` | Remove or leave empty |
+| `B3_CF_DOMAIN` | Remove or leave empty |
+| `B3_CF_TUNNEL_CONFIG_FILE` | Remove or leave empty |
+| `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | Your tunnel hostname, such as `brain3.example.com`, without a scheme or path |
+| `B3_OAUTH2_GATEWAY_ENFORCE_HOSTNAME_CHECK` | `true` |
+
+#### Install the Brain3 unit
+
+Save the following as `/etc/systemd/system/brain3.service` with `sudoedit`.
+Replace `brain3user`, its home and working directory, the executable path, and
+the Brain3 app home with values for your installation. For a migration, use
+the existing Brain3 working directory and app home.
+
+<!-- brain3.service -->
+```ini
+[Unit]
+Description=Brain3 MCP gateway
+Requires=docker.service
+Wants=network-online.target
+After=docker.service network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=brain3user
+WorkingDirectory=/home/brain3user
+Environment=HOME=/home/brain3user
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/home/brain3user/.local/bin/brain3 --cli --host 127.0.0.1 --brain3-home /home/brain3user/.brain3
+KillSignal=SIGINT
+KillMode=mixed
+TimeoutStopSec=60s
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`Type=exec` reports failures to launch the binary. Upstream systemd added it in
+version 240. Use `Type=simple` if your system does not support `exec`. If the
+vault or app home is on a separate mount,
+add `RequiresMountsFor=/absolute/path/to/mount` under `[Unit]`. If pulls fail
+only at boot, check DNS and whether your distribution's network wait service
+is enabled. `cloudflared` must be on the unit's `PATH` for Brain3's dependency
+check.
+
+Brain3 reads `.env` from the configured app home. For a custom location, add
+`--env-file /etc/brain3/brain3.env` to `ExecStart`, and make that file readable
+by the service user only (mode `0600`). Keep credentials in that file or the
+existing `.env` and keep the unit limited to paths and other nonsecret settings.
+
+For a migration, stop the existing Brain3 process with Ctrl-C and wait for it
+to exit before starting the unit. Run these commands and replace the example
+hostname and port in the probe with your own values.
+
+```bash
+sudo systemd-analyze verify /etc/systemd/system/brain3.service
+sudo systemctl daemon-reload
+sudo systemctl start brain3.service
+curl -fsS -H 'Host: brain3.example.com' -H 'X-Forwarded-Proto: https' \
+  http://127.0.0.1:8421/.well-known/oauth-protected-resource/mcp
+```
+
+Once the probe returns the expected HTTPS resource and authorization server,
+run `sudo systemctl enable brain3.service`. `active` alone only confirms that
+the process started.
+
+#### Run the named tunnel as a service
+
+Check `systemctl cat cloudflared.service` before staging tunnel files. If it
+already runs this tunnel, reuse the unit and its configuration. If it runs a
+different tunnel, preserve its configuration and use a dedicated unit such as
+`cloudflared-brain3.service` with its own config and credential paths.
+
+For a new named tunnel, follow [Cloudflare's local tunnel setup](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/create-local-tunnel/)
+to create the tunnel and DNS route. For an existing tunnel, reuse its UUID,
+credential JSON, and DNS route. For a fresh `cloudflared.service`, place its
+configuration at `/etc/cloudflared/config.yml`. Use the absolute
+`credentials-file` path and set the credential JSON to mode `0600`, owned by
+the account running the tunnel (root with the stock unit). Route the whole
+hostname to the loopback OAuth port so MCP and OAuth discovery share the same
+public origin.
+
+```yaml
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+ingress:
+  - hostname: brain3.example.com
+    service: http://127.0.0.1:8421
+  - service: http_status:404
+```
+
+With Brain3 ready and no existing `cloudflared.service`, validate and install the
+unit using [Cloudflare's Linux service instructions](https://developers.cloudflare.com/tunnel/features/locally-managed-tunnels/as-a-service/linux/).
+
+```bash
+sudo cloudflared --config /etc/cloudflared/config.yml tunnel ingress validate
+sudo cloudflared --config /etc/cloudflared/config.yml service install
+sudo systemctl enable --now cloudflared.service
+```
+
+If you need a dedicated unit, put the tunnel configuration in
+`/etc/cloudflared/brain3.yml` and validate that path with `tunnel ingress validate`.
+Save this example as `/etc/systemd/system/cloudflared-brain3.service` and adjust
+the packaged executable path if needed.
+
+```ini
+[Unit]
+Description=Cloudflare Tunnel for Brain3
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/brain3.yml tunnel run
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
+```
+
+For the dedicated unit, run `sudo systemctl daemon-reload` and
+`sudo systemctl enable --now cloudflared-brain3.service`. Use that unit name in
+the checks below.
+
+```bash
+systemctl is-active brain3.service cloudflared.service
+systemctl is-enabled brain3.service cloudflared.service
+curl -fsS https://brain3.example.com/.well-known/oauth-authorization-server
+```
+
+Confirm discovery advertises the public HTTPS hostname, then connect with your
+configured MCP client to verify OAuth sign-in and MCP initialization.
+
+#### Operate and recover the services
+
+```bash
+systemctl status brain3.service cloudflared.service
+sudo journalctl -b -u brain3.service -u cloudflared.service
+sudo systemctl restart brain3.service
+sudo systemctl disable --now brain3.service
+```
+
+Manage a dedicated tunnel separately with `systemctl restart` or
+`systemctl disable --now` on its unit. Leave a shared tunnel running for its
+other routes. For Brain3 upgrades, use the signed installer with `INSTALL_DIR`
+set to the directory in `ExecStart`, then restart Brain3. For changes that need
+the TUI, stop the service, run `brain3 --setup` as the service user with the
+same app home and config flags, quit it cleanly, and restart the service.
+
+After a crash or interrupted startup, Brain3 refuses to start if it finds a
+managed vault container orphan for the same installation. Review the journal
+and stop `brain3.service`. As the service user, run its `ExecStart` command from
+the same working directory with `--gc-containers` appended for that run. Wait
+for startup and quit with Ctrl-C. If systemd hit its start limit, run
+`sudo systemctl reset-failed brain3.service`, then start the service normally.
+
 ### Configure your AI 
 
 #### Compatibility Matrix
@@ -344,7 +528,9 @@ Connects your vault directly to your AI via MCP, works with your existing Claude
 
 ## Advanced Configuration Options
 
-To keep it running in the background even if your current shell exits, you can run it in a tool like [tmux](https://github.com/tmux/tmux/wiki).
+On Linux, [start Brain3 at boot with systemd](#start-at-boot-on-linux). To keep a
+manual session running after your shell exits, use a tool like
+[tmux](https://github.com/tmux/tmux/wiki).
 
 <details>
 <summary><img height="16" src="docs/logos/cloudflare.svg" alt="Cloudflare"> Named Cloudflare Tunnel on your domain (recommended)</summary>
@@ -463,7 +649,7 @@ Brain3 runs an MCP server on your own machine. It supports two access modes:
 - **Remote MCP** — major AI apps like Claude and ChatGPT require remote MCP connectors to be publicly accessible on the internet via TLS + OAuth2.1/PKCE in order to be configured via their UI and accessible across all supported apps (web, mobile, desktop). A Cloudflare tunnel gives Brain3 a reachable TLS endpoint, and OAuth2.1/PKCE is used for auth, with a locally configured username and password.
 
 - ⚠️ If you use remote MCP via a Cloudflare tunnel, you should only use Brain3 if you trust Cloudflare: Cloudflare owns the root TLS certs and has the ability to decrypt traffic. See their [Cloudflare Transparency Report - H2 2025](https://www.cloudflare.com/transparency/).
-- Tunnels are cleaned up automatically when Brain3 stops.
+- Brain3 stops the tunnels it starts. A systemd-managed tunnel has its own service lifecycle.
 
 ### Security Audit and Known Security Risks
 
@@ -541,7 +727,7 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cloudflare-setup` to provision it |
 | `B3_CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `B3_CF_TUNNEL_NAME`) |
 | `B3_CF_TUNNEL_CONFIG_FILE` | `.cloudflared/<tunnel-name>.yml` | Optional path to the `cloudflared` config file written during named tunnel provisioning |
-| `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using direct origin (Caddy/nginx) instead of Cloudflare Tunnel |
+| `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using an externally managed tunnel or a reverse proxy such as Caddy or nginx |
 | `B3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
 | `B3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
 | `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`. New installs default to the Brain3 release-matched tag; `:latest` is still published but must be chosen explicitly. |

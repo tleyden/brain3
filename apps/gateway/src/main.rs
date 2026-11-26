@@ -722,6 +722,7 @@ async fn run_cli_mode(
     );
 
     if !runtime.can_start_gateway() {
+        runtime.shutdown_managed_runtime().await;
         let summary = runtime
             .primary_failure_summary()
             .unwrap_or("MCP container failed to start");
@@ -741,16 +742,16 @@ async fn run_cli_mode(
     let _diag_listener =
         diagnostics::spawn_diagnostics_signal_listener(Arc::clone(&runtime.config));
 
-    server::run_gateway_server_until_with_plugin_containers(
+    let server_result = server::run_gateway_server_until_with_plugin_containers(
         host,
         Arc::clone(&runtime.config),
         runtime.upstream_secret.clone(),
         runtime.plugin_mcp_containers.clone(),
         shutdown_signal(),
     )
-    .await?;
+    .await;
     runtime.shutdown_managed_runtime().await;
-    Ok(())
+    server_result
 }
 
 async fn run_named_tunnel_setup_if_needed(

@@ -20,14 +20,14 @@ use super::{DockerContainerAdapter, MacOsContainerAdapter};
 const DEV_MOUNT_TARGET: &str = "/workspace/brain3-mcp-vault-tools";
 
 #[cfg(not(test))]
-const GC_POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_millis(200);
+const DOCKER_REMOVAL_POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_millis(200);
 #[cfg(not(test))]
-const GC_POLL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(5);
+const DOCKER_REMOVAL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_secs(5);
 
 #[cfg(test)]
-const GC_POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_millis(10);
+const DOCKER_REMOVAL_POLL_INTERVAL: tokio::time::Duration = tokio::time::Duration::from_millis(10);
 #[cfg(test)]
-const GC_POLL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_millis(100);
+const DOCKER_REMOVAL_TIMEOUT: tokio::time::Duration = tokio::time::Duration::from_millis(100);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StartedPluginMcpContainer {
@@ -176,13 +176,13 @@ pub async fn stop_mcp_container(startup: &ContainerStartupConfig) -> Result<(), 
         tracing::debug!(container = %startup.container_name, "managed MCP container already stopped during shutdown");
     }
 
-    // macOS containers require explicit removal; Docker containers use --rm
-    if startup.runtime == ContainerRuntime::MacOSContainer {
-        tracing::info!(container = %startup.container_name, "removing managed macOS MCP container during shutdown");
-        port.remove(&id).await?;
+    match startup.runtime {
+        ContainerRuntime::Docker => wait_for_docker_auto_removal(port.as_ref(), &id).await,
+        ContainerRuntime::MacOSContainer => {
+            tracing::info!(container = %startup.container_name, "removing managed macOS MCP container during shutdown");
+            port.remove(&id).await
+        }
     }
-
-    Ok(())
 }
 
 pub async fn stop_plugin_mcp_container(
@@ -203,13 +203,13 @@ pub async fn stop_plugin_mcp_container(
         tracing::debug!(container = %plugin.name, "managed Plugin MCP Container already stopped during shutdown");
     }
 
-    // macOS containers require explicit removal; Docker containers use --rm
-    if plugin.runtime == ContainerRuntime::MacOSContainer {
-        tracing::info!(container = %plugin.name, "removing managed macOS Plugin MCP Container during shutdown");
-        port.remove(&id).await?;
+    match plugin.runtime {
+        ContainerRuntime::Docker => wait_for_docker_auto_removal(port.as_ref(), &id).await,
+        ContainerRuntime::MacOSContainer => {
+            tracing::info!(container = %plugin.name, "removing managed macOS Plugin MCP Container during shutdown");
+            port.remove(&id).await
+        }
     }
-
-    Ok(())
 }
 
 pub(crate) fn container_port_for_runtime(runtime: ContainerRuntime) -> Arc<dyn ContainerPort> {
@@ -646,30 +646,13 @@ async fn garbage_collect_managed_containers(
 
         match runtime {
             ContainerRuntime::Docker => {
-                // Docker containers always use --rm. Whether we just stopped the
-                // container or it was already stopped, the daemon is responsible for
-                // removal. Poll until it disappears; never call explicit docker rm.
-                let gone = wait_for_container_gone(
-                    port,
-                    &id,
+                wait_for_docker_auto_removal(port, &id).await?;
+                tracing::info!(
                     installation_id,
-                    GC_POLL_INTERVAL,
-                    GC_POLL_TIMEOUT,
-                )
-                .await?;
-                if gone {
-                    tracing::info!(
-                        installation_id,
-                        container = %container.name,
-                        "removed managed orphan MCP container (Docker --rm)"
-                    );
-                    continue;
-                }
-                return Err(ContainerError::Other(format!(
-                    "timed out waiting for Docker to remove container '{}' via --rm; \
-                     Docker daemon may be unhealthy",
-                    container.name
-                )));
+                    container = %container.name,
+                    "removed managed orphan MCP container (Docker --rm)"
+                );
+                continue;
             }
             ContainerRuntime::MacOSContainer => {
                 // macOS containers do not use --rm; explicit removal is always needed.
@@ -706,37 +689,31 @@ async fn garbage_collect_managed_containers(
     Ok(())
 }
 
-/// Polls `port.exists()` until the container disappears or the timeout elapses.
-/// Returns `true` if the container is gone, `false` if it is still present at timeout.
-async fn wait_for_container_gone(
+// Docker can finish `stop` before it removes a container started with `--rm`.
+async fn wait_for_docker_auto_removal(
     port: &dyn ContainerPort,
     id: &ContainerId,
-    installation_id: &str,
-    poll_interval: tokio::time::Duration,
-    timeout: tokio::time::Duration,
-) -> Result<bool, ContainerError> {
-    let deadline = tokio::time::Instant::now() + timeout;
+) -> Result<(), ContainerError> {
+    let deadline = tokio::time::Instant::now() + DOCKER_REMOVAL_TIMEOUT;
     let mut attempt = 0u32;
     loop {
         if !port.exists(id).await? {
             tracing::debug!(
-                installation_id,
                 container = %id.0,
                 attempts = attempt,
                 "container removed by Docker --rm"
             );
-            return Ok(true);
+            return Ok(());
         }
         if tokio::time::Instant::now() >= deadline {
-            tracing::debug!(
-                installation_id,
-                container = %id.0,
-                "container still present after polling timeout"
-            );
-            return Ok(false);
+            return Err(ContainerError::Other(format!(
+                "timed out waiting for Docker to remove container '{}' via --rm; \
+                 Docker daemon may be unhealthy",
+                id.0
+            )));
         }
         attempt += 1;
-        tokio::time::sleep(poll_interval).await;
+        tokio::time::sleep(DOCKER_REMOVAL_POLL_INTERVAL).await;
     }
 }
 
