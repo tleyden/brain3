@@ -99,7 +99,11 @@ pub async fn ensure_mcp_container(
     .await?;
 
     let config = build_container_config(startup, installation_id);
-    let (_id, container_ip) = EnsureContainerUseCase::new(port).ensure(&config).await?;
+    let mut use_case = EnsureContainerUseCase::new(port);
+    if startup_policy.rebuild_container {
+        use_case = use_case.with_local_image_only();
+    }
+    let (_id, container_ip) = use_case.ensure(&config).await?;
     Ok(container_ip)
 }
 

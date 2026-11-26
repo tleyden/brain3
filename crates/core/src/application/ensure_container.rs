@@ -35,6 +35,7 @@ impl Default for StartupProbeSettings {
 pub struct EnsureContainerUseCase {
     port: Arc<dyn ContainerPort>,
     probe_settings: StartupProbeSettings,
+    allow_registry_pull: bool,
 }
 
 impl EnsureContainerUseCase {
@@ -42,7 +43,13 @@ impl EnsureContainerUseCase {
         Self {
             port,
             probe_settings: StartupProbeSettings::default(),
+            allow_registry_pull: true,
         }
+    }
+
+    pub fn with_local_image_only(mut self) -> Self {
+        self.allow_registry_pull = false;
+        self
     }
 
     #[cfg(test)]
@@ -51,8 +58,8 @@ impl EnsureContainerUseCase {
         probe_settings: StartupProbeSettings,
     ) -> Self {
         Self {
-            port,
             probe_settings,
+            ..Self::new(port)
         }
     }
 
@@ -61,6 +68,9 @@ impl EnsureContainerUseCase {
         config: &ContainerConfig,
     ) -> Result<(ContainerId, Option<String>), ContainerError> {
         if !self.port.image_exists(&config.image).await? {
+            if !self.allow_registry_pull {
+                return Err(ContainerError::ImageNotFound(config.image.clone()));
+            }
             tracing::warn!(
                 image = %config.image,
                 "container image not found locally; will pull from registry"
@@ -548,6 +558,20 @@ mod tests {
                 "is_running"
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn local_image_only_does_not_pull_or_start_a_missing_image() {
+        let port = Arc::new(MockContainerPort::new(MockState::default()));
+        let use_case = EnsureContainerUseCase::new(port.clone()).with_local_image_only();
+        let config = sample_config();
+
+        let error = use_case.ensure(&config).await.unwrap_err();
+
+        assert!(matches!(error, ContainerError::ImageNotFound(image) if image == config.image));
+        let state = port.snapshot();
+        assert_eq!(state.pull_count, 0);
+        assert_eq!(state.run_count, 0);
     }
 
     #[tokio::test]

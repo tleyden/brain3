@@ -128,9 +128,9 @@ For metadata-only changes:
 
 ## Container Build
 
-For normal Brain3 gateway usage, you should not need to build this image locally. Fresh Brain3 installs default to pulling `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. The registry still publishes `:latest`, but that is opt-in via `brain3 --container-tag latest` or an explicit `B3_CONTAINER_IMAGE` override. Older Brain3 configs that still point at the exact official `:latest` image are treated as a legacy default and remapped by the gateway to the current release-matched tag unless you explicitly request `--container-tag latest`.
+Brain3 uses the image selected by `B3_CONTAINER_IMAGE_REPO` and `B3_CONTAINER_IMAGE_TAG`. The setup wizard defaults to `ghcr.io/tleyden/brain3-mcp-vault-tools` with a tag matching the Brain3 release. Brain3 pulls that image when the local runtime is missing it. Use `brain3 --container-tag latest` to explicitly select the official `latest` tag for one launch.
 
-The commands below are for developing the container itself or testing local image changes.
+Use [`brain3 --rebuild-container`](../README.MD#rebuild-the-vault-tools-image) for a local edit and smoke-test cycle with the full Brain3 gateway. Use the script below to build an image on its own.
 
 This project includes a `Containerfile` that can be built with Apple's native `container` CLI on macOS or Docker on Linux. Docker examples also work on macOS. Every build command must specify `--container-runtime` explicitly.
 

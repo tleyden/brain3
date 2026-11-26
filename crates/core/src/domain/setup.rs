@@ -183,6 +183,7 @@ pub enum OrphanContainerPolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeStartupPolicy {
     pub orphan_containers: OrphanContainerPolicy,
+    pub rebuild_container: bool,
 }
 
 impl RuntimeStartupPolicy {
@@ -193,12 +194,14 @@ impl RuntimeStartupPolicy {
             } else {
                 OrphanContainerPolicy::FailClosed
             },
+            rebuild_container: false,
         }
     }
 
     pub fn setup_or_reconfigure() -> Self {
         Self {
             orphan_containers: OrphanContainerPolicy::SkipDuringSetup,
+            rebuild_container: false,
         }
     }
 

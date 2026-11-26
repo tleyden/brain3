@@ -236,7 +236,7 @@ sudo systemd-analyze verify /etc/systemd/system/brain3.service
 sudo systemctl daemon-reload
 sudo systemctl start brain3.service
 curl -fsS -H 'Host: brain3.example.com' -H 'X-Forwarded-Proto: https' \
-  http://127.0.0.1:8421/.well-known/oauth-protected-resource/mcp
+  http://127.0.0.1:2763/.well-known/oauth-protected-resource/mcp
 ```
 
 Once the probe returns the expected HTTPS resource and authorization server,
@@ -264,7 +264,7 @@ tunnel: REPLACE_WITH_TUNNEL_UUID
 credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
 ingress:
   - hostname: brain3.example.com
-    service: http://127.0.0.1:8421
+    service: http://127.0.0.1:2763
   - service: http_status:404
 ```
 
@@ -382,7 +382,7 @@ The ChatGPT macOS desktop client does not expose a configuration file on disk; y
 1. Click the **Create** button next to your Developer Mode options.
 2. Fill out the registration form:
    - **Name:** `Brain3`
-   - **Connector URL:** Copy the **Local MCP Endpoint** from Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`)
+   - **Connector URL:** Copy the **Local MCP Endpoint** from Brain3's MCP Config Settings screen (e.g. `http://localhost:2764/mcp`)
 
 #### Step 3: Configure Direct Bearer Authentication
 
@@ -393,7 +393,7 @@ The ChatGPT macOS desktop client does not expose a configuration file on disk; y
    - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
 4. Click **Save** or **Create**.
 
-> **macOS Sandboxing Note:** If ChatGPT blocks the connection because it is unencrypted `http://` rather than `https://`, you may need to expose the local port via a loopback TLS tunnel such as `ngrok http 8422` and use the resulting `https://` URL instead.
+> **macOS Sandboxing Note:** If ChatGPT blocks the connection because it is unencrypted `http://` rather than `https://`, you may need to expose the local port via a loopback TLS tunnel such as `ngrok http 2764` and use the resulting `https://` URL instead.
 
 </details>
 
@@ -436,7 +436,7 @@ Paste or merge the following block into your JSON. Copy the endpoint URL and tok
   "mcpServers": {
     "brain3": {
       "type": "http",
-      "url": "http://localhost:8422/mcp",
+      "url": "http://localhost:2764/mcp",
       "headers": {
         "Authorization": "Bearer <token from Brain3's MCP Config Settings screen>"
       }
@@ -455,7 +455,7 @@ Quit Claude Desktop entirely (**Cmd + Q**), then relaunch it. Check the plug ico
 <summary><img height="16" src="docs/logos/goose_logo_light.png" alt="Goose"> <strong>Goose — GUI + Local MCP</strong></summary>
 
 1. Open Goose settings and navigate to **MCP → Add Server**.
-2. Set the **URL** to the **Local MCP Endpoint** shown in Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`).
+2. Set the **URL** to the **Local MCP Endpoint** shown in Brain3's MCP Config Settings screen (e.g. `http://localhost:2764/mcp`).
 3. Under **Request Headers**, add:
    - **Header name:** `Authorization`
    - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
@@ -467,7 +467,7 @@ Quit Claude Desktop entirely (**Cmd + Q**), then relaunch it. Check the plug ico
 <summary><img height="16" src="docs/logos/jan.png" alt="Jan.ai"> <strong>Jan.ai — GUI + Local MCP</strong></summary>
 
 1. Open Jan, go to **Settings → MCP Servers → Add Server**.
-2. Set the **URL** to the **Local MCP Endpoint** shown in Brain3's MCP Config Settings screen (e.g. `http://localhost:8422/mcp`).
+2. Set the **URL** to the **Local MCP Endpoint** shown in Brain3's MCP Config Settings screen (e.g. `http://localhost:2764/mcp`).
 3. Add a request header:
    - **Header name:** `Authorization`
    - **Value:** `Bearer <token from Brain3's MCP Config Settings screen>`
@@ -544,7 +544,7 @@ Brain3's normal first-run setup configures the app and defaults to a Cloudflare 
 1. Run `brain3` once and complete the normal interactive setup wizard.
 2. Create a (free) Cloudflare account at [cloudflare.com](https://cloudflare.com)
 3. Install `cloudflared` if it is not already available — see [install instructions](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
-4. In `~/.brain3/.env`, set `B3_CF_TUNNEL_NAME` and `B3_CF_DOMAIN`. Set `B3_CF_TUNNEL_CONFIG_FILE` only if you want a non-default config path; otherwise Brain3 uses `.cloudflared/<tunnel-name>.yml`.
+4. In `~/.brain3/.env`, set `B3_CF_QUICK_TUNNEL=false`, `B3_CF_TUNNEL_NAME`, and `B3_CF_DOMAIN`. Brain3 uses `~/.brain3/cloudflared/<tunnel-name>.yml` unless you set `B3_CF_TUNNEL_CONFIG_FILE`.
 5. Run the named tunnel provisioning wizard:
 
 ```bash
@@ -565,13 +565,13 @@ INFO tunnel started url=https://brain3.yourdomain.com
 
 This is an alternative to a Cloudflare Tunnel if tunnels are not practical in your environment. It is less preferred because it involves exposing ports more directly, so only use it when a Cloudflare Tunnel is not a workable option.
 
-If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:8421`. Set `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
+If your machine already has a public IP or sits behind Cloudflare proxy, use Caddy or nginx to terminate TLS and reverse-proxy to `127.0.0.1:2763`. Set `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` in your `.env` to the public hostname; Brain3 uses it for hostname validation.
 
 Example minimal Caddyfile:
 
 ```
 brain3.yourdomain.com {
-    reverse_proxy 127.0.0.1:8421
+    reverse_proxy 127.0.0.1:2763
 }
 ```
 
@@ -672,7 +672,7 @@ Brain3 runs an MCP server on your own machine. It supports two access modes:
 - Every login issues a **fresh 256-bit access token** (1-hour lifetime by default), stored in a local SQLite database.
 - **Refresh token rotation** — the refresh token is replaced on every use; the old token is immediately revoked.
 - **Per-IP rate limiting** on credential endpoints: `POST /oauth/authorize` and `POST /oauth/token` are capped at 20 attempts per 15 minutes per IP. Cloudflare's `CF-Connecting-IP` header is used for accurate IP identification behind the tunnel.
-- Bearer-token validation on all `/mcp` routes.  A shared key is bind-mounted into the MCP container so the MCP server can verify the token.
+- The gateway validates bearer tokens on `/mcp` and uses a separate shared secret when forwarding requests to the vault-tools container.
 - **Host validation rejects unexpected hostnames** (HTTP 421) when a public hostname is configured. NOTE: this only works with Cloudflare tunnels associated with a DNS record, which is the recommended configuration.
 - Constant-time comparison for secret and token value checks (secret *length* is not hidden — see [security audit](SECURITY_AUDIT.md) M-4).
 - The macOS/Linux `install.sh` verifies downloaded release tarballs against a signed checksum manifest before extraction.
@@ -692,7 +692,7 @@ Brain3 runs an MCP server on your own machine. It supports two access modes:
 
 - **Container port exposure (macOS)** — it is not yet confirmed whether the mapped container port is accessible only to the gateway or to any local process, which could allow OAuth bypass from locally running malware that could discover the shared secret on the host filesystem.
 - **No sandboxing for host gateway process** — the Rust gateway has ambient filesystem and network access; a compromised dependency has no jail to contain it (unlike the MCP container). See `docs/SECURITY_AUDIT_LATEST.md` §6.3.
-- **Plaintext secret storage** — all secrets (password, client secret, upstream shared secret) are stored in plaintext in `~/.brain3/.env` (file permissions are `0600`, but no encryption at rest).
+- **Plaintext secret storage** — secrets saved to `~/.brain3/.env` have file permissions `0600`. Brain3 generates the upstream shared secret in memory unless you supply one in the config.
 - **No hostname validation in default (quick tunnel) mode** — hostname validation (HTTP 421 on unexpected `Host` headers) only works with named Cloudflare tunnels tied to a DNS record. The default quick tunnel setup currently disables it entirely. 
 
 
@@ -709,13 +709,16 @@ All configuration is via environment variables, loaded from a `.env` file.
 
 | Variable | Default | Description |
 |---|---|---|
-| `B3_OAUTH2_GATEWAY_PORT` | `8421` | Port Brain3 listens on |
+| `B3_ACCESS_MODE` | `both` | Enable `local`, `remote`, or both MCP listeners |
+| `B3_OAUTH2_GATEWAY_PORT` | `2763` | Port for the remote OAuth gateway |
+| `B3_LOCAL_MCP_PORT` | `2764` when a local bearer token is set | Loopback port for local MCP clients |
+| `LOCAL_GATEWAY_MCP_BEARER_TOKEN` | *(empty)* | Bearer token required by the local MCP listener |
 | `B3_OAUTH2_GATEWAY_CLIENT_ID` | `brain3-oauth2-client` | OAuth client ID accepted by Brain3 |
 | `B3_OAUTH2_GATEWAY_CLIENT_SECRET` | *(required)* | OAuth client secret required at token exchange |
 | `B3_OAUTH2_ACCESS_TOKEN_LIFETIME_SECS` | `3600` | Lifetime of issued access tokens in seconds |
 | `B3_TOKEN_DB_PATH` | `~/.brain3/brain3.db` | Optional override for the SQLite database path used for issued one-hour access tokens |
 | `B3_OAUTH2_GATEWAY_MCP_UPSTREAM_URL` | *(auto-derived from `B3_CONTAINER_HOST_PORT`)* | URL of the upstream MCP server (developers only) |
-| `B3_OAUTH2_GATEWAY_UPSTREAM_SECRET_FILE` | `/tmp/brain3-mcp-upstream-secret` | Path to the shared secret file |
+| `B3_UPSTREAM_SHARED_SECRET` | *(generated at startup)* | Optional fixed secret for requests from the gateway to vault tools |
 | `B3_OAUTH2_PKCE_REQUIRED` | `true` | Require PKCE for OAuth flow |
 | `B3_USERNAME` | *(required)* | Login username for the Brain3 sign-in page |
 | `B3_PASSWORD` | *(required)* | Login password for the Brain3 sign-in page |
@@ -726,12 +729,14 @@ All configuration is via environment variables, loaded from a `.env` file.
 | `B3_CF_QUICK_TUNNEL` | `false` | Set to `true` to have Brain3 start a quick Cloudflare Tunnel on startup |
 | `B3_CF_TUNNEL_NAME` | *(empty)* | Named Cloudflare Tunnel name; set with `B3_CF_DOMAIN` and then run `brain3 --cloudflare-setup` to provision it |
 | `B3_CF_DOMAIN` | *(empty)* | Cloudflare zone domain (used with `B3_CF_TUNNEL_NAME`) |
-| `B3_CF_TUNNEL_CONFIG_FILE` | `.cloudflared/<tunnel-name>.yml` | Optional path to the `cloudflared` config file written during named tunnel provisioning |
+| `B3_CF_TUNNEL_CONFIG_FILE` | `~/.brain3/cloudflared/<tunnel-name>.yml` | Optional path to the `cloudflared` config file written during named tunnel provisioning |
 | `B3_DIRECT_PUBLIC_ORIGIN_HOSTNAME` | *(empty)* | Public hostname when using an externally managed tunnel or a reverse proxy such as Caddy or nginx |
 | `B3_CONTAINER_RUNTIME` | *(empty = skip)* | `macos-container` or `docker`; if set, Brain3 starts the container on startup |
 | `B3_VAULT_PATH` | *(required if runtime set)* | Absolute path to your Obsidian vault or markdown folder |
-| `B3_CONTAINER_IMAGE` | *(required if runtime set)* | Published container image to run, e.g. `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`. New installs default to the Brain3 release-matched tag; `:latest` is still published but must be chosen explicitly. |
-| `B3_CONTAINER_HOST_PORT` | `8420` | Host loopback port published to the container |
+| `B3_CONTAINER_IMAGE_REPO` | `ghcr.io/tleyden/brain3-mcp-vault-tools` in the setup wizard | Image repository without a tag. Required when the runtime is set. |
+| `B3_CONTAINER_IMAGE_TAG` | Brain3’s release tag | Image tag to use. Leave empty to match the Brain3 release. |
+| `B3_CONTAINER_HOST_PORT` | `2765` | Host loopback port when the container uses port publishing |
+| `B3_CONTAINER_MCP_PORT` | `2765` | Port where vault tools listens inside the container |
 | `B3_CONTAINER_INTERNAL_NETWORK_ISOLATION` | `true` | Keep the managed MCP container on an internal-only network with no default outbound route. Set to `false` only as a compatibility fallback if Docker/macOS internal networking is broken on your VPS or runtime. |
 | `B3_VAULT_MCP_LOG_LEVEL` | `INFO` | Log level forwarded to the MCP server running inside the container. Set to `TRACE` to log the full body of every request/response sent to and from the MCP server, for debugging. |
 
@@ -803,6 +808,16 @@ Brain3 launches the setup wizard on first run and goes straight to the runtime s
 
 </details>
 
+### Rebuild the vault-tools image
+
+From the root of the source checkout, use `--rebuild-container` to build vault tools and start Brain3 in the same shell. Complete Brain3 setup once before using this flag. For a staging installation, pass its Brain3 home directory.
+
+```bash
+./target/release/brain3 --rebuild-container --brain3-home "$HOME/.brain3_staging"
+```
+
+Brain3 calls the [vault-tools build script](brain3-mcp-vault-tools/scripts/build-container.sh) with the runtime from the staging configuration. It uses the resulting local image for that launch. A build failure or failed container startup stops the launch before the gateway and tunnel start. The build uses the local runtime’s layer cache. It needs no registry push or CI run.
+
 <details>
 <summary><strong>Running tests</strong></summary>
 
@@ -851,18 +866,11 @@ Replace `123` with the pull request number.
 <details>
 <summary>MCP container image selection</summary>
 
-Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version.
+Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. Apple `container` on macOS and Docker on macOS or Linux use the same registry. Brain3 pulls the selected tag only when it is missing from that runtime’s local image store.
 
-If you need a different published MCP image for a single launch or while creating a brand-new config, use `--container-tag`:
+For a one-time tag override on the official image repository, pass `--container-tag`. For example, `brain3 --container-tag latest` selects the published `latest` tag. The configured `B3_CONTAINER_IMAGE_REPO` and `B3_CONTAINER_IMAGE_TAG` apply on later launches.
 
-```bash
-brain3 --container-tag latest
-brain3 --container-tag pr-123
-```
-
-On an already configured install, `--container-tag` overrides the MCP container image for that launch only. During first-run setup, the selected tag becomes the image written into the new config.
-
-The runtime status screen now reports whether the container is actually `Ready` or `Failed` after startup verification. If the container exits early, Brain3 shows the failure summary and log path instead of incorrectly reporting a successful start.
+The runtime status screen reports whether the container is `Ready` or `Failed` after startup verification. A failed startup includes the failure summary and log path.
 
 </details>
 

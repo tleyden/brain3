@@ -44,6 +44,7 @@ const OAUTH_PASSWORD: &str = "e2e-test-password";
 const OAUTH_REDIRECT_URI: &str = "https://claude.ai/api/mcp/auth_callback";
 const DIAGNOSTICS_TIMEOUT: Duration = Duration::from_secs(10);
 const PROCESS_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(20);
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 const NETWORKED_E2E_TIMEOUT: Duration = Duration::from_secs(15);
 const HELLO_MCP_CONTAINER_NAME: &str = "hello_mcp";
 const HELLO_MCP_BEARER_TOKEN: &str = "e2e-hello-mcp-token";
@@ -293,7 +294,6 @@ impl Brain3Process {
         let binary = env!("CARGO_BIN_EXE_brain3");
         let mut command = Command::new(binary);
         command
-            .arg("--cli")
             .arg("--env-file")
             .arg(&temp.env_file)
             .arg("--brain3-home")
@@ -339,27 +339,41 @@ impl Brain3Process {
         tunnel_mode: TunnelMode,
         health_port: u16,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut child = Self::command(temp, tunnel_mode).spawn()?;
+        let mut command = Self::command(temp, tunnel_mode);
+        command.arg("--cli");
+        let mut process = Self::start(command)?;
+        process
+            .wait_for_health(health_port, STARTUP_TIMEOUT)
+            .await?;
+        Ok(process)
+    }
 
+    fn start(mut command: Command) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut child = command.spawn()?;
         let stdout = child
             .stdout
             .take()
             .ok_or("brain3 child stdout was not piped")?;
         let (diagnostics_done, stdout_reader) = spawn_stdout_reader(stdout);
-        let process = Self {
+        Ok(Self {
             child,
             diagnostics_done,
             stdout_reader: Some(stdout_reader),
-        };
-        process.wait_for_health(health_port).await?;
-        Ok(process)
+        })
     }
 
-    async fn wait_for_health(&self, port: u16) -> Result<(), Box<dyn std::error::Error>> {
-        let deadline = Instant::now() + Duration::from_secs(30);
+    async fn wait_for_health(
+        &mut self,
+        port: u16,
+        timeout: Duration,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let deadline = Instant::now() + timeout;
         let mut last_error = String::from("health endpoint was not probed");
 
         while Instant::now() < deadline {
+            if let Some(status) = self.child.try_wait()? {
+                return Err(format!("Brain3 exited before becoming healthy ({status})").into());
+            }
             match probe_health(port).await {
                 Ok(()) => return Ok(()),
                 Err(error) => last_error = error.to_string(),
@@ -367,10 +381,10 @@ impl Brain3Process {
             tokio::time::sleep(Duration::from_millis(250)).await;
         }
 
-        Err(
-            format!("gateway did not become healthy on port {port} within 30s: {last_error}")
-                .into(),
+        Err(format!(
+            "gateway did not become healthy on port {port} within {timeout:?}: {last_error}"
         )
+        .into())
     }
 
     fn dump_diagnostics(&self) {
@@ -544,15 +558,108 @@ impl Drop for Brain3Process {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn failed_rebuild_aborts_startup() -> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::PermissionsExt;
+
+    for (runtime, executable) in [("docker", "docker"), ("macos-container", "container")] {
+        let temp = TempTestDir::create(TunnelMode::Disabled)?;
+        temp.write_env_file()?;
+        let checkout = temp.root.join("checkout with spaces");
+        let context = checkout.join("brain3-mcp-vault-tools");
+        let scripts = context.join("scripts");
+        fs::create_dir_all(&scripts)?;
+        fs::write(context.join("Containerfile"), "FROM scratch\n")?;
+        let build_script = scripts.join("build-container.sh");
+        fs::copy(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../brain3-mcp-vault-tools/scripts/build-container.sh"),
+            &build_script,
+        )?;
+        fs::set_permissions(&build_script, fs::Permissions::from_mode(0o755))?;
+
+        let calls = temp.root.join("runtime-calls");
+        for name in ["docker", "container", "cloudflared"] {
+            let shim = temp.cloudflared_shim_dir.join(name);
+            fs::write(
+                &shim,
+                r#"#!/bin/sh
+printf '%s\n' "${0##*/}" "$@" >> "$REBUILD_CALLS"
+if [ "${B3_OAUTH2_GATEWAY_CLIENT_SECRET+x}" = x ]; then
+    echo gateway-secret-exported >> "$REBUILD_CALLS"
+fi
+exit 42
+"#,
+            )?;
+            fs::set_permissions(&shim, fs::Permissions::from_mode(0o755))?;
+        }
+
+        let output = Brain3Process::command(&temp, TunnelMode::Disabled)
+            .arg("--rebuild-container")
+            .current_dir(&checkout)
+            .env("B3_CONTAINER_RUNTIME", runtime)
+            .env("B3_CF_QUICK_TUNNEL", "true")
+            .env("REBUILD_CALLS", &calls)
+            .env_remove("IMAGE_ARCH")
+            .output()?;
+        assert!(!output.status.success());
+
+        let calls = fs::read_to_string(calls)?;
+        let mut args = calls.lines();
+        assert_eq!(args.next(), Some(executable));
+        assert_eq!(args.next(), Some("build"));
+        if runtime == "macos-container" {
+            assert_eq!(args.next(), Some("--arch"));
+            assert_eq!(args.next(), Some("arm64"));
+        }
+        assert_eq!(args.next(), Some("--tag"));
+        assert!(args
+            .next()
+            .unwrap()
+            .starts_with("localhost/brain3-mcp-vault-tools:dev-"));
+        assert_eq!(args.next(), Some("--file"));
+        let context = context.canonicalize()?;
+        assert_eq!(
+            args.next().map(Path::new),
+            Some(context.join("Containerfile").as_path())
+        );
+        assert_eq!(args.next().map(Path::new), Some(context.as_path()));
+        assert_eq!(args.next(), None);
+        assert!(!temp.brain3_db.exists());
+    }
+    Ok(())
+}
+
 #[tokio::test]
 async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
     let temp = TempTestDir::create(TunnelMode::Disabled)?;
     temp.write_env_file()?;
+    let mut command = Brain3Process::command(&temp, TunnelMode::Disabled);
+    command
+        .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .arg("--rebuild-container");
 
+    let image;
     {
-        let gateway = Brain3Process::spawn(&temp, TunnelMode::Disabled).await?;
+        let mut gateway = Brain3Process::start(command)?;
+        gateway
+            .wait_for_health(OAUTH_PORT, Duration::from_secs(180))
+            .await?;
         let _diagnostics_guard = DiagnosticsDumpGuard::new(&gateway);
         assert_container_running_and_vault_visible(&gateway).await?;
+        let inspection = Command::new("docker")
+            .args(["inspect", "--format", "{{.Config.Image}}", CONTAINER_NAME])
+            .output()?;
+        assert!(
+            inspection.status.success(),
+            "could not inspect the running image"
+        );
+        image = String::from_utf8(inspection.stdout)?.trim().to_owned();
+        assert!(
+            image.starts_with("localhost/brain3-mcp-vault-tools:dev-"),
+            "unexpected image: {image}"
+        );
         let client = connect_local_mcp().await?;
 
         let tools = client.list_tools(Default::default()).await?;
@@ -802,6 +909,10 @@ async fn e2e_smoke_1_local_docker() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     assert_no_container_residue().await?;
+    assert!(Command::new("docker")
+        .args(["image", "rm", &image])
+        .status()?
+        .success());
     Ok(())
 }
 
@@ -919,6 +1030,7 @@ async fn e2e_smoke_2_oauth_public_flow() -> Result<(), Box<dyn std::error::Error
     let status = tokio::time::timeout(
         Duration::from_secs(60),
         failed_start
+            .arg("--cli")
             .kill_on_drop(true)
             .stdout(Stdio::null())
             .status(),

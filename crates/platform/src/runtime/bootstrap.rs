@@ -11,6 +11,7 @@ use futures::future::join_all;
 
 use crate::config::brain3_yaml::load_plugin_mcp_containers_config;
 use crate::config::log_config;
+use crate::container::rebuild::rebuild_vault_tools_image;
 use crate::container::startup::{
     ensure_mcp_container, ensure_plugin_mcp_container, installation_scope_id, stop_mcp_container,
     stop_plugin_mcp_container, StartedPluginMcpContainer,
@@ -246,18 +247,20 @@ mod tests {
 }
 
 pub async fn bootstrap_configured_runtime(
-    config: Arc<GatewayConfig>,
+    mut config: Arc<GatewayConfig>,
     launch_plan: RuntimeLaunchPlan,
     startup_policy: RuntimeStartupPolicy,
 ) -> Result<RuntimeBootstrap> {
     log_tunnel_mode(&config);
     ensure_named_tunnel_config_exists(&config)?;
+    if startup_policy.rebuild_container {
+        rebuild_vault_tools_image(Arc::make_mut(&mut config)).await?;
+    }
     log_config::log_startup_config(&config);
 
     let upstream_secret = config.mcp_reverse_proxy.upstream_secret.clone();
     let installation_id = installation_scope_id(&launch_plan.paths.app_home, &launch_plan.env_file);
 
-    let mut config = config;
     let (container_status, managed_container_started) = if let Some(startup) = &config.container {
         match ensure_mcp_container(startup, startup_policy, &installation_id).await {
             Ok(Some(container_ip))
