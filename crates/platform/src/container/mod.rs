@@ -1,6 +1,7 @@
 pub mod docker;
 pub mod macos_container;
 mod process;
+pub(crate) mod rebuild;
 pub mod startup;
 
 pub use docker::DockerContainerAdapter;

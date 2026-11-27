@@ -2,9 +2,8 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    tags:
+      - "ci-*"
 
 permissions: read-all
 

@@ -99,6 +99,13 @@ struct Args {
 
     #[arg(
         long,
+        conflicts_with_all = ["tui", "setup", "cloudflare_setup", "container_tag"],
+        help = "Build vault tools from the current checkout and start Brain3 in the foreground"
+    )]
+    rebuild_container: bool,
+
+    #[arg(
+        long,
         help = "Explicitly stop and remove Brain3-managed orphan MCP containers for this installation before configured startup"
     )]
     gc_containers: bool,
@@ -184,7 +191,7 @@ fn choose_launch_mode(args: &Args) -> LaunchMode {
         LaunchMode::Reconfigure
     } else if args.cloudflare_setup {
         LaunchMode::Setup
-    } else if args.cli {
+    } else if args.cli || args.rebuild_container {
         LaunchMode::Cli
     } else {
         LaunchMode::Tui
@@ -231,7 +238,10 @@ fn runtime_launch_plan(resolved_env: &ResolvedEnvFile, log_file: PathBuf) -> Run
 
 fn configured_startup_options(args: &Args, mode: LaunchMode) -> ConfiguredStartupOptions {
     ConfiguredStartupOptions {
-        startup_policy: RuntimeStartupPolicy::configured(args.gc_containers),
+        startup_policy: RuntimeStartupPolicy {
+            rebuild_container: args.rebuild_container,
+            ..RuntimeStartupPolicy::configured(args.gc_containers)
+        },
         orphan_gc_rerun_command: gc_containers_rerun_command(args, mode),
     }
 }
@@ -401,6 +411,10 @@ fn brain3_command_parts(args: &Args, mode: LaunchMode) -> Vec<String> {
     if let Some(container_tag) = &args.container_tag {
         parts.push("--container-tag".into());
         parts.push(shell_quote(container_tag));
+    }
+
+    if args.rebuild_container && mode == LaunchMode::Cli {
+        parts.push("--rebuild-container".into());
     }
 
     if args.gc_containers {
@@ -688,7 +702,15 @@ async fn run_cli_mode(
         .collect_dependency_status()
         .await
         .map_err(|error| anyhow::anyhow!("{error}"))?;
-    ensure_cli_ready(&dependencies)?;
+    if startup_options.startup_policy.rebuild_container {
+        if config.tunnel.is_some()
+            && !matches!(dependencies.cloudflared, DependencyAvailability::Installed)
+        {
+            anyhow::bail!("install cloudflared before starting Brain3 with the configured tunnel");
+        }
+    } else {
+        ensure_cli_ready(&dependencies)?;
+    }
 
     logging.enable_terminal_mirror();
 

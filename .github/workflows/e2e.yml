@@ -1,22 +1,18 @@
 name: E2E
 
 on:
-  push:
-    tags:
-      - "v*"
   pull_request:
     branches:
       - main
     types:
       - labeled
-      - synchronize
 
 permissions: read-all
 
 jobs:
   e2e-docker-linux:
     name: E2E smoke - Docker / Linux
-    if: github.event_name == 'push' || github.event.label.name == 'run-e2e-test' || contains(github.event.pull_request.labels.*.name, 'run-e2e-test')
+    if: github.event.label.name == 'run-e2e-test'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,7 +39,7 @@ jobs:
 
   e2e-cloudflare-quick-tunnel-linux:
     name: E2E smoke - Cloudflare quick tunnel / Linux
-    if: github.event_name == 'push' || github.event.label.name == 'run-e2e-test' || contains(github.event.pull_request.labels.*.name, 'run-e2e-test')
+    if: github.event.label.name == 'run-e2e-test'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
