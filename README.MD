@@ -820,7 +820,9 @@ Brain3 calls the [vault-tools build script](brain3-mcp-vault-tools/scripts/build
 
 ### Publish the vault-tools image from a PR
 
-Add `publish-container` under **Labels** on a pull request before merging it into `main`. GitHub Actions builds and smoke-tests the image from the exact merged commit, then publishes it to GHCR as `sha-<full commit SHA>`. It updates `latest` when that commit is still the tip of `main`. The workflow summary lists the image tag and digest.
+Add `publish-container` under **Labels** on a pull request before merging it into `main`. GitHub Actions builds and smoke-tests the image from the exact merged commit, then publishes it to GHCR as `sha-<full commit SHA>`. It updates `latest` when that commit is still the tip of `main`.
+
+Open the [Build and Publish MCP Container workflow](https://github.com/tleyden/brain3/actions/workflows/container.yml) after merging. The run summary lists the image tag, digest, and whether it updated `latest`.
 
 Applying the label records the request. The build starts after the merge. Remove the label before merging to cancel the publish.
 
