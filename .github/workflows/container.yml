@@ -4,18 +4,47 @@ on:
   push:
     tags:
       - "v*"
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - closed
 
 permissions: read-all
 
 jobs:
   container:
+    if: >-
+      github.event_name == 'push' ||
+      (github.event.pull_request.merged == true &&
+      contains(github.event.pull_request.labels.*.name, 'publish-container'))
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-brain3-vault-tools
+      queue: max
     permissions:
       contents: read
       packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && 'refs/heads/main' || '' }}
+          fetch-depth: ${{ github.event_name == 'pull_request_target' && '0' || '1' }}
+          persist-credentials: false
+
+      - name: Select the merged commit from main
+        if: github.event_name == 'pull_request_target'
+        env:
+          MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [[ ! "$MERGED_SHA" =~ ^[0-9a-f]{40}$ ]] || ! git merge-base --is-ancestor "$MERGED_SHA" HEAD; then
+            echo 'The PR merge commit is missing from main.' >&2
+            exit 1
+          fi
+
+          # The metadata action's git context requires a named ref for this checkout.
+          git switch --create container-publish-source "$MERGED_SHA"
 
       - name: Setup QEMU
         uses: docker/setup-qemu-action@v3
@@ -34,11 +63,13 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
+          context: ${{ github.event_name == 'pull_request_target' && 'git' || 'workflow' }}
           images: ghcr.io/${{ github.repository_owner }}/brain3-mcp-vault-tools
           tags: |
-            type=semver,pattern={{raw}}
-            type=semver,pattern=v{{major}}.{{minor}}
-            type=semver,pattern=v{{major}}
+            type=semver,pattern={{raw}},enable=${{ github.event_name == 'push' }}
+            type=semver,pattern=v{{major}}.{{minor}},enable=${{ github.event_name == 'push' }}
+            type=semver,pattern=v{{major}},enable=${{ github.event_name == 'push' }}
+            type=sha,format=long,enable=${{ github.event_name == 'pull_request_target' }}
 
       - name: Smoke test container startup
         run: |
@@ -73,6 +104,7 @@ jobs:
           fi
 
       - name: Build and publish image
+        id: publish
         uses: docker/build-push-action@v6
         with:
           context: ./brain3-mcp-vault-tools
@@ -81,3 +113,24 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Update latest from the published image
+        if: github.event_name == 'pull_request_target'
+        env:
+          MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          IMAGE_TAG: ${{ steps.meta.outputs.tags }}
+          IMAGE_DIGEST: ${{ steps.publish.outputs.digest }}
+        run: |
+          set -euo pipefail
+          printf 'Published `%s` from `%s`.\n\nDigest `%s`.\n\n' \
+            "$IMAGE_TAG" "$MERGED_SHA" "$IMAGE_DIGEST" >> "$GITHUB_STEP_SUMMARY"
+
+          main_tip=$(git ls-remote --exit-code origin refs/heads/main | cut -f1)
+          if [[ "$main_tip" != "$MERGED_SHA" ]]; then
+            echo 'Kept `latest` because `main` advanced.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          image_repo=${IMAGE_TAG%:*}
+          docker buildx imagetools create --tag "$image_repo:latest" "$image_repo@$IMAGE_DIGEST"
+          echo 'Updated `latest` to the published digest.' >> "$GITHUB_STEP_SUMMARY"
