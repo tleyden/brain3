@@ -2,8 +2,6 @@ name: Build and Publish MCP Container
 
 on:
   push:
-    branches:
-      - main
     tags:
       - "v*"
 
@@ -38,9 +36,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/brain3-mcp-vault-tools
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=sha,prefix=sha-,enable={{is_default_branch}}
-            type=ref,event=tag
+            type=semver,pattern={{raw}}
             type=semver,pattern=v{{major}}.{{minor}}
             type=semver,pattern=v{{major}}
 

@@ -825,6 +825,18 @@ Brain3 calls the [vault-tools build script](brain3-mcp-vault-tools/scripts/build
 cargo test
 ```
 
+GitHub build and test jobs and CodeQL run when you push a `ci-*` Git tag on the
+commit you want to check. Use a new tag for each run.
+
+```bash
+git tag ci-check-1
+git push origin ci-check-1
+```
+
+Version tags (`v*`) publish the release binary and vault-tools image. Stable
+releases also update the image's `latest` tag. OpenSSF Scorecard refreshes on
+its weekly schedule and on branch protection changes.
+
 </details>
 
 <details>

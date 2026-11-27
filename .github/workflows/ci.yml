@@ -1,12 +1,9 @@
 name: CI
 
 on:
-  pull_request:
-    branches:
-      - main
   push:
-    branches:
-      - main
+    tags:
+      - "ci-*"
 
 permissions: read-all
 
@@ -34,7 +31,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Build release
-        if: github.event_name == 'push'
         run: cargo build --release
 
       - name: Test

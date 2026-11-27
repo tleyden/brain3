@@ -22,6 +22,7 @@
   - Compile the test targets (catches errors in `#[cfg(test)]` code that a plain `cargo build` misses): `cargo test -p brain3 --no-run`.
   - Run the unit tests: `cargo test` (which should pass).
 - For Python tests in `brain3-mcp-vault-tools`, run: `cd brain3-mcp-vault-tools && uv run --with mcp python -m unittest discover -s tests -v`. This discovers and runs all tests in the `tests/` directory. (`pytest` is not installed; `uv run --with mcp python -m unittest` is the correct runner.)
+- GitHub build and test jobs and CodeQL run when the user pushes a `ci-*` Git tag. Leave pushing that tag to the user. Version tags (`v*`) trigger release and container publishing.
 - GitHub E2E smoke tests run when the user adds the `run-e2e-test` label to a pull request targeting `main`. Leave applying the label to the user. To test a later commit, the user can remove and re-add the label.
   - The CI runner uses `uv run scripts/e2e_smoke.py` to build the test images and run the E2E suite.
 - Never run linux containers for building or verifying.  Any linux testing will happen on the CI platform via GH Actions that run docker.  Ditto for Windows, all testing happens on CI. 
