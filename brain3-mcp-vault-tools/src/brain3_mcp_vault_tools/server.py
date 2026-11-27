@@ -7,9 +7,12 @@ import socket
 import sys
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from threading import Lock
 
-from mcp.server.fastmcp import FastMCP
+import uvicorn
+from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -75,6 +78,8 @@ def _resolve_log_level(name: str) -> int:
 
 
 frontmatter_index = FrontmatterIndex(enable_sync_mode=ENABLE_SYNC_REINDEX_TOOL)
+# MCP SDK 2 runs synchronous tools in worker threads. Keep multi-step writes serialized.
+vault_write_lock = Lock()
 DEFAULT_ALLOWED_HOSTS = [
     "127.0.0.1:*",
     "localhost:*",
@@ -300,20 +305,28 @@ class InboundRequestLoggingMiddleware:
         )
 
 
-class GuardedFastMCP(FastMCP):
-    def streamable_http_app(self):
-        app = super().streamable_http_app()
-        app.add_middleware(
-            InboundRequestLoggingMiddleware,
+mcp = MCPServer("brain3_mcp_vault_tools")
+
+
+def create_app() -> Starlette:
+    mcp_path = "/mcp"
+    app = mcp.streamable_http_app(
+        streamable_http_path=mcp_path,
+        stateless_http=True,
+        json_response=True,
+        transport_security=TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
             allowed_hosts=ALLOWED_HOSTS,
-        )
-        app.add_middleware(
-            UpstreamSharedSecretMiddleware,
-            shared_secret=_load_upstream_shared_secret(),
-            header_name=UPSTREAM_SHARED_SECRET_HEADER,
-            protected_path=self.settings.streamable_http_path,
-        )
-        return app
+        ),
+    )
+    app.add_middleware(InboundRequestLoggingMiddleware, allowed_hosts=ALLOWED_HOSTS)
+    app.add_middleware(
+        UpstreamSharedSecretMiddleware,
+        shared_secret=_load_upstream_shared_secret(),
+        header_name=UPSTREAM_SHARED_SECRET_HEADER,
+        protected_path=mcp_path,
+    )
+    return app
 
 
 def _start_process_resources() -> None:
@@ -339,19 +352,6 @@ def _stop_process_resources() -> None:
     """Stop process-scoped resources on server shutdown."""
     frontmatter_index.stop()
     logger.info("Vault MCP server shut down.")
-
-
-mcp = GuardedFastMCP(
-    "brain3_mcp_vault_tools",
-    host=VAULT_MCP_HOST,
-    port=VAULT_MCP_PORT,
-    stateless_http=True,
-    json_response=True,
-    transport_security=TransportSecuritySettings(
-        enable_dns_rebinding_protection=True,
-        allowed_hosts=ALLOWED_HOSTS,
-    ),
-)
 
 
 @mcp.tool(
@@ -414,7 +414,8 @@ def vault_create_overwrite_file(
     inp = VaultCreateOverwriteFileInput(
         path=path, content=content, create_dirs=create_dirs
     )
-    return _vault_create_overwrite_file(inp.path, inp.content, inp.create_dirs)
+    with vault_write_lock:
+        return _vault_create_overwrite_file(inp.path, inp.content, inp.create_dirs)
 
 
 @mcp.tool(
@@ -446,7 +447,8 @@ def vault_apply_unified_diff(
     inp = VaultApplyUnifiedDiffInput(
         path=path, diff=diff, dry_run=dry_run, expected_hash=expected_hash
     )
-    return _vault_apply_unified_diff(inp.path, inp.diff, inp.dry_run, inp.expected_hash)
+    with vault_write_lock:
+        return _vault_apply_unified_diff(inp.path, inp.diff, inp.dry_run, inp.expected_hash)
 
 
 @mcp.tool(
@@ -461,7 +463,8 @@ def vault_apply_unified_diff(
 )
 def vault_batch_frontmatter_update(updates: list[dict]) -> str:
     inp = VaultBatchFrontmatterUpdateInput(updates=updates)
-    return _vault_batch_frontmatter_update(inp.updates)
+    with vault_write_lock:
+        return _vault_batch_frontmatter_update(inp.updates)
 
 
 @mcp.tool(
@@ -595,7 +598,8 @@ def vault_move(source: str, destination: str, create_dirs: bool = True) -> str:
     inp = VaultMoveInput(
         source=source, destination=destination, create_dirs=create_dirs
     )
-    return _vault_move(inp.source, inp.destination, inp.create_dirs)
+    with vault_write_lock:
+        return _vault_move(inp.source, inp.destination, inp.create_dirs)
 
 
 @mcp.tool(
@@ -610,7 +614,8 @@ def vault_move(source: str, destination: str, create_dirs: bool = True) -> str:
 )
 def vault_delete(path: str, confirm: bool = False) -> str:
     inp = VaultDeleteInput(path=path, confirm=confirm)
-    return _vault_delete(inp.path, inp.confirm)
+    with vault_write_lock:
+        return _vault_delete(inp.path, inp.confirm)
 
 
 def main() -> None:
@@ -632,7 +637,7 @@ def main() -> None:
             _package_version(),
             VAULT_MCP_PORT,
         )
-        mcp.run(transport="streamable-http")
+        uvicorn.run(create_app(), host=VAULT_MCP_HOST, port=VAULT_MCP_PORT)
     finally:
         _stop_process_resources()
 

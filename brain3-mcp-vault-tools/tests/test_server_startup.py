@@ -3,7 +3,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import ANY, patch
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TEST_VAULT = PROJECT_ROOT / "test_vault"
@@ -19,43 +19,36 @@ def import_server_module():
 
 
 class ServerStartupTests(unittest.TestCase):
-    def test_fastmcp_host_defaults_to_loopback(self):
-        with patch.dict(
-            os.environ,
-            {
-                "B3_VAULT_PATH": str(TEST_VAULT),
-            },
-            clear=False,
-        ):
-            server = import_server_module()
+    def test_main_binds_to_default_and_configured_addresses(self):
+        cases = (
+            ({}, "127.0.0.1", 2765),
+            (
+                {"B3_VAULT_MCP_HOST": "0.0.0.0", "B3_VAULT_MCP_PORT": "4567"},
+                "0.0.0.0",
+                4567,
+            ),
+        )
+        for env, host, port in cases:
+            with self.subTest(host=host, port=port), patch.dict(
+                os.environ,
+                {
+                    "B3_VAULT_PATH": str(TEST_VAULT),
+                    "B3_UPSTREAM_SHARED_SECRET": "shared-secret",
+                    **env,
+                },
+                clear=True,
+            ):
+                server = import_server_module()
 
-        self.assertEqual(server.mcp.settings.host, "127.0.0.1")
+                with (
+                    patch.object(server, "_start_process_resources"),
+                    patch.object(server, "_stop_process_resources"),
+                    patch.object(server.uvicorn, "run") as run_mock,
+                ):
+                    server.main()
 
-    def test_fastmcp_host_is_configured_from_vault_mcp_host(self):
-        with patch.dict(
-            os.environ,
-            {
-                "B3_VAULT_PATH": str(TEST_VAULT),
-                "B3_VAULT_MCP_HOST": "0.0.0.0",
-            },
-            clear=False,
-        ):
-            server = import_server_module()
-
-        self.assertEqual(server.mcp.settings.host, "0.0.0.0")
-
-    def test_fastmcp_port_is_configured_from_vault_mcp_port(self):
-        with patch.dict(
-            os.environ,
-            {
-                "B3_VAULT_PATH": str(TEST_VAULT),
-                "B3_VAULT_MCP_PORT": "2765",
-            },
-            clear=False,
-        ):
-            server = import_server_module()
-
-        self.assertEqual(server.mcp.settings.port, 2765)
+                run_mock.assert_called_once()
+                self.assertEqual(run_mock.call_args.kwargs, {"host": host, "port": port})
 
     def test_upstream_shared_secret_can_be_provided_directly_via_env_var(self):
         with patch.dict(
@@ -69,31 +62,6 @@ class ServerStartupTests(unittest.TestCase):
             server = import_server_module()
 
         self.assertEqual(server._load_upstream_shared_secret(), "shared-secret")
-
-    def test_main_runs_streamable_http_without_port_keyword(self):
-        with patch.dict(
-            os.environ,
-            {
-                "B3_VAULT_PATH": str(TEST_VAULT),
-                "B3_VAULT_MCP_PORT": "2765",
-            },
-            clear=False,
-        ):
-            server = import_server_module()
-
-        with (
-            patch.object(server, "_start_process_resources"),
-            patch.object(server, "_stop_process_resources"),
-            patch.object(server, "_package_version", return_value="0.2.12"),
-            patch.object(server.logger, "info") as info_mock,
-            patch.object(server.mcp, "run") as run_mock,
-        ):
-            server.main()
-
-        run_mock.assert_called_once_with(transport="streamable-http")
-        info_mock.assert_any_call(
-            "Starting authless MCP server version=%s on port %s", "0.2.12", ANY
-        )
 
 
 if __name__ == "__main__":

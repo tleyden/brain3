@@ -41,7 +41,7 @@ class UpstreamAccessControlTests(unittest.TestCase):
         )
         self.env_patcher.start()
         self.server = import_server_module()
-        self.app = self.server.mcp.streamable_http_app()
+        self.app = self.server.create_app()
 
     def tearDown(self):
         self.env_patcher.stop()
@@ -78,6 +78,8 @@ class UpstreamAccessControlTests(unittest.TestCase):
             response = self._tools_list_request(client, secret="shared-secret")
 
         self.assertEqual(response.status_code, 200)
+        tool_names = {tool["name"] for tool in response.json()["result"]["tools"]}
+        self.assertIn("vault_read", tool_names)
 
     def test_mcp_allows_requests_to_detected_self_ip_when_enabled(self):
         with (
@@ -112,7 +114,7 @@ class UpstreamAccessControlTests(unittest.TestCase):
             ),
         ):
             server = import_server_module()
-            app = server.mcp.streamable_http_app()
+            app = server.create_app()
 
         with TestClient(app, base_url="http://172.18.0.2:2765") as client:
             response = self._tools_list_request(client, secret="shared-secret")
