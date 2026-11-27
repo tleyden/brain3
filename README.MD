@@ -818,6 +818,12 @@ From the root of the source checkout, use `--rebuild-container` to build vault t
 
 Brain3 calls the [vault-tools build script](brain3-mcp-vault-tools/scripts/build-container.sh) with the runtime from the staging configuration. It uses the resulting local image for that launch. A build failure or failed container startup stops the launch before the gateway and tunnel start. The build uses the local runtime’s layer cache. It needs no registry push or CI run.
 
+### Publish the vault-tools image from a PR
+
+Add `publish-container` under **Labels** on a pull request before merging it into `main`. GitHub Actions builds and smoke-tests the image from the exact merged commit, then publishes it to GHCR as `sha-<full commit SHA>`. It updates `latest` when that commit is still the tip of `main`. The workflow summary lists the image tag and digest.
+
+Applying the label records the request. The build starts after the merge. Remove the label before merging to cancel the publish.
+
 <details>
 <summary><strong>Running tests</strong></summary>
 
@@ -881,7 +887,7 @@ Replace `123` with the pull request number.
 
 Fresh installs default to the release-matched MCP image `ghcr.io/tleyden/brain3-mcp-vault-tools:vX.Y.Z`, where `X.Y.Z` matches the Brain3 app version. Apple `container` on macOS and Docker on macOS or Linux use the same registry. Brain3 pulls the selected tag only when it is missing from that runtime’s local image store.
 
-For a one-time tag override on the official image repository, pass `--container-tag`. For example, `brain3 --container-tag latest` selects the published `latest` tag. The configured `B3_CONTAINER_IMAGE_REPO` and `B3_CONTAINER_IMAGE_TAG` apply on later launches.
+Set `B3_CONTAINER_IMAGE_TAG` to a release version such as `v0.2.12` or a commit-specific `sha-<full commit SHA>` tag to pin the image across launches. For a one-time override on the official image repository, pass `--container-tag`. For example, `brain3 --container-tag latest` selects the moving `latest` tag. If it is cached locally, pull the image with your container runtime before launching to refresh it.
 
 The runtime status screen reports whether the container is `Ready` or `Failed` after startup verification. A failed startup includes the failure summary and log path.
 
